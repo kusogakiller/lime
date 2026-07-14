@@ -1,0 +1,18 @@
+fn main():
+    let sum = 0
+    for i in 0..5:
+        sum = sum + i
+    print(sum)
+
+    let items = [10, 20, 30]
+    for x in items:
+        print(x)
+
+    let n = 0
+    while (n < 3):
+        print(n)
+        n = n + 1
+
+    let names = ["a", "b", "c"]
+    for s in names:
+        print(s)
