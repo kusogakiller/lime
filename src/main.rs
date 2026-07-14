@@ -46,6 +46,12 @@ fn main() {
             let mut defs = Defs::new();
             collect_defs(&stmts, &mut defs);
 
+            // Interface 適合検証（struct が宣言した interface を満たすか）
+            if let Err(e) = check_interface_conformance(&defs) {
+                eprintln!("Type error: {}", e);
+                return;
+            }
+
             // Type Checker�E�実行前に型的に正しいか検査�E�E
             if let Err(e) = type_check(&stmts, &defs) {
                 eprintln!("Type error: {}", e);
@@ -502,6 +508,14 @@ enum Pattern {
     Ignore,
 }
 
+// interface のメソッド署名（本体なし）
+#[derive(Debug, Clone)]
+struct InterfaceMethod {
+    name: String,
+    params: Vec<(String, String)>,
+    return_type: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 enum Stmt {
     Let {
@@ -522,6 +536,7 @@ enum Stmt {
         type_params: Vec<String>,
         fields: Vec<(String, String)>,
         methods: Vec<Stmt>,
+        implements: Vec<String>,
     },
     If {
         cond: Expr,
@@ -545,6 +560,10 @@ enum Stmt {
         name: String,
         type_params: Vec<String>,
         variants: Vec<String>,
+    },
+    Interface {
+        name: String,
+        methods: Vec<InterfaceMethod>,
     },
     Return(Option<Expr>),
     Expr(Expr),
@@ -611,6 +630,7 @@ impl Parser {
             Token::Fn => self.parse_fn(),
             Token::Struct => self.parse_struct(),
             Token::State => self.parse_state(),
+            Token::Interface => self.parse_interface(),
             Token::If => self.parse_if(),
             Token::Match => self.parse_match(),
             Token::Return => self.parse_return(),
@@ -734,19 +754,23 @@ impl Parser {
         let mut params = Vec::new();
 
         while self.current() != &Token::RParen {
-            // Lime構文: <type>: <name>
+            // Lime構文: <type>: <name>  （名前は省略可: 型のみの場合は "_" とする）
             let param_type = self.parse_type()?;
 
-            self.expect(Token::Colon)?;
+            if self.current() == &Token::Colon {
+                self.advance();
 
-            let param_name = match self.current() {
-                Token::Ident(n) => n.clone(),
-                _ => return Err("Expected parameter name".to_string()),
-            };
+                let param_name = match self.current() {
+                    Token::Ident(n) => n.clone(),
+                    _ => return Err("Expected parameter name".to_string()),
+                };
 
-            self.advance();
+                self.advance();
 
-            params.push((param_name, param_type));
+                params.push((param_name, param_type));
+            } else {
+                params.push(("_".to_string(), param_type));
+            }
 
             if self.current() == &Token::Comma {
                 self.advance();
@@ -754,6 +778,9 @@ impl Parser {
         }
 
         self.expect(Token::RParen)?;
+
+        // 署名終端の : （戻り型省略時はこれが終端）
+        self.expect(Token::Colon)?;
 
         let return_type = match self.current() {
             Token::Int |
@@ -772,8 +799,10 @@ impl Parser {
             _ => None,
         };
 
-
-        self.expect(Token::Colon)?;
+        // 戻り型指定時はさらに終端の : が続く
+        if return_type.is_some() {
+            self.expect(Token::Colon)?;
+        }
 
         let body = self.parse_block()?;
 
@@ -938,6 +967,26 @@ impl Parser {
 
         let type_params = self.parse_type_params(false)?;
 
+        // 任意の interface 適合宣言: struct Dog implements Animal, Pet:
+        let mut implements = Vec::new();
+        if self.current() == &Token::Ident("implements".to_string()) {
+            self.advance();
+            loop {
+                match self.current() {
+                    Token::Ident(n) => {
+                        implements.push(n.clone());
+                        self.advance();
+                    }
+                    _ => return Err(format!("Expected interface name, got {:?}", self.current())),
+                }
+                if self.current() == &Token::Comma {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
         self.expect(Token::Colon)?;
 
         // ブロチE��開姁E
@@ -987,7 +1036,104 @@ impl Parser {
             type_params,
             fields,
             methods,
+            implements,
         })
+    }
+
+    fn parse_interface(&mut self) -> Result<Stmt, String> {
+        self.expect(Token::Interface)?;
+
+        let name = match self.current() {
+            Token::Ident(n) => n.clone(),
+            _ => return Err("Expected interface name".to_string()),
+        };
+        self.advance();
+
+        self.expect(Token::Colon)?;
+
+        // ブロチE��開姁E
+        if self.current() == &Token::Newline {
+            self.advance();
+        }
+        if self.current() == &Token::Indent {
+            self.advance();
+        } else {
+            return Err("Expected indented interface body".to_string());
+        }
+
+        let mut methods = Vec::new();
+        while self.current() != &Token::Dedent && self.current() != &Token::Eof {
+            if matches!(self.current(), Token::Newline | Token::Indent) {
+                self.advance();
+                continue;
+            }
+
+            // メソチE��署名: fn name(params) ret:  （本体なし）
+            if self.current() == &Token::Fn {
+                self.advance();
+                let mname = match self.current() {
+                    Token::Ident(n) => n.clone(),
+                    _ => return Err("Expected method name".to_string()),
+                };
+                self.advance();
+                // 型引数は interface では非対象（Phase 1）
+                let _ = self.parse_type_params(true);
+                self.expect(Token::LParen)?;
+                let mut params = Vec::new();
+                while self.current() != &Token::RParen && self.current() != &Token::Eof {
+                    let param_type = self.parse_type()?;
+                    // 名前は省略可能（型のみの署名を許可）
+                    if self.current() == &Token::Colon {
+                        self.advance();
+                        let pname = match self.current() {
+                            Token::Ident(n) => n.clone(),
+                            _ => return Err("Expected parameter name".to_string()),
+                        };
+                        self.advance();
+                        params.push((pname, param_type));
+                    } else {
+                        params.push(("_".to_string(), param_type));
+                    }
+                    if self.current() == &Token::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect(Token::RParen)?;
+                // 署名終端の : （戻り型省略時はこれが終端）
+                self.expect(Token::Colon)?;
+                let return_type = match self.current() {
+                    Token::Int | Token::Float | Token::Str | Token::Bool => {
+                        Some(self.parse_type()?)
+                    }
+                    Token::Ident(rn) => {
+                        let t = rn.clone();
+                        self.advance();
+                        Some(t)
+                    }
+                    _ => None,
+                };
+                // 戻り型指定時はさらに終端の : が続く
+                if return_type.is_some() {
+                    self.expect(Token::Colon)?;
+                }
+                methods.push(InterfaceMethod {
+                    name: mname,
+                    params,
+                    return_type,
+                });
+            } else {
+                return Err(format!(
+                    "Expected 'fn' in interface body, got {:?}",
+                    self.current()
+                ));
+            }
+        }
+
+        if self.current() == &Token::Dedent {
+            self.advance();
+        }
+
+        Ok(Stmt::Interface { name, methods })
     }
 
     fn parse_state(&mut self) -> Result<Stmt, String> {
@@ -1185,9 +1331,10 @@ impl Parser {
                 self.expect(Token::RParen)?;
             }
 
-            self.expect(Token::Colon)?;
+        self.expect(Token::Colon)?;
 
-            let body = self.parse_block()?;
+        eprintln!("DEBUG parse_fn body of '{}' current={:?}", name, self.current());
+        let body = self.parse_block()?;
 
             arms.push((Pattern::Variant { name, bindings }, body));
         }
@@ -1525,6 +1672,14 @@ struct StructDef {
     fields: Vec<(String, String)>,
     // メソチE��吁E-> 定義
     methods: HashMap<String, FunctionDef>,
+    // 適合する interface 名一覧（暗黙実装の宣言）
+    implements: Vec<String>,
+}
+
+// interface 定義: メソッド署名の集合
+#[derive(Clone)]
+struct InterfaceDef {
+    methods: Vec<InterfaceMethod>,
 }
 
 // プログラム全体で共有する型定義�E�読み取り専用�E�E
@@ -1537,6 +1692,8 @@ struct Defs {
     states: HashMap<String, Vec<String>>,
     // 関数吁E-> 定義
     functions: HashMap<String, FunctionDef>,
+    // interface吁E-> 定義
+    interfaces: HashMap<String, InterfaceDef>,
 }
 
 impl Defs {
@@ -1546,6 +1703,7 @@ impl Defs {
             state_variants: HashMap::new(),
             states: HashMap::new(),
             functions: HashMap::new(),
+            interfaces: HashMap::new(),
         }
     }
 }
@@ -1558,6 +1716,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                 type_params,
                 fields,
                 methods,
+                implements,
             } => {
                 let mut method_map = HashMap::new();
                 for m in methods {
@@ -1586,6 +1745,15 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                         type_params: type_params.clone(),
                         fields: fields.clone(),
                         methods: method_map,
+                        implements: implements.clone(),
+                    },
+                );
+            }
+            Stmt::Interface { name, methods } => {
+                defs.interfaces.insert(
+                    name.clone(),
+                    InterfaceDef {
+                        methods: methods.clone(),
                     },
                 );
             }
@@ -1677,6 +1845,7 @@ enum Type {
     Array(Box<Type>),
     Struct(String),
     State(String),
+    Interface(String),
     List(Box<Type>),
     Option(Box<Type>),
     Unit,
@@ -1731,6 +1900,8 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
                 Type::Struct(base.to_string())
             } else if defs.states.contains_key(base) {
                 Type::State(base.to_string())
+            } else if defs.interfaces.contains_key(base) {
+                Type::Interface(base.to_string())
             } else {
                 Type::Unknown
             }
@@ -1749,7 +1920,85 @@ fn type_eq(a: &Type, b: &Type) -> bool {
     }
 }
 
-// 式�E型を検査し、その型を返す
+// struct が宣言した interface を実際に満たすか検証する（Phase 1: メソチE�署名一致）
+fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
+    for (sname, sdef) in &defs.structs {
+        for iface_name in &sdef.implements {
+            let iface = defs.interfaces.get(iface_name).ok_or_else(|| {
+                format!(
+                    "Struct '{}' implements unknown interface '{}'",
+                    sname, iface_name
+                )
+            })?;
+
+            for im in &iface.methods {
+                let mdef = sdef.methods.get(&im.name).ok_or_else(|| {
+                    format!(
+                        "Struct '{}' does not implement method '{}' required by interface '{}'",
+                        sname, im.name, iface_name
+                    )
+                })?;
+
+                // 引数数の一致
+                if mdef.params.len() != im.params.len() {
+                    return Err(format!(
+                        "Method '{}' on struct '{}' has {} param(s), but interface '{}' requires {}",
+                        im.name, sname, mdef.params.len(), iface_name, im.params.len()
+                    ));
+                }
+
+                // 引数型の一致（名前は無視、型のみ）
+                for (idx, ((_, mptype), (_, iptype))) in
+                    mdef.params.iter().zip(im.params.iter()).enumerate()
+                {
+                    let expected = type_from_str(iptype, defs);
+                    let actual = type_from_str(mptype, defs);
+                    if !type_eq(&actual, &expected) {
+                        return Err(format!(
+                            "Method '{}' param {} on struct '{}' has type {:?}, but interface '{}' requires {:?}",
+                            im.name, idx, sname, actual, iface_name, expected
+                        ));
+                    }
+                }
+
+                // 戻り型の一致
+                let want_ret = match &im.return_type {
+                    Some(rt) => type_from_str(rt, defs),
+                    None => Type::Unit,
+                };
+                let got_ret = match &mdef.return_type {
+                    Some(rt) => type_from_str(rt, defs),
+                    None => Type::Unit,
+                };
+                if !type_eq(&got_ret, &want_ret) {
+                    return Err(format!(
+                        "Method '{}' on struct '{}' returns {:?}, but interface '{}' requires {:?}",
+                        im.name, sname, got_ret, iface_name, want_ret
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// struct が interface を実装（宣言）しているか
+fn struct_implements(defs: &Defs, struct_name: &str, iface_name: &str) -> bool {
+    match defs.structs.get(struct_name) {
+        Some(sdef) => sdef.implements.iter().any(|i| i == iface_name),
+        None => false,
+    }
+}
+
+// 型の整合判定（interface への struct 代入・引渡しを許可）
+fn type_matches(defs: &Defs, actual: &Type, expected: &Type) -> bool {
+    if let (Type::Struct(sname), Type::Interface(iface)) = (actual, expected) {
+        if struct_implements(defs, sname, iface) {
+            return true;
+        }
+    }
+    type_eq(actual, expected)
+}
 fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     match expr {
         Expr::IntLit(_) => Ok(Type::Int),
@@ -1956,7 +2205,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         for ((pname, ptype), arg) in fdef.params.iter().zip(args.iter()) {
                             let at = check_expr(arg, env, defs)?;
                             let expected = type_from_str(ptype, defs);
-                            if !type_eq(&at, &expected) {
+                            if !type_matches(defs, &at, &expected) {
                                 return Err(format!(
                                     "Type error: argument '{}' of {} expects {:?}, got {:?}",
                                     pname, base, expected, at
@@ -2039,6 +2288,46 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         });
                     }
                     Ok(Type::Unknown)
+                }
+                // Interface 型へのメソチE��呼び出し: interface 署名で検査し、戻り型を返す
+                // （実際のディスパチEは実行時の具象 struct メソチEで行われる）
+                Type::Interface(iface) => {
+                    let idef = defs.interfaces.get(&iface).ok_or_else(|| {
+                        format!("Type error: unknown interface '{}'", iface)
+                    })?;
+                    let imsig = idef
+                        .methods
+                        .iter()
+                        .find(|m| m.name == *method)
+                        .ok_or_else(|| {
+                            format!(
+                                "Type error: interface '{}' has no method '{}'",
+                                iface, method
+                            )
+                        })?;
+                    if args.len() != imsig.params.len() {
+                        return Err(format!(
+                            "Type error: interface method {}.{} expects {} argument(s), got {}",
+                            iface,
+                            method,
+                            imsig.params.len(),
+                            args.len()
+                        ));
+                    }
+                    for ((_pname, ptype), arg) in imsig.params.iter().zip(args.iter()) {
+                        let at = check_expr(arg, env, defs)?;
+                        let expected = type_from_str(ptype, defs);
+                        if !type_eq(&at, &expected) {
+                            return Err(format!(
+                                "Type error: argument of interface {}.{} expects {:?}, got {:?}",
+                                iface, method, expected, at
+                            ));
+                        }
+                    }
+                    return Ok(match &imsig.return_type {
+                        Some(rt) => type_from_str(rt, defs),
+                        None => Type::Unit,
+                    });
                 }
                 // String メソチE���E�型付き�E�E
                 Type::String => match method.as_str() {
@@ -2168,10 +2457,20 @@ fn check_stmt(
                 None => Type::Unknown,
             };
             if declared != Type::Unknown && !type_eq(&v_ty, &declared) {
-                return Err(format!(
-                    "Type error: let '{}' expects {:?}, got {:?}",
-                    name, declared, v_ty
-                ));
+                // interface 型への代入: 値の具象 struct が interface を実装していれば許可
+                if let (Type::Interface(iface), Type::Struct(sname)) = (&declared, &v_ty) {
+                    if !struct_implements(defs, sname, iface) {
+                        return Err(format!(
+                            "Type error: let '{}' expects interface '{}', but struct '{}' does not implement it",
+                            name, iface, sname
+                        ));
+                    }
+                } else {
+                    return Err(format!(
+                        "Type error: let '{}' expects {:?}, got {:?}",
+                        name, declared, v_ty
+                    ));
+                }
             }
             let bind_ty = if declared != Type::Unknown {
                 declared
@@ -2398,6 +2697,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                 type_params,
                 fields,
                 methods,
+                implements: _,
             } => {
                 // メソチE��検査: フィールドを環墁E��注入
                 let mut env = TypeEnv::new();
