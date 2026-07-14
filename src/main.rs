@@ -1069,8 +1069,12 @@ impl Parser {
             match self.current() {
                 Token::Dot => {
                     self.advance();
-                    let name = match self.current() {
-                        Token::Ident(n) => n.clone(),
+                    let name = match self.current().clone() {
+                        Token::Ident(n) => n,
+                        // 明示変換メソッド: .int() / .float() / .str()
+                        Token::Int => "int".to_string(),
+                        Token::Float => "float".to_string(),
+                        Token::Str => "str".to_string(),
                         other => return Err(format!("Expected method/field name, got {:?}", other)),
                     };
                     self.advance();
@@ -1361,6 +1365,7 @@ enum Type {
     Array(Box<Type>),
     Struct(String),
     State(String),
+    List(Box<Type>),
     Unit,
     Unknown,
 }
@@ -1435,12 +1440,12 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     elem_ty = t.clone();
                 } else if !type_eq(&elem_ty, &t) {
                     return Err(format!(
-                        "Type error: array element type mismatch (expected {:?}, got {:?})",
+                        "Type error: list element type mismatch (expected {:?}, got {:?})",
                         elem_ty, t
                     ));
                 }
             }
-            Ok(Type::Array(Box::new(elem_ty)))
+            Ok(Type::List(Box::new(elem_ty)))
         }
 
         Expr::UnOp { op, operand } => {
@@ -1717,6 +1722,65 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
+                // List メソッド（型付き）
+                Type::List(elem) => match method.as_str() {
+                    "len" => {
+                        if !args.is_empty() {
+                            return Err("Type error: List.len() takes no arguments".to_string());
+                        }
+                        Ok(Type::Int)
+                    }
+                    "add" => {
+                        if args.len() != 1 {
+                            return Err("Type error: List.add() takes exactly 1 argument".to_string());
+                        }
+                        let at = check_expr(&args[0], env, defs)?;
+                        if !type_eq(&at, &*elem) {
+                            return Err(format!(
+                                "Type error: List.add() expects {:?}, got {:?}",
+                                elem, at
+                            ));
+                        }
+                        Ok(Type::Unit)
+                    }
+                    "get" => {
+                        if args.len() != 1 {
+                            return Err("Type error: List.get() takes exactly 1 argument".to_string());
+                        }
+                        let at = check_expr(&args[0], env, defs)?;
+                        if at != Type::Int && at != Type::Unknown {
+                            return Err(format!(
+                                "Type error: List.get() index must be int (got {:?})",
+                                at
+                            ));
+                        }
+                        Ok(elem.as_ref().clone())
+                    }
+                    "set" => {
+                        if args.len() != 2 {
+                            return Err("Type error: List.set() takes exactly 2 arguments".to_string());
+                        }
+                        let at = check_expr(&args[0], env, defs)?;
+                        if at != Type::Int && at != Type::Unknown {
+                            return Err(format!(
+                                "Type error: List.set() index must be int (got {:?})",
+                                at
+                            ));
+                        }
+                        let vt = check_expr(&args[1], env, defs)?;
+                        if !type_eq(&vt, &*elem) {
+                            return Err(format!(
+                                "Type error: List.set() expects {:?}, got {:?}",
+                                elem, vt
+                            ));
+                        }
+                        Ok(Type::Unit)
+                    }
+                    other => Err(format!(
+                        "Type error: unknown method '{}' on List",
+                        other
+                    )),
+                },
                 // StringBuilder / Array / その他型モデル外: 緩和
                 Type::Unknown => Ok(Type::Unknown),
                 other => Err(format!(
@@ -1959,6 +2023,50 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
     }
 }
 
+// List（Array 値）のメソッド評価（.add / .len / .get / .set）
+fn eval_list_method(arr: &[Value], method: &str, args: &[Value]) -> Result<Value, String> {
+    match method {
+        "add" => {
+            if args.len() != 1 {
+                return Err("add() takes exactly 1 argument".to_string());
+            }
+            let mut new_arr = arr.to_vec();
+            new_arr.push(args[0].clone());
+            Ok(Value::Array(new_arr))
+        }
+        "len" => Ok(Value::Int(arr.len() as i64)),
+        "get" => {
+            if args.len() != 1 {
+                return Err("get() takes exactly 1 argument".to_string());
+            }
+            let idx = match &args[0] {
+                Value::Int(n) => *n,
+                _ => return Err("get() index must be int".to_string()),
+            };
+            if idx < 0 || idx as usize >= arr.len() {
+                return Err(format!("List index out of bounds: {}", idx));
+            }
+            Ok(arr[idx as usize].clone())
+        }
+        "set" => {
+            if args.len() != 2 {
+                return Err("set() takes exactly 2 arguments".to_string());
+            }
+            let idx = match &args[0] {
+                Value::Int(n) => *n,
+                _ => return Err("set() index must be int".to_string()),
+            };
+            if idx < 0 || idx as usize >= arr.len() {
+                return Err(format!("List index out of bounds: {}", idx));
+            }
+            let mut new_arr = arr.to_vec();
+            new_arr[idx as usize] = args[1].clone();
+            Ok(Value::Array(new_arr))
+        }
+        other => Err(format!("Unknown List method: {}", other)),
+    }
+}
+
 fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Result<Value, String> {
     match expr {
         Expr::IntLit(n) => Ok(Value::Int(*n)),
@@ -2184,18 +2292,14 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         "build" => Ok(Value::String(s)),
                         other => Err(format!("Unknown StringBuilder method: {}", other)),
                     },
-                    Value::Array(mut arr) => match method.as_str() {
-                        "add" => {
-                            if arg_vals.len() != 1 {
-                                return Err("add() takes exactly 1 argument".to_string());
-                            }
-                            arr.push(arg_vals[0].clone());
-                            env.insert(var.clone(), Value::Array(arr));
-                            Ok(Value::Int(0))
+                    Value::Array(arr) => {
+                        let result = eval_list_method(&arr, method, &arg_vals)?;
+                        // add/set は値を更新、それ以外は一時値を返す
+                        if method == "add" || method == "set" {
+                            env.insert(var.clone(), result.clone());
                         }
-                        "len" => Ok(Value::Int(arr.len() as i64)),
-                        other => Err(format!("Unknown Array/List method: {}", other)),
-                    },
+                        Ok(result)
+                    }
                     Value::String(s) => eval_string_method(&s, method, &arg_vals),
                     Value::Struct { name, fields } => {
                         call_method(&name, &fields, method, arg_vals, defs)
@@ -2213,10 +2317,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         "build" => Ok(Value::String(s)),
                         other => Err(format!("Unknown StringBuilder method: {}", other)),
                     },
-                    Value::Array(arr) => match method.as_str() {
-                        "len" => Ok(Value::Int(arr.len() as i64)),
-                        other => Err(format!("Unknown Array/List method: {}", other)),
-                    },
+                    Value::Array(arr) => eval_list_method(&arr, method, &arg_vals),
                     Value::String(s) => eval_string_method(&s, method, &arg_vals),
                     Value::Struct { name, fields } => {
                         call_method(&name, &fields, method, arg_vals, defs)
