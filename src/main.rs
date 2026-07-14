@@ -648,7 +648,7 @@ impl Parser {
         // Lime構文: let [mut] <type>: <name> = <expr>
         // 型推論時は型を省略可: let [mut] <name> = <expr>
         let has_type = match self.current() {
-            Token::Int | Token::Float | Token::Str | Token::Bool => true,
+            Token::Int | Token::Float | Token::Str | Token::Bool | Token::Option => true,
             Token::Ident(_) => self.peek() == &Token::Colon,
             _ => false,
         };
@@ -780,30 +780,44 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<String, String> {
-        match self.current() {
+        // Option(T) 記法: Option キーワードの直後が ( なら Generic 引数を解析
+        if let Token::Option = self.current() {
+            self.advance();
+            self.expect(Token::LParen)?;
+            let inner = self.parse_type()?;
+            self.expect(Token::RParen)?;
+            return Ok(format!("Option({})", inner));
+        }
+        let base = match self.current() {
             Token::Int => {
                 self.advance();
-                Ok("int".to_string())
+                "int".to_string()
             }
             Token::Float => {
                 self.advance();
-                Ok("float".to_string())
+                "float".to_string()
             }
             Token::Str => {
                 self.advance();
-                Ok("str".to_string())
+                "str".to_string()
             }
             Token::Bool => {
                 self.advance();
-                Ok("bool".to_string())
+                "bool".to_string()
             }
             Token::Ident(name) => {
                 let t = name.clone();
                 self.advance();
-                Ok(t)
+                t
             }
-            _ => Err(format!("Expected type, got {:?}", self.current())),
+            _ => return Err(format!("Expected type, got {:?}", self.current())),
+        };
+        // T? 省略記法: 後ろに ? が続く場合は Option(T) とする
+        if self.current() == &Token::Question {
+            self.advance();
+            return Ok(format!("Option({})", base));
         }
+        Ok(base)
     }
 
     fn parse_struct(&mut self) -> Result<Stmt, String> {
@@ -1246,7 +1260,15 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                Ok(Expr::Ident(name))
+                // None は引数なしの Option コンストラクタ（括弧不要）
+                if name == "None" {
+                    Ok(Expr::Call {
+                        func: "None".to_string(),
+                        args: vec![],
+                    })
+                } else {
+                    Ok(Expr::Ident(name))
+                }
             }
             // 明示型変換 API: int(..) / float(..) / str(..)
             // これらは Lexer キーワード (Token::Int 等) だが、
@@ -1314,6 +1336,7 @@ enum Value {
     Bool(bool),
     Array(Vec<Value>),
     StringBuilder(String),
+    Option(Option<Box<Value>>),
     State {
         name: String,
         values: Vec<Value>,
@@ -1433,8 +1456,12 @@ impl Value {
                 let strs: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 format!("[{}]", strs.join(", "))
             }
-            Value::StringBuilder(s) => s.clone(),
-            Value::State { name, values } => {
+        Value::StringBuilder(s) => s.clone(),
+        Value::Option(opt) => match opt {
+            Some(v) => format!("Some({})", v.to_string()),
+            None => "None".to_string(),
+        },
+        Value::State { name, values } => {
                 if values.is_empty() {
                     name.clone()
                 } else {
@@ -1461,6 +1488,7 @@ enum Type {
     Struct(String),
     State(String),
     List(Box<Type>),
+    Option(Box<Type>),
     Unit,
     Unknown,
 }
@@ -1489,6 +1517,15 @@ impl TypeEnv {
 
 // 型名文字列 -> Type への変換（宣言型と値型の比較に使用）
 fn type_from_str(s: &str, defs: &Defs) -> Type {
+    // Option(T) または T? 記法をサポート
+    if let Some(inner) = s.strip_prefix("Option(") {
+        if let Some(inner) = inner.strip_suffix(')') {
+            return Type::Option(Box::new(type_from_str(inner, defs)));
+        }
+    }
+    if let Some(inner) = s.strip_suffix('?') {
+        return Type::Option(Box::new(type_from_str(inner, defs)));
+    }
     match s {
         "int" => Type::Int,
         "float" => Type::Float,
@@ -1510,6 +1547,9 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
 fn type_eq(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Unknown, _) | (_, Type::Unknown) => true,
+        (Type::Option(inner_a), Type::Option(inner_b)) => type_eq(inner_a, inner_b),
+        (Type::List(inner_a), Type::List(inner_b)) => type_eq(inner_a, inner_b),
+        (Type::Array(inner_a), Type::Array(inner_b)) => type_eq(inner_a, inner_b),
         _ => a == b,
     }
 }
@@ -1640,23 +1680,37 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 }
                 // 明示型変換 API（暗黙変換禁止のための意図的変換）
                 // bool 変換は禁止（数値 -> bool 不可）
-                "int" | "float" | "str" => {
-                    if args.len() != 1 {
-                        return Err(format!(
-                            "Type error: {}() takes exactly 1 argument",
-                            func
-                        ));
-                    }
-                    // 引数は任意型を受容（Unknown を含む）
-                    check_expr(&args[0], env, defs)?;
-                    match func.as_str() {
-                        "int" => Ok(Type::Int),
-                        "float" => Ok(Type::Float),
-                        "str" => Ok(Type::String),
-                        _ => Ok(Type::Unknown),
-                    }
-                }
-                other => {
+        "int" | "float" | "str" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "Type error: {}() takes exactly 1 argument",
+                    func
+                ));
+            }
+            // 引数は任意型を受容（Unknown も含む）
+            check_expr(&args[0], env, defs)?;
+            match func.as_str() {
+                "int" => Ok(Type::Int),
+                "float" => Ok(Type::Float),
+                "str" => Ok(Type::String),
+                _ => Ok(Type::Unknown),
+            }
+        }
+        // Option コンストラクタ: Some(x) -> Option(T), None -> Option(Unknown)
+        "Some" => {
+            if args.len() != 1 {
+                return Err("Type error: Some() takes exactly 1 argument".to_string());
+            }
+            let inner_ty = check_expr(&args[0], env, defs)?;
+            Ok(Type::Option(Box::new(inner_ty)))
+        }
+        "None" => {
+            if args.len() != 0 {
+                return Err("Type error: None() takes no arguments".to_string());
+            }
+            Ok(Type::Option(Box::new(Type::Unknown)))
+        }
+        other => {
                     // Struct constructor
                     if let Some(struct_def) = defs.structs.get(other) {
                         if args.len() != struct_def.fields.len() {
@@ -2025,8 +2079,39 @@ fn check_stmt(
                         ));
                     }
                 }
+            } else if let Type::Option(_) = &m_ty {
+                // Option は Some / None の両方を網羅必須
+                let variants = vec!["Some".to_string(), "None".to_string()];
+                let mut covered: Vec<String> = Vec::new();
+                for (pattern, body) in arms {
+                    if let Pattern::Variant { name: pname, bindings } = pattern {
+                        if !variants.contains(pname) {
+                            return Err(format!(
+                                "Type error: unknown variant '{}' for Option",
+                                pname
+                            ));
+                        }
+                        covered.push(pname.clone());
+
+                        let mut arm_env = env.clone();
+                        for b in bindings {
+                            if b != "Ignore" {
+                                arm_env.insert(b.clone(), Type::Unknown);
+                            }
+                        }
+                        check_stmts(body, &mut arm_env, defs, expected_return)?;
+                    }
+                }
+                for v in &variants {
+                    if !covered.contains(v) {
+                        return Err(format!(
+                            "Type error: match on Option is not exhaustive (missing variant '{}')",
+                            v
+                        ));
+                    }
+                }
             } else {
-                // State 型以外は各腕のボディのみ検査（束縛なし）
+                // State / Option 型以外は各腕のボディのみ検査（束縛なし）
                 for (_, body) in arms {
                     check_stmts(body, env, defs, expected_return)?;
                 }
@@ -2367,14 +2452,28 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         _ => Err("float() cannot convert this value".to_string()),
                     }
                 }
-                "str" => {
-                    if args.len() != 1 {
-                        return Err("str() takes exactly 1 argument".to_string());
-                    }
-                    let val = eval_expr(&args[0], env, defs)?;
-                    Ok(Value::String(val.to_string()))
-                }
-                other => {
+        "str" => {
+            if args.len() != 1 {
+                return Err("str() takes exactly 1 argument".to_string());
+            }
+            let val = eval_expr(&args[0], env, defs)?;
+            Ok(Value::String(val.to_string()))
+        }
+        // Option コンストラクタ: Some(x) -> Option(Some(x)), None -> Option(None)
+        "Some" => {
+            if args.len() != 1 {
+                return Err("Some() takes exactly 1 argument".to_string());
+            }
+            let val = eval_expr(&args[0], env, defs)?;
+            Ok(Value::Option(Some(Box::new(val))))
+        }
+        "None" => {
+            if args.len() != 0 {
+                return Err("None() takes no arguments".to_string());
+            }
+            Ok(Value::Option(None))
+        }
+        other => {
                     // Constructor判定: 1. Struct → 2. State Variant → 3. エラー
                     if let Some(struct_def) = defs.structs.get(other) {
                         let field_defs = &struct_def.fields;
@@ -2742,8 +2841,50 @@ fn execute_stmt(
                     }
                     Err(format!("Unhandled state: {}", name))
                 }
+                Value::Option(opt) => {
+                    match opt {
+                        Some(inner) => {
+                            for (pattern, body) in arms {
+                                match pattern {
+                                    Pattern::Variant { name: pname, bindings } => {
+                                        if pname == "Some" {
+                                            for (idx, binding) in bindings.iter().enumerate() {
+                                                if binding != "Ignore" {
+                                                    let v = if idx == 0 {
+                                                        (*inner).clone()
+                                                    } else {
+                                                        Value::Int(0)
+                                                    };
+                                                    env.insert(binding.clone(), v);
+                                                }
+                                            }
+                                            return execute_stmts(body, env, defs);
+                                        }
+                                    }
+                                    Pattern::Ignore => {}
+                                }
+                            }
+                            Err("Unhandled Option: Some".to_string())
+                        }
+                        None => {
+                            for (pattern, body) in arms {
+                                match pattern {
+                                    Pattern::Variant { name: pname, bindings } => {
+                                        if pname == "None" {
+                                            // None は束縛なし
+                                            let _ = bindings;
+                                            return execute_stmts(body, env, defs);
+                                        }
+                                    }
+                                    Pattern::Ignore => {}
+                                }
+                            }
+                            Err("Unhandled Option: None".to_string())
+                        }
+                    }
+                }
                 other => Err(format!(
-                    "match expects a state value, got {:?}",
+                    "match expects a state or option value, got {:?}",
                     other
                 )),
             }
