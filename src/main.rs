@@ -2656,8 +2656,12 @@ fn execute_stmt(
             let cond_val = eval_expr(cond, env, defs)?;
             let is_true = match cond_val {
                 Value::Bool(b) => b,
-                Value::Int(n) => n != 0,
-                _ => return Err("Condition must be boolean or integer".to_string()),
+                other => {
+                    return Err(format!(
+                        "Condition must be bool (implicit int->bool conversion is forbidden), got {:?}",
+                        other
+                    ))
+                }
             };
 
             if is_true {
@@ -2691,8 +2695,12 @@ fn execute_stmt(
                 let cond_val = eval_expr(cond, env, defs)?;
                 let is_true = match cond_val {
                     Value::Bool(b) => b,
-                    Value::Int(n) => n != 0,
-                    _ => return Err("while condition must be boolean or integer".to_string()),
+                    other => {
+                        return Err(format!(
+                            "while condition must be bool (implicit int->bool conversion is forbidden), got {:?}",
+                            other
+                        ))
+                    }
                 };
                 if !is_true {
                     break;
