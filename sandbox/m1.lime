@@ -1,0 +1,9 @@
+struct User:
+    str: name
+
+    fn greet() str:
+        return "Hello " + name
+
+fn main():
+    let user = User("Alice")
+    print(user.greet())

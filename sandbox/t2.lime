@@ -1,0 +1,6 @@
+struct User:
+    str: name
+
+fn main():
+    let user = User("Alice")
+    print(user.name)

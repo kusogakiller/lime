@@ -118,30 +118,41 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             line += 1;
             col = 1;
             i += 1;
-            // 改行後の空白でインデントを計算
+            // 空行・コメント行をスキップし、次の実コード行のインデントで調整する
             let mut indent = 0usize;
-            while i < n && (chars[i] == ' ' || chars[i] == '\t') {
-                indent += 1;
-                i += 1;
-            }
-            // 空行（コメントのみ等）はスキップ
-            if i < n && chars[i] == '#' {
-                while i < n && chars[i] != '\n' {
+            loop {
+                // 行頭の空白を消費してインデントを計測
+                indent = 0;
+                while i < n && (chars[i] == ' ' || chars[i] == '\t') {
+                    indent += 1;
                     i += 1;
                 }
-                continue;
+                if i < n && chars[i] == '#' {
+                    // コメント行をスキップ
+                    while i < n && chars[i] != '\n' {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if i < n && chars[i] == '\n' {
+                    // 空行: 改行を記録して次の行へ
+                    tokens.push(Token::Newline);
+                    line += 1;
+                    i += 1;
+                    continue;
+                }
+                break;
             }
-            if i < n && chars[i] == '\n' {
-                continue;
-            }
-            let current = *indent_stack.last().unwrap();
-            if indent > current {
-                indent_stack.push(indent);
-                tokens.push(Token::Indent);
-            } else if indent < current {
-                while indent_stack.len() > 1 && *indent_stack.last().unwrap() > indent {
-                    indent_stack.pop();
-                    tokens.push(Token::Dedent);
+            if i < n {
+                let current = *indent_stack.last().unwrap();
+                if indent > current {
+                    indent_stack.push(indent);
+                    tokens.push(Token::Indent);
+                } else if indent < current {
+                    while indent_stack.len() > 1 && *indent_stack.last().unwrap() > indent {
+                        indent_stack.pop();
+                        tokens.push(Token::Dedent);
+                    }
                 }
             }
             continue;
@@ -993,6 +1004,7 @@ impl Parser {
     }
 
     fn parse_match(&mut self) -> Result<Stmt, String> {
+        self.expect(Token::Match)?;
 
         let expr = self.parse_expr()?;
         self.expect(Token::Colon)?;

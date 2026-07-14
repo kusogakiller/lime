@@ -1,0 +1,5 @@
+fn main():
+    let builder = StringBuilder()
+    builder.add("Hello")
+    builder.add(" Lime")
+    print(builder.build())
