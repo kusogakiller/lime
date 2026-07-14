@@ -46,7 +46,7 @@ fn main() {
             let mut defs = Defs::new();
             collect_defs(&stmts, &mut defs);
 
-            // Type Checker（実行前に型的に正しいか検査）
+            // Type Checker�E�実行前に型的に正しいか検査�E�E
             if let Err(e) = type_check(&stmts, &defs) {
                 eprintln!("Type error: {}", e);
                 return;
@@ -57,7 +57,7 @@ fn main() {
                     eprintln!("Runtime error: {}", e);
                 }
             } else {
-                // main が無い場合はトップレベル文を実行
+                // main が無ぁE��合�Eトップレベル斁E��実衁E
                 let mut env = HashMap::new();
                 if let Err(e) = execute_stmts(&stmts, &mut env, &defs) {
                     eprintln!("Runtime error: {}", e);
@@ -112,30 +112,30 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
     while i < n {
         let ch = chars[i];
 
-        // 改行
+        // 改衁E
         if ch == '\n' {
             tokens.push(Token::Newline);
             line += 1;
             col = 1;
             i += 1;
-            // 空行・コメント行をスキップし、次の実コード行のインデントで調整する
+            // 空行�Eコメント行をスキチE�Eし、次の実コード行�EインチE��トで調整する
             let mut indent = 0usize;
             loop {
-                // 行頭の空白を消費してインデントを計測
+                // 行頭の空白を消費してインチE��トを計測
                 indent = 0;
                 while i < n && (chars[i] == ' ' || chars[i] == '\t') {
                     indent += 1;
                     i += 1;
                 }
                 if i < n && chars[i] == '#' {
-                    // コメント行をスキップ
+                    // コメント行をスキチE�E
                     while i < n && chars[i] != '\n' {
                         i += 1;
                     }
                     continue;
                 }
                 if i < n && chars[i] == '\n' {
-                    // 空行: 改行を記録して次の行へ
+                    // 空衁E 改行を記録して次の行へ
                     tokens.push(Token::Newline);
                     line += 1;
                     i += 1;
@@ -158,7 +158,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // コメント
+        // コメンチE
         if ch == '#' {
             while i < n && chars[i] != '\n' {
                 i += 1;
@@ -173,7 +173,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 文字列リテラル
+        // 斁E���EリチE��ル
         if ch == '"' {
             i += 1;
             let mut s = String::new();
@@ -204,15 +204,15 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 数字
+        // 数孁E
         if ch.is_ascii_digit() {
             let start = i;
             let mut is_float = false;
             while i < n && chars[i].is_ascii_digit() {
                 i += 1;
             }
-            // 小数点: '.' の直後が数字の場合のみ浮動小数とする
-            // （'..' は Range 演算子なので消費しない）
+            // 小数点: '.' の直後が数字�E場合�Eみ浮動小数とする
+            // �E�E..' は Range 演算子なので消費しなぁE��E
             if i < n && chars[i] == '.' && i + 1 < n && chars[i + 1].is_ascii_digit() {
                 is_float = true;
                 i += 1; // '.'
@@ -235,7 +235,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 識別子 / キーワード
+        // 識別孁E/ キーワーチE
         if ch.is_alphabetic() || ch == '_' {
             let start = i;
             while i < n && (chars[i].is_alphanumeric() || chars[i] == '_') {
@@ -279,7 +279,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 演算子
+        // 演算孁E
         let op = match ch {
             '+' => {
                 i += 1;
@@ -444,7 +444,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
         col += 1;
     }
 
-    // 末尾のインデントを閉じる
+    // 末尾のインチE��トを閉じめE
     while indent_stack.len() > 1 {
         indent_stack.pop();
         tokens.push(Token::Dedent);
@@ -498,7 +498,7 @@ enum Pattern {
         name: String,
         bindings: Vec<String>,
     },
-    // 予約: パーサからは生成しない（catch-all は else禁止のため不採用）
+    // 予紁E パ�Eサからは生�EしなぁE��Eatch-all は else禁止のため不採用�E�E
     Ignore,
 }
 
@@ -512,12 +512,14 @@ enum Stmt {
     },
     Fn {
         name: String,
+        type_params: Vec<String>,
         params: Vec<(String, String)>,
         return_type: Option<String>,
         body: Vec<Stmt>,
     },
     Struct {
         name: String,
+        type_params: Vec<String>,
         fields: Vec<(String, String)>,
         methods: Vec<Stmt>,
     },
@@ -541,6 +543,7 @@ enum Stmt {
     },
     State {
         name: String,
+        type_params: Vec<String>,
         variants: Vec<String>,
     },
     Return(Option<Expr>),
@@ -614,7 +617,7 @@ impl Parser {
             Token::For => self.parse_for(),
             Token::While => self.parse_while(),
             _ => {
-                // 代入文: Ident '=' expr
+                // 代入斁E Ident '=' expr
                 if let Token::Ident(name) = self.current().clone() {
                     if self.peek() == &Token::Assign {
                         self.advance(); // Ident
@@ -685,7 +688,7 @@ impl Parser {
             self.advance();
         }
 
-        // インデント開始
+        // インチE��ト開姁E
         if self.current() == &Token::Indent {
             self.advance();
         } else {
@@ -706,7 +709,7 @@ impl Parser {
             stmts.push(self.parse_stmt()?);
         }
 
-        // インデント終了
+        // インチE��ト終亁E
         if self.current() == &Token::Dedent {
             self.advance();
         }
@@ -722,6 +725,9 @@ impl Parser {
             _ => return Err("Expected function name".to_string()),
         };
         self.advance();
+
+        // ジェネリック関数: fn name(T)(args): の (T) 部分
+        let type_params = self.parse_type_params(true)?;
 
         self.expect(Token::LParen)?;
 
@@ -773,6 +779,7 @@ impl Parser {
 
         Ok(Stmt::Fn {
             name,
+            type_params,
             params,
             return_type,
             body,
@@ -780,7 +787,7 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<String, String> {
-        // Option(T) 記法: Option キーワードの直後が ( なら Generic 引数を解析
+        // Option(T) 記況E Option キーワード�E直後が ( なめEGeneric 引数を解极E
         if let Token::Option = self.current() {
             self.advance();
             self.expect(Token::LParen)?;
@@ -812,12 +819,112 @@ impl Parser {
             }
             _ => return Err(format!("Expected type, got {:?}", self.current())),
         };
-        // T? 省略記法: 後ろに ? が続く場合は Option(T) とする
+        // T? 省略記況E 後ろに ? が続く場合�E Option(T) とする
         if self.current() == &Token::Question {
             self.advance();
             return Ok(format!("Option({})", base));
         }
         Ok(base)
+    }
+
+    // 先読み: 現在位置の (...) が「型引数リスト」として解析できるか試す。
+    // 成功すれば Some([型文字列...]) を返し、位置は ) の直後に進む。
+    // 失敗(値引数など)なら None を返し、位置は元に戻る。
+    fn try_parse_type_args(&mut self) -> Option<Vec<String>> {
+        let save = self.pos;
+        if self.current() != &Token::LParen {
+            return None;
+        }
+        self.advance(); // '('
+        let mut args = Vec::new();
+        if self.current() == &Token::RParen {
+            self.advance();
+            return Some(args);
+        }
+        loop {
+            match self.parse_type() {
+                Ok(t) => args.push(t),
+                Err(_) => {
+                    self.pos = save;
+                    return None;
+                }
+            }
+            if self.current() == &Token::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if self.current() == &Token::RParen {
+            self.advance();
+            Some(args)
+        } else {
+            self.pos = save;
+            None
+        }
+    }
+
+    // ジェネリチE��型パラメータ: Name(T, U) の (T, U) 部刁E��解极E
+    // require_paren_after = true の場吁E関数)、最初�E (...) の直後が ( ならジェネリチE��、E
+    //   そうでなければそれは引数リストなのでジェネリチE��無し、E
+    // require_paren_after = false の場吁Estruct/state)、E...) があれ�E常にジェネリチE��、E
+    fn parse_type_params(&mut self, require_paren_after: bool) -> Result<Vec<String>, String> {
+        // 現在ぁE( で、その対応すめE) の直後が ( ならジェネリチE��とみなぁE
+        if self.current() == &Token::LParen {
+            let mut depth = 0usize;
+            let mut i = self.pos;
+            let tokens = &self.tokens;
+            loop {
+                if i >= tokens.len() {
+                    break;
+                }
+                match &tokens[i] {
+                    Token::LParen => depth += 1,
+                    Token::RParen => {
+                        depth -= 1;
+                        if depth == 0 {
+                            // ) の次のト�Eクンを覗く
+                            let next_is_paren =
+                                i + 1 < tokens.len() && tokens[i + 1] == Token::LParen;
+                            if require_paren_after {
+                                if next_is_paren {
+                                    // ジェネリチE��あり
+                                    break;
+                                } else {
+                                    // 引数リストとみなぁE
+                                    return Ok(Vec::new());
+                                }
+                            } else {
+                                // struct/state: (...) は常にジェネリチE��
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        } else {
+            return Ok(Vec::new());
+        }
+
+        // ジェネリチE�� (T, U) を消費
+        self.advance(); // '('
+        let mut params = Vec::new();
+        while self.current() != &Token::RParen && self.current() != &Token::Eof {
+            match self.current() {
+                Token::Ident(n) => {
+                    params.push(n.clone());
+                    self.advance();
+                }
+                _ => return Err(format!("Expected type parameter, got {:?}", self.current())),
+            }
+            if self.current() == &Token::Comma {
+                self.advance();
+            }
+        }
+        self.expect(Token::RParen)?;
+        Ok(params)
     }
 
     fn parse_struct(&mut self) -> Result<Stmt, String> {
@@ -829,9 +936,11 @@ impl Parser {
         };
         self.advance();
 
+        let type_params = self.parse_type_params(false)?;
+
         self.expect(Token::Colon)?;
 
-        // ブロック開始
+        // ブロチE��開姁E
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -849,7 +958,7 @@ impl Parser {
                 continue;
             }
 
-            // メソッド定義
+            // メソチE��定義
             if self.current() == &Token::Fn {
                 methods.push(self.parse_fn()?);
                 continue;
@@ -873,7 +982,12 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Stmt::Struct { name, fields, methods })
+        Ok(Stmt::Struct {
+            name,
+            type_params,
+            fields,
+            methods,
+        })
     }
 
     fn parse_state(&mut self) -> Result<Stmt, String> {
@@ -885,18 +999,12 @@ impl Parser {
         };
         self.advance();
 
-        // ジェネリック引数 state Result(T): は今回はスキップ
-        if self.current() == &Token::LParen {
-            self.advance();
-            while self.current() != &Token::RParen && self.current() != &Token::Eof {
-                self.advance();
-            }
-            self.expect(Token::RParen)?;
-        }
+        // ジェネリチE��引数 state Result(T): を保持
+        let type_params = self.parse_type_params(false)?;
 
         self.expect(Token::Colon)?;
 
-        // ブロック開始
+        // ブロチE��開姁E
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -919,7 +1027,7 @@ impl Parser {
             };
             self.advance();
 
-            // Variant のペイロード指定は今回はスキップ
+            // Variant のペイロード指定�E今回はスキチE�E
             if self.current() == &Token::LParen {
                 self.advance();
                 let mut depth = 1;
@@ -940,7 +1048,11 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Stmt::State { name, variants })
+        Ok(Stmt::State {
+            name,
+            type_params,
+            variants,
+        })
     }
 
     fn parse_if(&mut self) -> Result<Stmt, String> {
@@ -1005,7 +1117,7 @@ impl Parser {
     fn parse_while(&mut self) -> Result<Stmt, String> {
         self.expect(Token::While)?;
 
-        // 条件式は括弧で囲む（仕様）
+        // 条件式�E括弧で囲む�E�仕様！E
         self.expect(Token::LParen)?;
         let cond = self.parse_expr()?;
         self.expect(Token::RParen)?;
@@ -1023,7 +1135,7 @@ impl Parser {
         let expr = self.parse_expr()?;
         self.expect(Token::Colon)?;
 
-        // ブロック開始
+        // ブロチE��開姁E
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1045,14 +1157,14 @@ impl Parser {
                 return Err("Match else is not allowed (exhaustive match required)".to_string());
             }
 
-            // Variant名
+            // Variant吁E
             let name = match self.current() {
                 Token::Ident(n) => n.clone(),
                 other => return Err(format!("Expected variant name in match, got {:?}", other)),
             };
             self.advance();
 
-            // 束縛（Ignore を含む）
+            // 束縛！Egnore を含む�E�E
             let mut bindings = Vec::new();
             if self.current() == &Token::LParen {
                 self.advance();
@@ -1091,7 +1203,7 @@ impl Parser {
         self.parse_binary(0)
     }
 
-    // 演算子優先順位（高→低）: not > * / % > + - > < > <= >= > == != > and > or
+    // 演算子優先頁E��（高�E低！E not > * / % > + - > < > <= >= > == != > and > or
     fn bin_prec(op: &str) -> Option<u8> {
         match op {
             "or" => Some(1),
@@ -1162,7 +1274,7 @@ impl Parser {
         }
     }
 
-    // 後置修飾（呼び出し・メソッド・フィールドアクセス）を処理
+    // 後置修飾�E�呼び出し�EメソチE��・フィールドアクセス�E�を処琁E
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_atom()?;
 
@@ -1172,7 +1284,7 @@ impl Parser {
                     self.advance();
                     let name = match self.current().clone() {
                         Token::Ident(n) => n,
-                        // 明示変換メソッド: .int() / .float() / .str()
+                        // 明示変換メソチE��: .int() / .float() / .str()
                         Token::Int => "int".to_string(),
                         Token::Float => "float".to_string(),
                         Token::Str => "str".to_string(),
@@ -1202,21 +1314,69 @@ impl Parser {
                     }
                 }
                 Token::LParen => {
-                    // 識別子に対する関数呼び出し
+                    // 識別子に対する呼び出し。ジェネリック構築 Point(int)(1, 2) を判別。
                     if let Expr::Ident(func) = &expr {
-                        self.advance();
-                        let mut args = Vec::new();
-                        while self.current() != &Token::RParen && self.current() != &Token::Eof {
-                            args.push(self.parse_expr()?);
-                            if self.current() == &Token::Comma {
+                        // 先読み: (...) が型引数リストなら Point(int) として扱う
+                        let save = self.pos;
+                        if let Some(type_args) =
+                            self.try_parse_type_args()
+                        {
+                            let typed_name = format!("{}({})", func, type_args.join(", "));
+                            // 直後に (values) が続けば構築呼び出し
+                            if self.current() == &Token::LParen {
                                 self.advance();
+                                let mut args = Vec::new();
+                                while self.current() != &Token::RParen
+                                    && self.current() != &Token::Eof
+                                {
+                                    args.push(self.parse_expr()?);
+                                    if self.current() == &Token::Comma {
+                                        self.advance();
+                                    }
+                                }
+                                self.expect(Token::RParen)?;
+                                expr = Expr::Call {
+                                    func: typed_name,
+                                    args,
+                                };
+                            } else {
+                                // (values) が続かない場合は通常の関数呼び出しとする: 位置を戻す
+                                self.pos = save;
+                                self.advance();
+                                let mut args = Vec::new();
+                                while self.current() != &Token::RParen
+                                    && self.current() != &Token::Eof
+                                {
+                                    args.push(self.parse_expr()?);
+                                    if self.current() == &Token::Comma {
+                                        self.advance();
+                                    }
+                                }
+                                self.expect(Token::RParen)?;
+                                expr = Expr::Call {
+                                    func: func.clone(),
+                                    args,
+                                };
                             }
+                        } else {
+                            // 通常の関数呼び出し: 位置を戻して値引数を解析
+                            self.pos = save;
+                            self.advance();
+                            let mut args = Vec::new();
+                            while self.current() != &Token::RParen
+                                && self.current() != &Token::Eof
+                            {
+                                args.push(self.parse_expr()?);
+                                if self.current() == &Token::Comma {
+                                    self.advance();
+                                }
+                            }
+                            self.expect(Token::RParen)?;
+                            expr = Expr::Call {
+                                func: func.clone(),
+                                args,
+                            };
                         }
-                        self.expect(Token::RParen)?;
-                        expr = Expr::Call {
-                            func: func.clone(),
-                            args,
-                        };
                     } else {
                         break;
                     }
@@ -1260,7 +1420,7 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                // None は引数なしの Option コンストラクタ（括弧不要）
+                // None は引数なし�E Option コンストラクタ�E�括弧不要E��E
                 if name == "None" {
                     Ok(Expr::Call {
                         func: "None".to_string(),
@@ -1271,8 +1431,8 @@ impl Parser {
                 }
             }
             // 明示型変換 API: int(..) / float(..) / str(..)
-            // これらは Lexer キーワード (Token::Int 等) だが、
-            // 直後に '(' が続く場合は変換呼び出しとして扱う。
+            // これら�E Lexer キーワーチE(Token::Int 筁E だが、E
+            // 直後に '(' が続く場合�E変換呼び出しとして扱ぁE��E
             Token::Int | Token::Float | Token::Str => {
                 if self.peek() == &Token::LParen {
                     let name = match self.current() {
@@ -1350,29 +1510,32 @@ enum Value {
 // ユーザー定義関数
 #[derive(Clone)]
 struct FunctionDef {
+    type_params: Vec<String>,
     params: Vec<(String, String)>,
     return_type: Option<String>,
     body: Vec<Stmt>,
 }
 
-// struct定義（フィールド + メソッド）
+// struct定義�E�フィールチE+ メソチE���E�E
 #[derive(Clone)]
 struct StructDef {
-    // フィールド (フィールド名, 型名) を定義順で保持
+    // ジェネリチE��型パラメータ�E�非ジェネリチE��なら空�E�E
+    type_params: Vec<String>,
+    // フィールチE(フィールド名, 型名) を定義頁E��保持
     fields: Vec<(String, String)>,
-    // メソッド名 -> 定義
+    // メソチE��吁E-> 定義
     methods: HashMap<String, FunctionDef>,
 }
 
-// プログラム全体で共有する型定義（読み取り専用）
+// プログラム全体で共有する型定義�E�読み取り専用�E�E
 struct Defs {
-    // struct名 -> 定義
+    // struct吁E-> 定義
     structs: HashMap<String, StructDef>,
-    // state variant名 -> 所属する state名
+    // state variant吁E-> 所属すめEstate吁E
     state_variants: HashMap<String, String>,
-    // state名 -> variant名一覧（網羅性検査用）
+    // state吁E-> variant名一覧�E�網羁E��検査用�E�E
     states: HashMap<String, Vec<String>>,
-    // 関数名 -> 定義
+    // 関数吁E-> 定義
     functions: HashMap<String, FunctionDef>,
 }
 
@@ -1390,13 +1553,26 @@ impl Defs {
 fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
     for stmt in stmts {
         match stmt {
-            Stmt::Struct { name, fields, methods } => {
+            Stmt::Struct {
+                name,
+                type_params,
+                fields,
+                methods,
+            } => {
                 let mut method_map = HashMap::new();
                 for m in methods {
-                    if let Stmt::Fn { name: mname, params, return_type, body } = m {
+                    if let Stmt::Fn {
+                        name: mname,
+                        type_params: mtp,
+                        params,
+                        return_type,
+                        body,
+                    } = m
+                    {
                         method_map.insert(
                             mname.clone(),
                             FunctionDef {
+                                type_params: mtp.clone(),
                                 params: params.clone(),
                                 return_type: return_type.clone(),
                                 body: body.clone(),
@@ -1407,21 +1583,35 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                 defs.structs.insert(
                     name.clone(),
                     StructDef {
+                        type_params: type_params.clone(),
                         fields: fields.clone(),
                         methods: method_map,
                     },
                 );
             }
-            Stmt::State { name, variants } => {
+            Stmt::State {
+                name,
+                type_params,
+                variants,
+            } => {
                 for v in variants {
                     defs.state_variants.insert(v.clone(), name.clone());
                 }
                 defs.states.insert(name.clone(), variants.clone());
+                // type_params は Phase 1 では保持のみ�E�未使用�E�E
+                let _ = type_params;
             }
-            Stmt::Fn { name, params, return_type, body } => {
+            Stmt::Fn {
+                name,
+                type_params,
+                params,
+                return_type,
+                body,
+            } => {
                 defs.functions.insert(
                     name.clone(),
                     FunctionDef {
+                        type_params: type_params.clone(),
                         params: params.clone(),
                         return_type: return_type.clone(),
                         body: body.clone(),
@@ -1476,8 +1666,8 @@ impl Value {
 
 // ===== Type Checker =====
 
-// 型を表現する。Lime は暗黙型変換を許さないため、厳密な一致を検査する。
-// Unknown は「型が判明しない（組込み/StringBuilder等）」または「検査を緩和する」用途。
+// 型を表現する、Eime は暗黙型変換を許さなぁE��め、厳寁E��一致を検査する、E
+// Unknown は「型が判明しなぁE��絁E��み/StringBuilder等）」また�E「検査を緩和する」用途、E
 #[derive(Debug, Clone, PartialEq)]
 enum Type {
     Int,
@@ -1493,7 +1683,7 @@ enum Type {
     Unknown,
 }
 
-// 変数名 -> 型 を管理する環境
+// 変数吁E-> 垁Eを管琁E��る環墁E
 #[derive(Debug, Clone)]
 struct TypeEnv {
     vars: HashMap<String, Type>,
@@ -1515,9 +1705,9 @@ impl TypeEnv {
     }
 }
 
-// 型名文字列 -> Type への変換（宣言型と値型の比較に使用）
+// 型名斁E���E -> Type への変換�E�宣言型と値型�E比輁E��使用�E�E
 fn type_from_str(s: &str, defs: &Defs) -> Type {
-    // Option(T) または T? 記法をサポート
+    // Option(T) また�E T? 記法をサポ�EチE
     if let Some(inner) = s.strip_prefix("Option(") {
         if let Some(inner) = inner.strip_suffix(')') {
             return Type::Option(Box::new(type_from_str(inner, defs)));
@@ -1532,10 +1722,15 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
         "bool" => Type::Bool,
         "str" => Type::String,
         _ => {
-            if defs.structs.contains_key(s) {
-                Type::Struct(s.to_string())
-            } else if defs.states.contains_key(s) {
-                Type::State(s.to_string())
+            // ジェネリチE��型参照 Base(Arg, ...) はベ�Eス名で照吁E
+            let base = match s.find('(') {
+                Some(i) => &s[..i],
+                None => s,
+            };
+            if defs.structs.contains_key(base) {
+                Type::Struct(base.to_string())
+            } else if defs.states.contains_key(base) {
+                Type::State(base.to_string())
             } else {
                 Type::Unknown
             }
@@ -1543,7 +1738,7 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
     }
 }
 
-// Unknown を含む比較を許容する等価判定
+// Unknown を含む比輁E��許容する等価判宁E
 fn type_eq(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Unknown, _) | (_, Type::Unknown) => true,
@@ -1554,7 +1749,7 @@ fn type_eq(a: &Type, b: &Type) -> bool {
     }
 }
 
-// 式の型を検査し、その型を返す
+// 式�E型を検査し、その型を返す
 fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     match expr {
         Expr::IntLit(_) => Ok(Type::Int),
@@ -1576,7 +1771,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             if et != Type::Int && et != Type::Unknown {
                 return Err(format!("Type error: range end must be int (got {:?})", et));
             }
-            // Range は int の List として扱う
+            // Range は int の List として扱ぁE
             Ok(Type::List(Box::new(Type::Int)))
         }
 
@@ -1616,7 +1811,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             let rt = check_expr(right, env, defs)?;
 
             match op.as_str() {
-                // 比較演算: 結果は常に Bool
+                // 比輁E��箁E 結果は常に Bool
                 "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                     if !type_eq(&lt, &rt) {
                         return Err(format!(
@@ -1626,7 +1821,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Bool)
                 }
-                // 論理演算
+                // 論理演箁E
                 "and" | "or" => {
                     if (lt != Type::Bool && lt != Type::Unknown)
                         || (rt != Type::Bool && rt != Type::Unknown)
@@ -1638,7 +1833,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Bool)
                 }
-                // 算術演算: 左右同型
+                // 算術演箁E 左右同型
                 "+" | "-" | "*" | "/" | "%" => {
                     if !type_eq(&lt, &rt) {
                         return Err(format!(
@@ -1646,7 +1841,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             op, lt, rt
                         ));
                     }
-                    // 文字列連結も + で許可
+                    // 斁E���E連結も + で許可
                     Ok(lt)
                 }
                 other => Err(format!("Type error: unknown binary operator '{}'", other)),
@@ -1654,7 +1849,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
 
         Expr::Call { func, args } => {
-            // 組込み
+            // 絁E��み
             match func.as_str() {
                 "print" | "println" => {
                     for a in args {
@@ -1675,11 +1870,11 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             "Type error: StringBuilder() takes no arguments".to_string()
                         );
                     }
-                    // StringBuilder は型モデルにないため Unknown で緩和
+                    // StringBuilder は型モチE��になぁE��めEUnknown で緩咁E
                     Ok(Type::Unknown)
                 }
-                // 明示型変換 API（暗黙変換禁止のための意図的変換）
-                // bool 変換は禁止（数値 -> bool 不可）
+                // 明示型変換 API�E�暗黙変換禁止のための意図皁E��換�E�E
+                // bool 変換は禁止�E�数値 -> bool 不可�E�E
         "int" | "float" | "str" => {
             if args.len() != 1 {
                 return Err(format!(
@@ -1687,7 +1882,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     func
                 ));
             }
-            // 引数は任意型を受容（Unknown も含む）
+            // 引数は任意型を受容�E�Enknown も含む�E�E
             check_expr(&args[0], env, defs)?;
             match func.as_str() {
                 "int" => Ok(Type::Int),
@@ -1711,12 +1906,16 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             Ok(Type::Option(Box::new(Type::Unknown)))
         }
         other => {
-                    // Struct constructor
-                    if let Some(struct_def) = defs.structs.get(other) {
+                    // Struct / State コンストラクタ�E�ジェネリチE�� Base(Arg) も�Eース名で照合！E
+                    let base = match other.find('(') {
+                        Some(i) => &other[..i],
+                        None => other,
+                    };
+                    if let Some(struct_def) = defs.structs.get(base) {
                         if args.len() != struct_def.fields.len() {
                             return Err(format!(
                                 "Type error: {} expects {} field(s), got {}",
-                                other,
+                                base,
                                 struct_def.fields.len(),
                                 args.len()
                             ));
@@ -1729,27 +1928,27 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             if !type_eq(&at, &expected) {
                                 return Err(format!(
                                     "Type error: field '{}' of {} expects {:?}, got {:?} (arg {})",
-                                    fname, other, expected, at, i
+                                    fname, base, expected, at, i
                                 ));
                             }
                         }
-                        return Ok(Type::Struct(other.to_string()));
+                        return Ok(Type::Struct(base.to_string()));
                     }
 
                     // State constructor
-                    if let Some(state_name) = defs.state_variants.get(other) {
+                    if let Some(state_name) = defs.state_variants.get(base) {
                         for a in args {
                             check_expr(a, env, defs)?;
                         }
                         return Ok(Type::State(state_name.clone()));
                     }
 
-                    // 関数呼び出し
-                    if let Some(fdef) = defs.functions.get(other) {
+                    // 関数呼び出ぁE
+                    if let Some(fdef) = defs.functions.get(base) {
                         if args.len() != fdef.params.len() {
                             return Err(format!(
                                 "Type error: function {} expects {} argument(s), got {}",
-                                other,
+                                base,
                                 fdef.params.len(),
                                 args.len()
                             ));
@@ -1760,7 +1959,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             if !type_eq(&at, &expected) {
                                 return Err(format!(
                                     "Type error: argument '{}' of {} expects {:?}, got {:?}",
-                                    pname, other, expected, at
+                                    pname, base, expected, at
                                 ));
                             }
                         }
@@ -1841,7 +2040,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Unknown)
                 }
-                // String メソッド（型付き）
+                // String メソチE���E�型付き�E�E
                 Type::String => match method.as_str() {
                     "len" | "byte_len" => {
                         if !args.is_empty() {
@@ -1884,7 +2083,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
-                // List メソッド（型付き）
+                // List メソチE���E�型付き�E�E
                 Type::List(elem) => match method.as_str() {
                     "len" => {
                         if !args.is_empty() {
@@ -1943,7 +2142,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
-                // StringBuilder / Array / その他型モデル外: 緩和
+                // StringBuilder / Array / そ�E他型モチE��夁E 緩咁E
                 Type::Unknown => Ok(Type::Unknown),
                 other => Err(format!(
                     "Type error: no method '{}' on type {:?}",
@@ -1954,7 +2153,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     }
 }
 
-// 文を検査。expected_return は直近の関数の戻り型（指定なしは None）
+// 斁E��検査。expected_return は直近�E関数の戻り型�E�指定なし�E None�E�E
 fn check_stmt(
     stmt: &Stmt,
     env: &mut TypeEnv,
@@ -2014,7 +2213,7 @@ fn check_stmt(
 
         Stmt::For { var, iterable, body } => {
             let iter_ty = check_expr(iterable, env, defs)?;
-            // Iterable の要素型をループ変数の型として環境に注入
+            // Iterable の要素型をループ変数の型として環墁E��注入
             let elem_ty = match &iter_ty {
                 Type::List(elem) => (&**elem).clone(),
                 Type::Array(elem) => (&**elem).clone(),
@@ -2041,7 +2240,7 @@ fn check_stmt(
         Stmt::Match { expr, arms } => {
             let m_ty = check_expr(expr, env, defs)?;
 
-            // 網羅性検査（State 型の場合のみ）
+            // 網羁E��検査�E�Etate 型�E場合�Eみ�E�E
             if let Type::State(state_name) = &m_ty {
                 let variants = defs
                     .states
@@ -2060,7 +2259,7 @@ fn check_stmt(
                         }
                         covered.push(pname.clone());
 
-                        // 束縛変数を環境に追加（variant のペイロード型は未保持のため Unknown）
+                        // 束縛変数を環墁E��追加�E�Eariant のペイロード型は未保持のため Unknown�E�E
                         let mut arm_env = env.clone();
                         for b in bindings {
                             if b != "Ignore" {
@@ -2080,7 +2279,7 @@ fn check_stmt(
                     }
                 }
             } else if let Type::Option(_) = &m_ty {
-                // Option は Some / None の両方を網羅必須
+                // Option は Some / None の両方を網羁E��E��E
                 let variants = vec!["Some".to_string(), "None".to_string()];
                 let mut covered: Vec<String> = Vec::new();
                 for (pattern, body) in arms {
@@ -2111,7 +2310,7 @@ fn check_stmt(
                     }
                 }
             } else {
-                // State / Option 型以外は各腕のボディのみ検査（束縛なし）
+                // State / Option 型以外�E吁E�Eのボディのみ検査�E�束縛なし！E
                 for (_, body) in arms {
                     check_stmts(body, env, defs, expected_return)?;
                 }
@@ -2126,7 +2325,7 @@ fn check_stmt(
 
         Stmt::Assign { name, value } => {
             let v_ty = check_expr(value, env, defs)?;
-            // 既存変数への代入（未宣言ならエラー）
+            // 既存変数への代入�E�未宣言ならエラー�E�E
             match env.get(name) {
                 Some(existing) => {
                     if !type_eq(existing, &v_ty) {
@@ -2144,7 +2343,7 @@ fn check_stmt(
             Ok(())
         }
 
-        // 定義系は collect_defs で登録済み。ここでは本文を検査する。
+        // 定義系は collect_defs で登録済み。ここでは本斁E��検査する、E
         Stmt::Fn { .. } => Ok(()),
         Stmt::Struct { .. } => Ok(()),
         Stmt::State { .. } => Ok(()),
@@ -2164,7 +2363,7 @@ fn check_stmts(
     Ok(())
 }
 
-// 関数本文を検査（params を環境に注入）
+// 関数本斁E��検査�E�Earams を環墁E��注入�E�E
 fn check_function(
     params: &[(String, String)],
     return_type: &Option<String>,
@@ -2179,23 +2378,42 @@ fn check_function(
     check_stmts(body, &mut env, defs, rt.as_ref())
 }
 
-// プログラム全体の型検査
+// プログラム全体�E型検査
 fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
     for stmt in stmts {
         match stmt {
-            Stmt::Fn { name, params, return_type, body } => {
+            Stmt::Fn {
+                name,
+                type_params,
+                params,
+                return_type,
+                body,
+            } => {
+                let _ = type_params;
                 check_function(params, return_type, body, defs)
                     .map_err(|e| format!("In function '{}': {}", name, e))?;
             }
-            Stmt::Struct { name, fields, methods } => {
-                // メソッド検査: フィールドを環境に注入
+            Stmt::Struct {
+                name,
+                type_params,
+                fields,
+                methods,
+            } => {
+                // メソチE��検査: フィールドを環墁E��注入
                 let mut env = TypeEnv::new();
                 for (fname, ftype) in fields {
                     env.insert(fname.clone(), type_from_str(ftype, defs));
                 }
                 for m in methods {
-                    if let Stmt::Fn { name: mname, params, return_type, body } = m {
-                        // フィールド環境 + 引数を注入
+                    if let Stmt::Fn {
+                        name: mname,
+                        type_params: _,
+                        params,
+                        return_type,
+                        body,
+                    } = m
+                    {
+                        // フィールド環墁E+ 引数を注入
                         let mut menv = env.clone();
                         for (pname, ptype) in params {
                             menv.insert(pname.clone(), type_from_str(ptype, defs));
@@ -2206,7 +2424,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                     }
                 }
             }
-            // トップレベルの実行文（main が無いプログラム用）も検査
+            // トップレベルの実行文�E�Eain が無ぁE�Eログラム用�E�も検査
             Stmt::Let { .. }
             | Stmt::If { .. }
             | Stmt::Match { .. }
@@ -2222,7 +2440,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
     Ok(())
 }
 
-// String のメソッド評価（.len / .byte_len / .chars / .bytes / .slice）
+// String のメソチE��評価�E�Elen / .byte_len / .chars / .bytes / .slice�E�E
 fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "len" => Ok(Value::Int(s.chars().count() as i64)),
@@ -2247,7 +2465,7 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
                 Value::Int(n) => *n,
                 _ => return Err("slice() end must be int".to_string()),
             };
-            // 文字単位のインデックスでスライス
+            // 斁E��単位�EインチE��クスでスライス
             let chars: Vec<char> = s.chars().collect();
             let len = chars.len() as i64;
             let s_idx = if start < 0 { len + start } else { start }.max(0) as usize;
@@ -2263,7 +2481,7 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
     }
 }
 
-// List（Array 値）のメソッド評価（.add / .len / .get / .set）
+// List�E�Erray 値�E��EメソチE��評価�E�Eadd / .len / .get / .set�E�E
 fn eval_list_method(arr: &[Value], method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "add" => {
@@ -2418,8 +2636,8 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     }
                     Ok(Value::StringBuilder(String::new()))
                 }
-                // 明示型変換 API（暗黙変換禁止）
-                // bool 変換は禁止（数値 -> bool 不可）
+                // 明示型変換 API�E�暗黙変換禁止�E�E
+                // bool 変換は禁止�E�数値 -> bool 不可�E�E
                 "int" => {
                     if args.len() != 1 {
                         return Err("int() takes exactly 1 argument".to_string());
@@ -2474,8 +2692,13 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             Ok(Value::Option(None))
         }
         other => {
-                    // Constructor判定: 1. Struct → 2. State Variant → 3. エラー
-                    if let Some(struct_def) = defs.structs.get(other) {
+                    // Constructor判宁E 1. Struct ↁE2. State Variant ↁE3. Function ↁE4. エラー
+                    // ジェネリチE�� Base(Arg) も�Eース名で照吁E
+                    let base = match other.find('(') {
+                        Some(i) => &other[..i],
+                        None => other,
+                    };
+                    if let Some(struct_def) = defs.structs.get(base) {
                         let field_defs = &struct_def.fields;
                         let mut values = Vec::new();
                         for a in args {
@@ -2484,7 +2707,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         if values.len() != field_defs.len() {
                             return Err(format!(
                                 "{} expects {} field(s), got {}",
-                                other,
+                                base,
                                 field_defs.len(),
                                 values.len()
                             ));
@@ -2495,24 +2718,24 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                             .zip(values.into_iter())
                             .collect();
                         Ok(Value::Struct {
-                            name: other.to_string(),
+                            name: base.to_string(),
                             fields,
                         })
-                    } else if defs.state_variants.contains_key(other) {
+                    } else if defs.state_variants.contains_key(base) {
                         let mut values = Vec::new();
                         for a in args {
                             values.push(eval_expr(a, env, defs)?);
                         }
                         Ok(Value::State {
-                            name: other.to_string(),
+                            name: base.to_string(),
                             values,
                         })
-                    } else if defs.functions.contains_key(other) {
+                    } else if defs.functions.contains_key(base) {
                         let mut arg_vals = Vec::new();
                         for a in args {
                             arg_vals.push(eval_expr(a, env, defs)?);
                         }
-                        call_function(other, arg_vals, defs)
+                        call_function(base, arg_vals, defs)
                     } else {
                         Err(format!("Unknown function: {}", func))
                     }
@@ -2520,13 +2743,13 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
         }
         Expr::MethodCall { object, method, args } => {
-            // 引数を先に評価
+            // 引数を�Eに評価
             let mut arg_vals = Vec::new();
             for a in args {
                 arg_vals.push(eval_expr(a, env, defs)?);
             }
 
-            // 変数を対象にした呼び出しは書き換えを反映できる
+            // 変数を対象にした呼び出し�E書き換えを反映できる
             if let Expr::Ident(var) = object.as_ref() {
                 let current = env
                     .get(var)
@@ -2548,7 +2771,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     },
                     Value::Array(arr) => {
                         let result = eval_list_method(&arr, method, &arg_vals)?;
-                        // add/set は値を更新、それ以外は一時値を返す
+                        // add/set は値を更新、それ以外�E一時値を返す
                         if method == "add" || method == "set" {
                             env.insert(var.clone(), result.clone());
                         }
@@ -2564,7 +2787,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     )),
                 }
             } else {
-                // 一時値に対する読み取り専用メソッド
+                // 一時値に対する読み取り専用メソチE��
                 let obj = eval_expr(object, env, defs)?;
                 match obj {
                     Value::StringBuilder(s) => match method.as_str() {
@@ -2614,7 +2837,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 (Value::Int(a), Value::Int(b)) => {
                     let mut values = Vec::new();
                     let mut i = *a;
-                    // 終端を含まない（A方式）
+                    // 終端を含まなぁE��E方式！E
                     while i < *b {
                         values.push(Value::Int(i));
                         i += 1;
@@ -2686,13 +2909,13 @@ fn call_method(
         ));
     }
 
-    // 新しいローカル環境: フィールドを暗黙注入（self/this なし）
+    // 新しいローカル環墁E フィールドを暗黙注入�E�Eelf/this なし！E
     let mut local: HashMap<String, Value> = HashMap::new();
     for (fname, fval) in fields {
         local.insert(fname.clone(), fval.clone());
     }
 
-    // 引数束縛（フィールドと同名なら引数が優先）
+    // 引数束縛（フィールドと同名なら引数が優先！E
     for ((param_name, _param_type), val) in func.params.iter().zip(args.into_iter()) {
         local.insert(param_name.clone(), val);
     }
@@ -2812,7 +3035,7 @@ fn execute_stmt(
             Ok(ExecResult::Continue)
         }
 
-        // 関数定義は collect_defs で登録済み。実行時は何もしない。
+        // 関数定義は collect_defs で登録済み。実行時は何もしなぁE��E
         Stmt::Fn { .. } => Ok(ExecResult::Continue),
 
         Stmt::Match { expr, arms } => {
@@ -2871,7 +3094,7 @@ fn execute_stmt(
                                 match pattern {
                                     Pattern::Variant { name: pname, bindings } => {
                                         if pname == "None" {
-                                            // None は束縛なし
+                                            // None は束縛なぁE
                                             let _ = bindings;
                                             return execute_stmts(body, env, defs);
                                         }
@@ -2890,7 +3113,7 @@ fn execute_stmt(
             }
         }
 
-        // state 宣言は型定義。実行時は何もしない（意味付けは次段階）
+        // state 宣言は型定義。実行時は何もしなぁE��意味付けは次段階！E
         Stmt::State { .. } => Ok(ExecResult::Continue),
 
         _ => Ok(ExecResult::Continue),

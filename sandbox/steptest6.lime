@@ -1,0 +1,23 @@
+struct Point(T):
+    T: x
+    T: y
+
+state Result(T):
+    Ok(T)
+    Err(str)
+
+fn main():
+    let p = Point(int)(1, 2)
+    print(p.x)
+    print(p.y)
+
+    let p2 = Point(str)("a", "b")
+    print(p2.x)
+    print(p2.y)
+
+    let r = Ok(int)(42)
+    match r:
+        Ok(v):
+            print(v)
+        Err(msg):
+            print(msg)
