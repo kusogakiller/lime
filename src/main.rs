@@ -75,7 +75,7 @@ fn main() {
 enum Token {
     // Keywords
     Fn, Struct, Interface, State, Let, Mut, If, Else, Match, Return,
-    Async, Await, Unsafe, True, False, Where,
+    Async, Await, Unsafe, True, False, Where, For, While,
     Int, Float, Str, Bool, Option,
 
     // Operators
@@ -197,11 +197,17 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
         if ch.is_ascii_digit() {
             let start = i;
             let mut is_float = false;
-            while i < n && (chars[i].is_ascii_digit() || chars[i] == '.') {
-                if chars[i] == '.' {
-                    is_float = true;
-                }
+            while i < n && chars[i].is_ascii_digit() {
                 i += 1;
+            }
+            // 小数点: '.' の直後が数字の場合のみ浮動小数とする
+            // （'..' は Range 演算子なので消費しない）
+            if i < n && chars[i] == '.' && i + 1 < n && chars[i + 1].is_ascii_digit() {
+                is_float = true;
+                i += 1; // '.'
+                while i < n && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
             }
             let num: String = chars[start..i].iter().collect();
             if is_float {
@@ -250,6 +256,9 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
                 "str" => Token::Str,
                 "bool" => Token::Bool,
                 "Option" => Token::Option,
+
+                "for" => Token::For,
+                "while" => Token::While,
 
                 _ => Token::Ident(ident),
             };
@@ -466,6 +475,10 @@ enum Expr {
         field: String,
     },
     Array(Vec<Expr>),
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -502,6 +515,15 @@ enum Stmt {
         then_branch: Vec<Stmt>,
         else_branch: Option<Vec<Stmt>>,
     },
+    For {
+        var: String,
+        iterable: Expr,
+        body: Vec<Stmt>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
     Match {
         expr: Expr,
         arms: Vec<(Pattern, Vec<Stmt>)>,
@@ -512,6 +534,10 @@ enum Stmt {
     },
     Return(Option<Expr>),
     Expr(Expr),
+    Assign {
+        name: String,
+        value: Expr,
+    },
 }
 
 struct Parser {
@@ -574,7 +600,21 @@ impl Parser {
             Token::If => self.parse_if(),
             Token::Match => self.parse_match(),
             Token::Return => self.parse_return(),
+            Token::For => self.parse_for(),
+            Token::While => self.parse_while(),
             _ => {
+                // 代入文: Ident '=' expr
+                if let Token::Ident(name) = self.current().clone() {
+                    if self.peek() == &Token::Assign {
+                        self.advance(); // Ident
+                        self.advance(); // '='
+                        let value = self.parse_expr()?;
+                        if self.current() == &Token::Semicolon {
+                            self.advance();
+                        }
+                        return Ok(Stmt::Assign { name, value });
+                    }
+                }
                 let expr = self.parse_expr()?;
                 if self.current() == &Token::Semicolon {
                     self.advance();
@@ -916,8 +956,43 @@ impl Parser {
         Ok(Stmt::Return(expr))
     }
 
+    fn parse_for(&mut self) -> Result<Stmt, String> {
+        self.expect(Token::For)?;
+
+        let var = match self.current() {
+            Token::Ident(n) => n.clone(),
+            _ => return Err(format!("Expected loop variable, got {:?}", self.current())),
+        };
+        self.advance();
+
+        self.expect(Token::Ident("in".to_string())).map_err(|_| {
+            "Expected 'in' in for loop".to_string()
+        })?;
+
+        let iterable = self.parse_expr()?;
+        self.expect(Token::Colon)?;
+
+        let body = self.parse_block()?;
+
+        Ok(Stmt::For { var, iterable, body })
+    }
+
+    fn parse_while(&mut self) -> Result<Stmt, String> {
+        self.expect(Token::While)?;
+
+        // 条件式は括弧で囲む（仕様）
+        self.expect(Token::LParen)?;
+        let cond = self.parse_expr()?;
+        self.expect(Token::RParen)?;
+
+        self.expect(Token::Colon)?;
+
+        let body = self.parse_block()?;
+
+        Ok(Stmt::While { cond, body })
+    }
+
     fn parse_match(&mut self) -> Result<Stmt, String> {
-        self.expect(Token::Match)?;
 
         let expr = self.parse_expr()?;
         self.expect(Token::Colon)?;
@@ -1119,6 +1194,14 @@ impl Parser {
                     } else {
                         break;
                     }
+                }
+                Token::DoubleDot => {
+                    self.advance();
+                    let end = self.parse_expr()?;
+                    expr = Expr::Range {
+                        start: Box::new(expr),
+                        end: Box::new(end),
+                    };
                 }
                 _ => break,
             }
@@ -1431,6 +1514,19 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             .get(name)
             .cloned()
             .ok_or_else(|| format!("Type error: undefined variable '{}'", name)),
+
+        Expr::Range { start, end } => {
+            let st = check_expr(start, env, defs)?;
+            let et = check_expr(end, env, defs)?;
+            if st != Type::Int && st != Type::Unknown {
+                return Err(format!("Type error: range start must be int (got {:?})", st));
+            }
+            if et != Type::Int && et != Type::Unknown {
+                return Err(format!("Type error: range end must be int (got {:?})", et));
+            }
+            // Range は int の List として扱う
+            Ok(Type::List(Box::new(Type::Int)))
+        }
 
         Expr::Array(elements) => {
             let mut elem_ty = Type::Unknown;
@@ -1850,6 +1946,32 @@ fn check_stmt(
             Ok(())
         }
 
+        Stmt::For { var, iterable, body } => {
+            let iter_ty = check_expr(iterable, env, defs)?;
+            // Iterable の要素型をループ変数の型として環境に注入
+            let elem_ty = match &iter_ty {
+                Type::List(elem) => (&**elem).clone(),
+                Type::Array(elem) => (&**elem).clone(),
+                _ => Type::Unknown,
+            };
+            let mut loop_env = env.clone();
+            loop_env.insert(var.clone(), elem_ty);
+            check_stmts(body, &mut loop_env, defs, expected_return)?;
+            Ok(())
+        }
+
+        Stmt::While { cond, body } => {
+            let c_ty = check_expr(cond, env, defs)?;
+            if c_ty != Type::Bool && c_ty != Type::Unknown {
+                return Err(format!(
+                    "Type error: while condition must be bool (got {:?})",
+                    c_ty
+                ));
+            }
+            check_stmts(body, env, defs, expected_return)?;
+            Ok(())
+        }
+
         Stmt::Match { expr, arms } => {
             let m_ty = check_expr(expr, env, defs)?;
 
@@ -1902,6 +2024,26 @@ fn check_stmt(
 
         Stmt::Expr(e) => {
             check_expr(e, env, defs)?;
+            Ok(())
+        }
+
+        Stmt::Assign { name, value } => {
+            let v_ty = check_expr(value, env, defs)?;
+            // 既存変数への代入（未宣言ならエラー）
+            match env.get(name) {
+                Some(existing) => {
+                    if !type_eq(existing, &v_ty) {
+                        return Err(format!(
+                            "Type error: assign to '{}' expects {:?}, got {:?}",
+                            name, existing, v_ty
+                        ));
+                    }
+                }
+                None => {
+                    return Err(format!("Type error: assignment to undeclared variable '{}'", name));
+                }
+            }
+            env.insert(name.clone(), v_ty);
             Ok(())
         }
 
@@ -1972,7 +2114,8 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
             | Stmt::If { .. }
             | Stmt::Match { .. }
             | Stmt::Return(_)
-            | Stmt::Expr(_) => {
+            | Stmt::Expr(_)
+            | Stmt::Assign { .. } => {
                 let mut env = TypeEnv::new();
                 check_stmt(stmt, &mut env, defs, None)?;
             }
@@ -2353,6 +2496,23 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
             Ok(Value::Array(values))
         }
+        Expr::Range { start, end } => {
+            let s = eval_expr(start, env, defs)?;
+            let e = eval_expr(end, env, defs)?;
+            match (&s, &e) {
+                (Value::Int(a), Value::Int(b)) => {
+                    let mut values = Vec::new();
+                    let mut i = *a;
+                    // 終端を含まない（A方式）
+                    while i < *b {
+                        values.push(Value::Int(i));
+                        i += 1;
+                    }
+                    Ok(Value::Array(values))
+                }
+                _ => Err("Range requires integer bounds".to_string()),
+            }
+        }
     }
 }
 
@@ -2468,6 +2628,11 @@ fn execute_stmt(
             eval_expr(e, env, defs)?;
             Ok(ExecResult::Continue)
         }
+        Stmt::Assign { name, value } => {
+            let v = eval_expr(value, env, defs)?;
+            env.insert(name.clone(), v);
+            Ok(ExecResult::Continue)
+        }
         Stmt::Return(expr) => {
             let v = match expr {
                 Some(e) => eval_expr(e, env, defs)?,
@@ -2490,6 +2655,42 @@ fn execute_stmt(
             } else {
                 Ok(ExecResult::Continue)
             }
+        }
+
+        Stmt::For { var, iterable, body } => {
+            let val = eval_expr(iterable, env, defs)?;
+            // Iterable: List(T) / Range
+            let items: Vec<Value> = match val {
+                Value::Array(arr) => arr,
+                other => return Err(format!("Cannot iterate over {:?}", other)),
+            };
+            for item in items {
+                env.insert(var.clone(), item);
+                match execute_stmts(body, env, defs)? {
+                    ExecResult::Return(v) => return Ok(ExecResult::Return(v)),
+                    ExecResult::Continue => {}
+                }
+            }
+            Ok(ExecResult::Continue)
+        }
+
+        Stmt::While { cond, body } => {
+            loop {
+                let cond_val = eval_expr(cond, env, defs)?;
+                let is_true = match cond_val {
+                    Value::Bool(b) => b,
+                    Value::Int(n) => n != 0,
+                    _ => return Err("while condition must be boolean or integer".to_string()),
+                };
+                if !is_true {
+                    break;
+                }
+                match execute_stmts(body, env, defs)? {
+                    ExecResult::Return(v) => return Ok(ExecResult::Return(v)),
+                    ExecResult::Continue => {}
+                }
+            }
+            Ok(ExecResult::Continue)
         }
 
         // 関数定義は collect_defs で登録済み。実行時は何もしない。
