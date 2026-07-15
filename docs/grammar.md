@@ -61,6 +61,10 @@ field_decl     ::= type ":" ident
 interface_decl ::= "interface" ident ":" indent_block
                  （indent_block 内は fn_decl のシグネチャのみ）
 
+struct_decl    ::= "struct" ident type_params? ":" indent_block
+                 （明示的な implements は不要。interface の全メソッドを
+                   満たす署名で持っていれば自動的に実装とみなす＝暗黙実装）
+
 state_decl     ::= "state" ident type_params? ":" indent_block
                  （indent_block 内は variant 名 + 任意 payload）
 
@@ -176,14 +180,16 @@ un_op         ::= "-" | "not"
 | Interface | 対応演算子 |
 |-----------|-----------|
 | `Add` | `+` |
-| `Sub` | `-` |
-| `Mul` | `*` |
-| `Div` | `/` |
-| `Eq` | `==` `!=` |
-| `Ord` | `<` `>` `<=` `>=` |
+| `Equal` | `==` `!=` |
+| `Compare` | `<` `>` `<=` `>=` |
 
+`Sub` / `Mul` / `Div` は今後追加（順次拡張）。
 ユーザーは `fn add(...)` 等を実装するだけで演算子が使用可能。
 文字列は対象外（String API 経由）。
+
+命名は初心者にも役割が伝わること（Easy. Simple. Fast.）を優先：
+- `Eq` は略語で直感的でないため採用せず `Equal`。
+- `Ord` は "Order" の略で意味が伝わりにくいため採用せず `Compare`。
 
 ### 4.6 Generic / Constraint
 
@@ -192,7 +198,7 @@ type_params    ::= "(" ident ("," ident)* ")"
 constraint     ::= ident "where" ident ":" ident ("," ident ":" ident)*
 ```
 
-例: `fn max(List(T where T: Ord)): T:`
+例: `fn max(List(T where T: Compare)): T:`
 
 ---
 

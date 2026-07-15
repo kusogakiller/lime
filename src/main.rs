@@ -536,7 +536,6 @@ enum Stmt {
         type_params: Vec<String>,
         fields: Vec<(String, String)>,
         methods: Vec<Stmt>,
-        implements: Vec<String>,
     },
     If {
         cond: Expr,
@@ -967,26 +966,6 @@ impl Parser {
 
         let type_params = self.parse_type_params(false)?;
 
-        // 任意の interface 適合宣言: struct Dog implements Animal, Pet:
-        let mut implements = Vec::new();
-        if self.current() == &Token::Ident("implements".to_string()) {
-            self.advance();
-            loop {
-                match self.current() {
-                    Token::Ident(n) => {
-                        implements.push(n.clone());
-                        self.advance();
-                    }
-                    _ => return Err(format!("Expected interface name, got {:?}", self.current())),
-                }
-                if self.current() == &Token::Comma {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-        }
-
         self.expect(Token::Colon)?;
 
         // ブロチE��開姁E
@@ -1036,7 +1015,6 @@ impl Parser {
             type_params,
             fields,
             methods,
-            implements,
         })
     }
 
@@ -1672,8 +1650,6 @@ struct StructDef {
     fields: Vec<(String, String)>,
     // メソチE��吁E-> 定義
     methods: HashMap<String, FunctionDef>,
-    // 適合する interface 名一覧（暗黙実装の宣言）
-    implements: Vec<String>,
 }
 
 // interface 定義: メソッド署名の集合
@@ -1716,7 +1692,6 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                 type_params,
                 fields,
                 methods,
-                implements,
             } => {
                 let mut method_map = HashMap::new();
                 for m in methods {
@@ -1745,7 +1720,6 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                         type_params: type_params.clone(),
                         fields: fields.clone(),
                         methods: method_map,
-                        implements: implements.clone(),
                     },
                 );
             }
@@ -1920,60 +1894,69 @@ fn type_eq(a: &Type, b: &Type) -> bool {
     }
 }
 
-// struct が宣言した interface を実際に満たすか検証する（Phase 1: メソチE�署名一致）
+// interface メソッド署名と struct メソッド署名が一致するか
+// （名前は同一と仮定し、引数数・引数型・戻り型を照合）
+fn method_sig_matches(defs: &Defs, mdef: &FunctionDef, im: &InterfaceMethod) -> bool {
+    if mdef.params.len() != im.params.len() {
+        return false;
+    }
+    for ((_, mptype), (_, iptype)) in mdef.params.iter().zip(im.params.iter()) {
+        let expected = type_from_str(iptype, defs);
+        let actual = type_from_str(mptype, defs);
+        if !type_eq(&actual, &expected) {
+            return false;
+        }
+    }
+    let want_ret = match &im.return_type {
+        Some(rt) => type_from_str(rt, defs),
+        None => Type::Unit,
+    };
+    let got_ret = match &mdef.return_type {
+        Some(rt) => type_from_str(rt, defs),
+        None => Type::Unit,
+    };
+    type_eq(&got_ret, &want_ret)
+}
+
+// struct が interface を暗黙に実装しているか
+// （interface の全メソッドを、一致する署名で持っていること）
+fn struct_satisfies_interface(defs: &Defs, sname: &str, iface_name: &str) -> bool {
+    let sdef = match defs.structs.get(sname) {
+        Some(s) => s,
+        None => return false,
+    };
+    let iface = match defs.interfaces.get(iface_name) {
+        Some(i) => i,
+        None => return false,
+    };
+    for im in &iface.methods {
+        match sdef.methods.get(&im.name) {
+            Some(mdef) if method_sig_matches(defs, mdef, im) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+// 暗黙実装の検証: すべての struct について、メソッド名が interface と
+// 一致するが署名が異なる場合はエラー（親切な診断のため）
 fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
     for (sname, sdef) in &defs.structs {
-        for iface_name in &sdef.implements {
-            let iface = defs.interfaces.get(iface_name).ok_or_else(|| {
-                format!(
-                    "Struct '{}' implements unknown interface '{}'",
-                    sname, iface_name
-                )
-            })?;
-
+        for (iface_name, iface) in &defs.interfaces {
+            let satisfies = iface
+                .methods
+                .iter()
+                .all(|im| sdef.methods.contains_key(&im.name));
+            if !satisfies {
+                continue;
+            }
+            // 全メソッド名が揃っているなら、署名も一致している必要がある
             for im in &iface.methods {
-                let mdef = sdef.methods.get(&im.name).ok_or_else(|| {
-                    format!(
-                        "Struct '{}' does not implement method '{}' required by interface '{}'",
+                let mdef = sdef.methods.get(&im.name).unwrap();
+                if !method_sig_matches(defs, mdef, im) {
+                    return Err(format!(
+                        "Struct '{}' has method '{}' with a signature that does not match interface '{}'",
                         sname, im.name, iface_name
-                    )
-                })?;
-
-                // 引数数の一致
-                if mdef.params.len() != im.params.len() {
-                    return Err(format!(
-                        "Method '{}' on struct '{}' has {} param(s), but interface '{}' requires {}",
-                        im.name, sname, mdef.params.len(), iface_name, im.params.len()
-                    ));
-                }
-
-                // 引数型の一致（名前は無視、型のみ）
-                for (idx, ((_, mptype), (_, iptype))) in
-                    mdef.params.iter().zip(im.params.iter()).enumerate()
-                {
-                    let expected = type_from_str(iptype, defs);
-                    let actual = type_from_str(mptype, defs);
-                    if !type_eq(&actual, &expected) {
-                        return Err(format!(
-                            "Method '{}' param {} on struct '{}' has type {:?}, but interface '{}' requires {:?}",
-                            im.name, idx, sname, actual, iface_name, expected
-                        ));
-                    }
-                }
-
-                // 戻り型の一致
-                let want_ret = match &im.return_type {
-                    Some(rt) => type_from_str(rt, defs),
-                    None => Type::Unit,
-                };
-                let got_ret = match &mdef.return_type {
-                    Some(rt) => type_from_str(rt, defs),
-                    None => Type::Unit,
-                };
-                if !type_eq(&got_ret, &want_ret) {
-                    return Err(format!(
-                        "Method '{}' on struct '{}' returns {:?}, but interface '{}' requires {:?}",
-                        im.name, sname, got_ret, iface_name, want_ret
                     ));
                 }
             }
@@ -1982,12 +1965,9 @@ fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
     Ok(())
 }
 
-// struct が interface を実装（宣言）しているか
+// struct が interface を暗黙実装しているか
 fn struct_implements(defs: &Defs, struct_name: &str, iface_name: &str) -> bool {
-    match defs.structs.get(struct_name) {
-        Some(sdef) => sdef.implements.iter().any(|i| i == iface_name),
-        None => false,
-    }
+    struct_satisfies_interface(defs, struct_name, iface_name)
 }
 
 // 型の整合判定（interface への struct 代入・引渡しを許可）
@@ -2697,7 +2677,6 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                 type_params,
                 fields,
                 methods,
-                implements: _,
             } => {
                 // メソチE��検査: フィールドを環墁E��注入
                 let mut env = TypeEnv::new();
