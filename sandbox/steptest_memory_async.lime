@@ -1,0 +1,14 @@
+struct Config:
+    str: url
+
+lime fetch(Config: cfg): str:
+    let Config(heap): c = cfg
+    let data = await fetch(c.url)
+    return data
+
+lime fetch(str: u): str:
+    return u
+
+fn main():
+    let r = await fetch(Config("x"))
+    print(r)

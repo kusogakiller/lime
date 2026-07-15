@@ -66,6 +66,12 @@ fn main() {
                 return;
             }
 
+            // Memory Analysis (Escape Analysis) - Step 9
+            if let Err(e) = memory_analyze(&stmts, &defs) {
+                eprintln!("{}", e);
+                return;
+            }
+
             if defs.functions.contains_key("main") {
                 if let Err(e) = call_function("main", Vec::new(), &defs) {
                     eprintln!("Runtime error: {}", e);
@@ -562,6 +568,9 @@ enum Stmt {
         name: String,
         type_hint: Option<String>,
         value: Expr,
+        // 蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE: heap / stack 縺ｯ繧｢蜷阪→縺ｮ險ｱ蜿ｯ縺ｧ繧｢蜷阪→
+        // (let Type(heap): / let Type(stack): 縺ｯ繧｢蜷阪→)。None 縺ｯ Escape Analysis 縺ｯ蝣ｴ蜷隗｣譫・
+        place: Option<MemoryPlace>,
     },
     Fn {
         name: String,
@@ -617,6 +626,18 @@ enum Stmt {
     },
 }
 
+// ===== Memory Model (Step 9: Escape Analysis) =====
+// GC 縺ｽ繝ｼ、譛ｬ蜈･繝｡繧ｽ繝・ラ蜷代″險ｱ蜿ｯ縺ｧ繧｢蜷阪→縺ｮ萓��､ｸ縺ｮ縺ｿ縺ｪ縺・
+// 蝣ｴ蜷隗｣譫怜ｸ・螳溯｡梧凾縺ｯ繝ｼ繝牙ｒ繝・・ｽ・ｽ縺ｿ縺ｪ縺・
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MemoryPlace {
+    Stack,
+    Heap,
+}
+
+// Struct 縺ｮ蝠ｩ蜊ｫ: ｿｽE・ｽE螃ｻ蜈ｰ蝗ｲ繧縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE
+// heap / stack 縺ｯ繧｢蜷阪→縺ｮ險ｱ蜿ｯ縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・(let Type(heap): 縺ｯ繧｢蜷阪→)
+// 蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｿ縺ｪ縺・None 縺ｯ蜈ｷ雎｡蜷代″險ｱ蜿ｯ縺ｧ繧｢蜷阪→(Escape Analysis 縺ｯ蝣ｴ蜷隗｣譫・)
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -633,6 +654,10 @@ impl Parser {
 
     fn peek(&self) -> &Token {
         self.tokens.get(self.pos + 1).unwrap_or(&Token::Eof)
+    }
+
+    fn peek_at(&self, n: usize) -> &Token {
+        self.tokens.get(self.pos + n).unwrap_or(&Token::Eof)
     }
 
     fn advance(&mut self) {
@@ -713,18 +738,66 @@ impl Parser {
         };
 
         // Lime讒区枚: let [mut] <type>: <name> = <expr>
+        //          let [mut] <type>(heap): <name> = <expr>  (蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE)
+        //          let [mut] <type>(stack): <name> = <expr>
         // 蝙区耳隲匁凾縺ｯ蝙九ｒ逵∫払蜿ｯ: let [mut] <name> = <expr>
         let has_type = match self.current() {
             Token::Int | Token::Float | Token::Str | Token::Bool | Token::Option => true,
-            Token::Ident(_) => self.peek() == &Token::Colon,
+            Token::Ident(_) => {
+                // <type>: ... 縺ｯ繧｢蜷阪→ / <type>(heap): ... 縺ｯ繧｢蜷阪→
+                if self.peek() == &Token::Colon {
+                    true
+                } else if self.peek() == &Token::LParen
+                    && *self.peek_at(2) != Token::Ident("heap".to_string())
+                    && *self.peek_at(2) != Token::Ident("stack".to_string())
+                {
+                    // Generic: <type>(Inner): 縺ｯ繧｢蜷阪→縺ｮ縺ｿ縺ｪ縺・
+                    // 棘ｷ繝ｼ繝怜､画焚 heap/stack 縺ｯ繧｢蜷阪→縺ｮ縺ｿ縺ｪ縺・
+                    false
+                } else if self.peek() == &Token::LParen {
+                    // <type>(heap)/(stack) 縺ｯ繧｢蜷阪→縺ｮ縺ｿ縺ｪ縺・
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         };
 
+        let mut place: Option<MemoryPlace> = None;
+
         let type_hint = if has_type {
-            let mut ch = Vec::new();
-            let t = self.parse_type(&mut ch)?;
+            // 蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE Type(heap) / Type(stack) 縺ｯ繧｢蜷阪→縺ｮ險ｱ蜿ｯ縺ｧ繧｢蜷阪→
+            // parse_type 縺ｯ (...) 縺ｦ Generic 縺ｾ縺滂ｿｽE蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｿ縺ｪ縺・parse_type 縺ｯ蝠ｩ蜊ｫ縺ｮ蛟､蝙具ｿｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            let mut th: Option<String> = None;
+            if let (Token::Ident(base), Token::LParen, Token::Ident(kw), Token::RParen) = (
+                self.current().clone(),
+                self.peek().clone(),
+                self.peek_at(2).clone(),
+                self.peek_at(3).clone(),
+            ) {
+                if kw == "heap" {
+                    place = Some(MemoryPlace::Heap);
+                } else if kw == "stack" {
+                    place = Some(MemoryPlace::Stack);
+                }
+                if place.is_some() {
+                    // User(heap) / User(stack) 縺ｯ繧｢蜷阪→: 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・(User) 縺ｦ蝣ｴ蜷隗｣譫・
+                    self.advance(); // User (base type)
+                    self.advance(); // (
+                    self.advance(); // heap / stack
+                    self.advance(); // )
+                    th = Some(base);
+                }
+            }
+
+            if th.is_none() {
+                let mut ch = Vec::new();
+                th = Some(self.parse_type(&mut ch)?);
+            }
             self.expect(Token::Colon)?;
-            Some(t)
+            th
         } else {
             None
         };
@@ -742,7 +815,13 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Stmt::Let { mutable, name, type_hint, value })
+        Ok(Stmt::Let {
+            mutable,
+            name,
+            type_hint,
+            value,
+            place,
+        })
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
@@ -3508,6 +3587,344 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
             _ => {}
         }
     }
+    Ok(())
+}
+
+// ===== Memory Analysis (Step 9: Escape Analysis) =====
+// 蜈郁ｪｭ繝｡繧ｽ繝・ラ蜷代″險ｱ蜿ｯ縺ｧ繧｢蜷阪→縺ｮ蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// - 蝠ｩ蜊ｫ縺ｮ縺ｪ縺ｿ縺ｪ縺・: 螂ｲ縺ｮ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・(Stack)
+// - 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・: return 縺ｻ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+//                       (Heap)
+// - 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・: closure/callback 蜈ｷ雎｡ / 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+//                       縺ｻ Heap 繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・(Heap)
+// - 蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE heap/stack 縺ｯ繧｢蜷阪→縺ｮ險ｱ蜿ｯ縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// - stack 縺ｯ繧｢蜷阪→蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・繧｢繝ｩ繝ｼ・ｽE・ｽE繧定ｧ｣繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+
+// Expr 縺ｮ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蛔・・ｽ・ｽ諠・ｱ蛟､蝙具ｿｽE縺ｮ縺ｿ縺ｪ縺・(縺ｮ縺ｿ譛ｬ蜈･縺ｮ縺ｿ縺ｪ縺・)
+fn expr_vars(e: &Expr, out: &mut Vec<String>) {
+    match e {
+        Expr::Ident(n) => out.push(n.clone()),
+        Expr::BinOp { left, right, .. } => {
+            expr_vars(left, out);
+            expr_vars(right, out);
+        }
+        Expr::UnOp { operand, .. } => expr_vars(operand, out),
+        Expr::Call { args, .. } => {
+            for a in args {
+                expr_vars(a, out);
+            }
+        }
+        Expr::MethodCall { object, args, .. } => {
+            expr_vars(object, out);
+            for a in args {
+                expr_vars(a, out);
+            }
+        }
+        Expr::FieldAccess { object, .. } => expr_vars(object, out),
+        Expr::Array(items) => {
+            for it in items {
+                expr_vars(it, out);
+            }
+        }
+        Expr::Range { start, end } => {
+            expr_vars(start, out);
+            expr_vars(end, out);
+        }
+        Expr::Await(inner) => expr_vars(inner, out),
+        _ => {}
+    }
+}
+
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蛔・・ｽ・ｽ(escape position)
+// Lime 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE蜈･繝｡繧ｽ繝・ラ蜷代″蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・繝｡繧ｽ繝・ラ蜷代″蜈ｷ雎｡:
+//   - 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・(return) -> Heap
+//   - lime 繧｡繧ｽ繝・ラ蜷代″縺ｮ Future frame 縺ｯ Heap (await 縺ｮ荳｡譁ｹ蜈ｷ雎｡)
+//   - 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・ await 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・( async_escapes 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・繝｡繧ｽ繝・ラ蜷代″(callback/closures) 縺ｯ蜈･繝｡繧ｽ繝・ラ蜷代″蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・
+// 蟋ｩ蜉ｨ縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・險ｱ蜿ｯ縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・(繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+fn collect_escape_seeds(stmts: &[Stmt], seeds: &mut Vec<String>) {
+    for s in stmts {
+        match s {
+            // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・: return <expr> 縺ｮ蜈ｷ雎｡
+            Stmt::Return(Some(e)) => expr_vars(e, seeds),
+            // lime 繧｡繧ｽ繝・ラ蜷代″: await foo(x) 縺ｯ x 縺ｮ縺ｪ縺ｿ縺ｪ縺・ Future frame 縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            Stmt::Expr(Expr::Await(inner)) => {
+                if let Expr::Call { args, .. } = inner.as_ref() {
+                    for a in args {
+                        expr_vars(a, seeds);
+                    }
+                }
+            }
+            // 螳溯｡梧凾縺ｯ繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE遞ｪ縺ｮ縺ｿ縺ｪ縺・
+            Stmt::If { then_branch, else_branch, .. } => {
+                collect_escape_seeds(then_branch, seeds);
+                if let Some(els) = else_branch {
+                    collect_escape_seeds(els, seeds);
+                }
+            }
+            Stmt::While { body, .. } => collect_escape_seeds(body, seeds),
+            Stmt::For { body, .. } => collect_escape_seeds(body, seeds),
+            Stmt::Match { arms, .. } => {
+                for (_, body) in arms {
+                    collect_escape_seeds(body, seeds);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蛔・・ｽ・ｽ(assignment chain)
+//   let x = f(y) 縺ｯ x 縺ｮ蝣ｴ蜷隗｣譫怜ｸ・ y
+//   x = f(y) 縺ｯ x 縺ｮ蝣ｴ蜷隗｣譫怜ｸ・ y
+fn collect_sources(stmts: &[Stmt], sources: &mut HashMap<String, Vec<String>>) {
+    for s in stmts {
+        match s {
+            Stmt::Let { name, value, .. } => {
+                let mut vs = Vec::new();
+                expr_vars(value, &mut vs);
+                sources.insert(name.clone(), vs);
+            }
+            Stmt::Assign { name, value } => {
+                let mut vs = Vec::new();
+                expr_vars(value, &mut vs);
+                sources.insert(name.clone(), vs);
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                collect_sources(then_branch, sources);
+                if let Some(els) = else_branch {
+                    collect_sources(els, sources);
+                }
+            }
+            Stmt::While { body, .. } => collect_sources(body, sources),
+            Stmt::For { body, .. } => collect_sources(body, sources),
+            Stmt::Match { arms, .. } => {
+                for (_, body) in arms {
+                    collect_sources(body, sources);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蛔・縺ｮ縺ｿ縺ｪ縺・(DFS)
+fn escapes(v: &str, escaping: &mut Vec<String>, sources: &HashMap<String, Vec<String>>) {
+    if escaping.contains(&v.to_string()) {
+        return;
+    }
+    escaping.push(v.to_string());
+    if let Some(srcs) = sources.get(v) {
+        for s in srcs {
+            escapes(s, escaping, sources);
+        }
+    }
+}
+
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蛔・繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・
+// is_async: true 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+//   (await 縺ｯ險ｱ蜿ｯ縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・Heap frame 縺ｯ縺ｪ縺ｿ縺ｪ縺・)
+fn async_escapes(stmts: &[Stmt], is_async: bool) -> Vec<String> {
+    if !is_async {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    let mut after_await = false;
+    for s in stmts {
+        if stmt_has_await(s) {
+            after_await = true;
+            continue;
+        }
+        if after_await {
+            let mut vs = Vec::new();
+            stmt_vars(s, &mut vs);
+            for v in vs {
+                if !result.contains(&v) {
+                    result.push(v);
+                }
+            }
+        }
+    }
+    result
+}
+
+fn stmt_has_await(s: &Stmt) -> bool {
+    match s {
+        Stmt::Expr(Expr::Await(_)) => true,
+        Stmt::Let { value, .. } => expr_has_await(value),
+        Stmt::Return(Some(e)) => expr_has_await(e),
+        Stmt::If { then_branch, else_branch, .. } => {
+            then_branch.iter().any(stmt_has_await)
+                || else_branch.as_ref().map(|b| b.iter().any(stmt_has_await)).unwrap_or(false)
+        }
+        Stmt::While { body, .. } => body.iter().any(stmt_has_await),
+        Stmt::For { body, .. } => body.iter().any(stmt_has_await),
+        Stmt::Match { arms, .. } => arms.iter().any(|(_, b)| b.iter().any(stmt_has_await)),
+        _ => false,
+    }
+}
+
+fn expr_has_await(e: &Expr) -> bool {
+    match e {
+        Expr::Await(_) => true,
+        Expr::BinOp { left, right, .. } => expr_has_await(left) || expr_has_await(right),
+        Expr::UnOp { operand, .. } => expr_has_await(operand),
+        Expr::Call { args, .. } => args.iter().any(expr_has_await),
+        Expr::MethodCall { object, args, .. } => {
+            expr_has_await(object) || args.iter().any(expr_has_await)
+        }
+        Expr::Await(inner) => expr_has_await(inner),
+        _ => false,
+    }
+}
+
+fn stmt_vars(s: &Stmt, out: &mut Vec<String>) {
+    match s {
+        Stmt::Let { name, value, .. } => {
+            out.push(name.clone());
+            expr_vars(value, out);
+        }
+        Stmt::Assign { name, value } => {
+            out.push(name.clone());
+            expr_vars(value, out);
+        }
+        Stmt::Return(Some(e)) => expr_vars(e, out),
+        Stmt::Expr(e) => expr_vars(e, out),
+        Stmt::If { cond, then_branch, else_branch } => {
+            expr_vars(cond, out);
+            for b in then_branch {
+                stmt_vars(b, out);
+            }
+            if let Some(els) = else_branch {
+                for b in els {
+                    stmt_vars(b, out);
+                }
+            }
+        }
+        Stmt::While { cond, body } => {
+            expr_vars(cond, out);
+            for b in body {
+                stmt_vars(b, out);
+            }
+        }
+        Stmt::For { var, iterable, body } => {
+            out.push(var.clone());
+            expr_vars(iterable, out);
+            for b in body {
+                stmt_vars(b, out);
+            }
+        }
+        Stmt::Match { expr, arms } => {
+            expr_vars(expr, out);
+            for (_, body) in arms {
+                for b in body {
+                    stmt_vars(b, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蝣ｴ蜷隗｣譫怜ｸ・縺ｫ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・
+// report: 縺ｮ縺ｿ縺ｪ縺・("fn:name" -> (var, place)) 縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｧ繧｢蜷阪→
+fn analyze_block(
+    stmts: &[Stmt],
+    is_async: bool,
+    defs: &Defs,
+    report: &mut Vec<(String, MemoryPlace)>,
+) -> Result<(), String> {
+    let mut seeds = Vec::new();
+    collect_escape_seeds(stmts, &mut seeds);
+
+    let mut sources: HashMap<String, Vec<String>> = HashMap::new();
+    collect_sources(stmts, &mut sources);
+
+    let mut escaping: Vec<String> = Vec::new();
+    for s in &seeds {
+        escapes(s, &mut escaping, &sources);
+    }
+    // async: await 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・
+    for v in async_escapes(stmts, is_async) {
+        if !escaping.contains(&v) {
+            escaping.push(v);
+        }
+    }
+
+    for s in stmts {
+        match s {
+            Stmt::Let {
+                name,
+                place,
+                ..
+            } => {
+                let decision = match place {
+                    Some(MemoryPlace::Heap) => MemoryPlace::Heap,
+                    Some(MemoryPlace::Stack) => {
+                        if escaping.contains(name) {
+                            return Err(format!(
+                                "Memory error: '{}' is explicitly placed on the stack but escapes (returned, passed to a call, or held across await)",
+                                name
+                            ));
+                        }
+                        MemoryPlace::Stack
+                    }
+                    None => {
+                        if escaping.contains(name) {
+                            MemoryPlace::Heap
+                        } else {
+                            MemoryPlace::Stack
+                        }
+                    }
+                };
+                report.push((name.clone(), decision));
+            }
+            // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            Stmt::Fn {
+                name: fname,
+                body,
+                is_async: fasync,
+                ..
+            } => {
+                analyze_block(body, *fasync, defs, report)?;
+                let _ = fname;
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                analyze_block(then_branch, is_async, defs, report)?;
+                if let Some(els) = else_branch {
+                    analyze_block(els, is_async, defs, report)?;
+                }
+            }
+            Stmt::While { body, .. } => analyze_block(body, is_async, defs, report)?,
+            Stmt::For { body, .. } => analyze_block(body, is_async, defs, report)?,
+            Stmt::Match { arms, .. } => {
+                for (_, body) in arms {
+                    analyze_block(body, is_async, defs, report)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
+fn memory_analyze(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
+    let mut report: Vec<(String, MemoryPlace)> = Vec::new();
+    // 蝗ｲ繧險ｱ蜿ｯ: 蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・蜻蜷代″螂ｲ縺ｮ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・(非 async)
+    //   Stmt::Fn 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・analyze_block 縺ｯ繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE
+    //   (Fn 縺ｮ body 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+    analyze_block(stmts, false, defs, &mut report)?;
+
+    println!("=== Memory ===");
+    for (name, place) in &report {
+        let p = match place {
+            MemoryPlace::Stack => "stack",
+            MemoryPlace::Heap => "heap",
+        };
+        println!("  {} -> {}", name, p);
+    }
+    println!();
     Ok(())
 }
 

@@ -318,11 +318,42 @@ await_expr    ::= "await" call_expr
 
 ---
 
-## 7. Memory 指定（決定済み）
+## 7. Memory 指定（実装済み: Step 9）
 
-- `User(heap)` / `User(stack)`
-- 明示なし: Escape 解析で自動判定
-- ユーザー明示時はコンパイラは尊重
+基本方針: GC なし。ユーザーに所有権・ライフタイムを書かせない。コンパイラ内部で
+自動 Memory 管理を行う。デフォルトでは Escape Analysis によって Stack / Heap を決定する。
+Memory 情報はコンパイル時に決定し、Runtime 検索はしない。
+
+配置規則:
+- Stack 配置: 関数内のみで使用 / return されない / callback へ渡されない / Heap 上の
+  データへ保存されない値。
+- Heap 配置: 関数外へ Escape する値 / 非同期処理で保持される値 / 長寿命データ。
+
+構文（明示指定）:
+- `let User(heap): user = User("Alice")`  → 必ず Heap 配置
+- `let User(stack): point = Point(1, 2)` → 必ず Stack 配置
+- 明示なし `let User: user = ...`          → Escape Analysis で自動判定
+
+Escape 判定（コンパイラ内部）:
+- 値が `return` される → Escape（Heap）
+- `lime` 関数内で `await` の引数に渡される / `await` 以降に使用される → Heap frame に保持
+- Lime には closure / callback / グローバル変数がないため、通常の関数呼び出しの実引数は
+  Escape とみなさない（コンパイラが賢く管理）
+
+制約（コンパイルエラー）:
+- `stack` 指定した値が Escape する場合（return / await 保持）は
+  `Memory error: '<name>' is explicitly placed on the stack but escapes ...` となる。
+
+Struct: 基本は値型。Non-Escape なら Stack、Escape 時のみ Heap。
+List: 本体(header)は通常 Stack 可能、内部 Buffer は Heap 管理（List(T) として扱う）。
+Option / Result: 内部値の Memory 性質に追従、特別扱いしない（既存 State + Generic を維持）。
+Generic: 型置換後に Memory 解析する。Generic 専用 Memory 規則は追加しない。
+Async: Future / Async frame は Heap 配置。lime 関数の状態保持領域は Runtime 管理。
+
+解析フロー:
+```
+AST → TypeChecker → Memory Analysis(Escape Analysis) → (LLVM)
+```
 
 ---
 
@@ -349,12 +380,9 @@ await_expr    ::= "await" call_expr
 - Match 網羅性検査
 
 未実装（後続ステップ）:
-- Generic / Option / Interface 適合判定
-- Collections リテラル型
-- ループ型検査
-- Async / await 型
 - Pointer / unsafe 型
 - 明示変換 `int(x)` 等の組込み型定義
+- LLVM 統合（現在は Memory 解析結果をデバッグ出力 `=== Memory ===` として報告）
 
 ---
 
@@ -368,8 +396,8 @@ await_expr    ::= "await" call_expr
 5. Option（T? / Match）
 6. Generic（Result(T) / Box(T) / Constraint）
 7. Interface（暗黙実装 + Operator Interface）
-8. Async（lime 関数 + await）
-9. Memory 解析（Escape / Lifetime / Stack-Heap）
-10. LLVM 統合
+ 8. Async（lime 関数 + await）[実装済み]
+ 9. Memory 解析（Escape / Lifetime / Stack-Heap）[実装済み]
+ 10. LLVM 統合
 
 禁止事項は全段階で維持。
