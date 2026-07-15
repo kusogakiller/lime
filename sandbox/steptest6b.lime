@@ -1,0 +1,50 @@
+# Step 6 Phase 2: Generic Constraint (where T: Interface).
+# fn max(List(T where T: Compare): xs): T:  selects the largest element.
+# T is constrained to Compare, so > works on elements, and the concrete
+# type must implement Compare at the call site.
+#
+# Positive case: Vec2 implements Compare  ->  max([Vec2(1,2), Vec2(3,4), Vec2(2,9)]) = Vec2(2, 9).
+# Compare is defined by y (primary), then x, so Vec2(2,9) wins.
+# Negative case: int does NOT implement the user Compare interface -> compile error.
+
+interface Compare(T):
+    fn compare(T): int:
+
+struct Vec2:
+    int: x
+    int: y
+    fn compare(Vec2: other): int:
+        if y < other.y:
+            0 - 1
+        else:
+            if y > other.y:
+                1
+            else:
+                if x < other.x:
+                    0 - 1
+                else:
+                    if x > other.x:
+                        1
+                    else:
+                        0
+
+fn max(List(T where T: Compare): xs): T:
+    let best = xs.get(0)
+    let i = 1
+    while i < xs.len():
+        let cur = xs.get(i)
+        if cur > best:
+            best = cur
+        i = i + 1
+    best
+
+fn xof(Vec2: p): int:
+    p.x
+
+fn yof(Vec2: p): int:
+    p.y
+
+let v = [Vec2(1, 2), Vec2(3, 4), Vec2(2, 9)]
+let m = max(v)
+print(xof(m))
+print(yof(m))

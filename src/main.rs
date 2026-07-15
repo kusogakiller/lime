@@ -46,6 +46,9 @@ fn main() {
             let mut defs = Defs::new();
             collect_defs(&stmts, &mut defs);
 
+            // Defs 縺ｮ蝙九・繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・ (call_function 縺ｯ defs 縺ｮ蜻ｼ縺ｳ蜃ｺ縺ｮ縺ｧ繧｢蜷阪→) 縺ｮ resolved_operator 縺ｦ縺ｪ縺ｿ縺ｪ縺・
+            resolve_operators_defs(&mut defs);
+
             // Interface 驕ｩ蜷域､懆ｨｼ・・truct 縺悟ｮ｣險縺励◆ interface 繧呈ｺ縺溘☆縺具ｼ・
             if let Err(e) = check_interface_conformance(&defs) {
                 eprintln!("Type error: {}", e);
@@ -53,7 +56,9 @@ fn main() {
             }
 
             // 貍皮ｮ怜ｭ舌ｒ髱咏噪縺ｫ隗｣豎ｺ縺・AST 縺ｫ譖ｸ縺崎ｾｼ繧・亥ｮ溯｡梧凾縺ｯ縺薙・諠・ｱ縺ｮ縺ｿ菴ｿ逕ｨ・・
-            resolve_operators_stmts(&mut stmts, &defs);
+            let empty_cons: HashMap<String, Vec<String>> = HashMap::new();
+            let empty_env: HashMap<String, Type> = HashMap::new();
+            resolve_operators_stmts(&mut stmts, &defs, &empty_cons, &empty_env);
 
             // Type Checker・ｽE・ｽ螳溯｡悟燕縺ｫ蝙狗噪縺ｫ豁｣縺励＞縺区､懈渊・ｽE・ｽE
             if let Err(e) = type_check(&stmts, &defs) {
@@ -557,6 +562,7 @@ enum Stmt {
     Fn {
         name: String,
         type_params: Vec<String>,
+        constraints: Vec<(String, String)>,
         params: Vec<(String, String)>,
         return_type: Option<String>,
         body: Vec<Stmt>,
@@ -564,6 +570,7 @@ enum Stmt {
     Struct {
         name: String,
         type_params: Vec<String>,
+        constraints: Vec<(String, String)>,
         fields: Vec<(String, String)>,
         methods: Vec<Stmt>,
     },
@@ -593,6 +600,7 @@ enum Stmt {
     Interface {
         name: String,
         type_params: Vec<String>,
+        constraints: Vec<(String, String)>,
         methods: Vec<InterfaceMethod>,
     },
     Return(Option<Expr>),
@@ -707,7 +715,8 @@ impl Parser {
         };
 
         let type_hint = if has_type {
-            let t = self.parse_type()?;
+            let mut ch = Vec::new();
+            let t = self.parse_type(&mut ch)?;
             self.expect(Token::Colon)?;
             Some(t)
         } else {
@@ -777,7 +786,8 @@ impl Parser {
         self.advance();
 
         // 繧ｸ繧ｧ繝阪Μ繝・け髢｢謨ｰ: fn name(T)(args): 縺ｮ (T) 驛ｨ蛻・
-        let type_params = self.parse_type_params(true)?;
+        let mut constraints = Vec::new();
+        let mut type_params = self.parse_type_params(true, &mut constraints)?;
 
         self.expect(Token::LParen)?;
 
@@ -785,7 +795,7 @@ impl Parser {
 
         while self.current() != &Token::RParen {
             // Lime讒区枚: <type>: <name>  ・亥錐蜑阪・逵∫払蜿ｯ: 蝙九・縺ｿ縺ｮ蝣ｴ蜷医・ "_" 縺ｨ縺吶ｋ・・
-            let param_type = self.parse_type()?;
+            let param_type = self.parse_type(&mut constraints)?;
 
             if self.current() == &Token::Colon {
                 self.advance();
@@ -817,7 +827,7 @@ impl Parser {
             Token::Float |
             Token::Str |
             Token::Bool => {
-                Some(self.parse_type()?)
+                Some(self.parse_type(&mut constraints)?)
             }
 
             Token::Ident(name) => {
@@ -836,21 +846,44 @@ impl Parser {
 
         let body = self.parse_block()?;
 
+        // constraint 縺ｮ蝙区枚蟄怜・縺ｪ type_params 縺ｮ蝣ｴ蜷隗｣譫・
+        for (tv, _) in &constraints {
+            if !type_params.contains(tv) {
+                type_params.push(tv.clone());
+            }
+        }
+        // return_type 縺ｮ蝙区枚蟄怜・縺ｪ縺ｯ type_params 縺ｮ蝣ｴ蜷隗｣譫・
+        if let Some(rt) = &return_type {
+            let base = rt.split('(').next().unwrap_or(rt);
+            let base = if let Some(stripped) = base.strip_suffix('?') {
+                stripped
+            } else {
+                base
+            };
+            if base.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !matches!(base, "int" | "float" | "str" | "bool")
+                && !type_params.contains(&base.to_string())
+            {
+                type_params.push(base.to_string());
+            }
+        }
+
         Ok(Stmt::Fn {
             name,
             type_params,
+            constraints,
             params,
             return_type,
             body,
         })
     }
 
-    fn parse_type(&mut self) -> Result<String, String> {
+    fn parse_type(&mut self, constraints: &mut Vec<(String, String)>) -> Result<String, String> {
         // Option(T) 險俶ｳ・ Option 繧ｭ繝ｼ繝ｯ繝ｼ繝会ｿｽE逶ｴ蠕後′ ( 縺ｪ繧・Generic 蠑墓焚繧定ｧ｣譫・
         if let Token::Option = self.current() {
             self.advance();
             self.expect(Token::LParen)?;
-            let inner = self.parse_type()?;
+            let inner = self.parse_type(constraints)?;
             self.expect(Token::RParen)?;
             return Ok(format!("Option({})", inner));
         }
@@ -883,13 +916,61 @@ impl Parser {
             self.advance();
             return Ok(format!("Option({})", base));
         }
+        // Generic type args: Base(Inner, ...) 縺ｯ繝・・ｽ・ｽ List(T) / Option(T) 繧定ｿ斐＠縲∝ｽｮ縺ｮ縺ｿ縺ｪ縺・
+        if self.current() == &Token::LParen {
+            self.advance();
+            let mut inner = Vec::new();
+            if self.current() != &Token::RParen {
+                loop {
+                    let t = self.parse_type(constraints)?;
+                    inner.push(t);
+                    if self.current() == &Token::Comma {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.expect(Token::RParen)?;
+            return Ok(format!("{}({})", base, inner.join(", ")));
+        }
+        // Generic constraint: T where T: Iface (, T: Iface)*
+        if self.current() == &Token::Where {
+            let tv = base.clone();
+            self.advance();
+            loop {
+                let ctp = match self.current() {
+                    Token::Ident(n) => n.clone(),
+                    _ => return Err("Expected constrained type parameter".to_string()),
+                };
+                self.advance();
+                if ctp != tv {
+                    return Err(format!(
+                        "Type constraint '{}' must match the declared type parameter '{}'",
+                        ctp, tv
+                    ));
+                }
+                self.expect(Token::Colon)?;
+                let iface = match self.current() {
+                    Token::Ident(n) => n.clone(),
+                    _ => return Err("Expected interface name in constraint".to_string()),
+                };
+                self.advance();
+                constraints.push((tv.clone(), iface));
+                if self.current() == &Token::Comma {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
         Ok(base)
     }
 
     // 蜈郁ｪｭ縺ｿ: 迴ｾ蝨ｨ菴咲ｽｮ縺ｮ (...) 縺後悟梛蠑墓焚繝ｪ繧ｹ繝医阪→縺励※隗｣譫舌〒縺阪ｋ縺玖ｩｦ縺吶・
     // 謌仙粥縺吶ｌ縺ｰ Some([蝙区枚蟄怜・...]) 繧定ｿ斐＠縲∽ｽ咲ｽｮ縺ｯ ) 縺ｮ逶ｴ蠕後↓騾ｲ繧縲・
     // 螟ｱ謨・蛟､蠑墓焚縺ｪ縺ｩ)縺ｪ繧・None 繧定ｿ斐＠縲∽ｽ咲ｽｮ縺ｯ蜈・↓謌ｻ繧九・
-    fn try_parse_type_args(&mut self) -> Option<Vec<String>> {
+    fn try_parse_type_args(&mut self, constraints: &mut Vec<(String, String)>) -> Option<Vec<String>> {
         let save = self.pos;
         if self.current() != &Token::LParen {
             return None;
@@ -901,7 +982,7 @@ impl Parser {
             return Some(args);
         }
         loop {
-            match self.parse_type() {
+            match self.parse_type(constraints) {
                 Ok(t) => args.push(t),
                 Err(_) => {
                     self.pos = save;
@@ -927,7 +1008,11 @@ impl Parser {
     // require_paren_after = true 縺ｮ蝣ｴ蜷・髢｢謨ｰ)縲∵怙蛻晢ｿｽE (...) 縺ｮ逶ｴ蠕後′ ( 縺ｪ繧峨ず繧ｧ繝阪Μ繝・・ｽ・ｽ縲・
     //   縺昴≧縺ｧ縺ｪ縺代ｌ縺ｰ縺昴ｌ縺ｯ蠑墓焚繝ｪ繧ｹ繝医↑縺ｮ縺ｧ繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ辟｡縺励・
     // require_paren_after = false 縺ｮ蝣ｴ蜷・struct/state)縲・...) 縺後≠繧鯉ｿｽE蟶ｸ縺ｫ繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ縲・
-    fn parse_type_params(&mut self, require_paren_after: bool) -> Result<Vec<String>, String> {
+    fn parse_type_params(
+        &mut self,
+        require_paren_after: bool,
+        constraints: &mut Vec<(String, String)>,
+    ) -> Result<Vec<String>, String> {
         // 迴ｾ蝨ｨ縺・( 縺ｧ縲√◎縺ｮ蟇ｾ蠢懊☆繧・) 縺ｮ逶ｴ蠕後′ ( 縺ｪ繧峨ず繧ｧ繝阪Μ繝・・ｽ・ｽ縺ｨ縺ｿ縺ｪ縺・
         if self.current() == &Token::LParen {
             let mut depth = 0usize;
@@ -973,8 +1058,37 @@ impl Parser {
         while self.current() != &Token::RParen && self.current() != &Token::Eof {
             match self.current() {
                 Token::Ident(n) => {
-                    params.push(n.clone());
+                    let tv = n.clone();
                     self.advance();
+                    if self.current() == &Token::Where {
+                        self.advance();
+                        loop {
+                            let ctp = match self.current() {
+                                Token::Ident(c) => c.clone(),
+                                _ => return Err("Expected constrained type parameter".to_string()),
+                            };
+                            self.advance();
+                            if ctp != tv {
+                                return Err(format!(
+                                    "Type constraint '{}' must match the declared type parameter '{}'",
+                                    ctp, tv
+                                ));
+                            }
+                            self.expect(Token::Colon)?;
+                            let iface = match self.current() {
+                                Token::Ident(f) => f.clone(),
+                                _ => return Err("Expected interface name in constraint".to_string()),
+                            };
+                            self.advance();
+                            constraints.push((tv.clone(), iface));
+                            if self.current() == &Token::Comma {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    params.push(tv);
                 }
                 _ => return Err(format!("Expected type parameter, got {:?}", self.current())),
             }
@@ -995,7 +1109,8 @@ impl Parser {
         };
         self.advance();
 
-        let type_params = self.parse_type_params(false)?;
+        let mut constraints = Vec::new();
+        let type_params = self.parse_type_params(false, &mut constraints)?;
 
         self.expect(Token::Colon)?;
 
@@ -1024,7 +1139,7 @@ impl Parser {
             }
 
             // Lime讒区枚: <type>: <name>
-            let field_type = self.parse_type()?;
+            let field_type = self.parse_type(&mut constraints)?;
 
             self.expect(Token::Colon)?;
 
@@ -1044,6 +1159,7 @@ impl Parser {
         Ok(Stmt::Struct {
             name,
             type_params,
+            constraints,
             fields,
             methods,
         })
@@ -1059,7 +1175,8 @@ impl Parser {
         self.advance();
 
         // 繧ｸ繧ｧ繝阪Μ繝・け蝙句ｼ墓焚: interface Add(T):
-        let type_params = self.parse_type_params(false)?;
+        let mut constraints = Vec::new();
+        let type_params = self.parse_type_params(false, &mut constraints)?;
 
         self.expect(Token::Colon)?;
 
@@ -1091,7 +1208,7 @@ impl Parser {
                 self.expect(Token::LParen)?;
                 let mut params = Vec::new();
                 while self.current() != &Token::RParen && self.current() != &Token::Eof {
-                    let param_type = self.parse_type()?;
+                    let param_type = self.parse_type(&mut constraints)?;
                     // 蜷榊燕縺ｯ逵∫払蜿ｯ閭ｽ・亥梛縺ｮ縺ｿ縺ｮ鄂ｲ蜷阪ｒ險ｱ蜿ｯ・・
                     if self.current() == &Token::Colon {
                         self.advance();
@@ -1113,7 +1230,7 @@ impl Parser {
                 self.expect(Token::Colon)?;
                 let return_type = match self.current() {
                     Token::Int | Token::Float | Token::Str | Token::Bool => {
-                        Some(self.parse_type()?)
+                        Some(self.parse_type(&mut constraints)?)
                     }
                     Token::Ident(rn) => {
                         let t = rn.clone();
@@ -1146,6 +1263,7 @@ impl Parser {
         Ok(Stmt::Interface {
             name,
             type_params,
+            constraints,
             methods,
         })
     }
@@ -1160,7 +1278,7 @@ impl Parser {
         self.advance();
 
         // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蠑墓焚 state Result(T): 繧剃ｿ晄戟
-        let type_params = self.parse_type_params(false)?;
+        let type_params = self.parse_type_params(false, &mut Vec::new())?;
 
         self.expect(Token::Colon)?;
 
@@ -1277,10 +1395,8 @@ impl Parser {
     fn parse_while(&mut self) -> Result<Stmt, String> {
         self.expect(Token::While)?;
 
-        // 譚｡莉ｶ蠑擾ｿｽE諡ｬ蠑ｧ縺ｧ蝗ｲ繧・ｽE・ｽ莉墓ｧ假ｼ・
-        self.expect(Token::LParen)?;
+        // 譚｡莉ｶ蠑擾ｿｽE諡ｬ蠑ｧ縺ｧ蝗ｲ繧・ｽE・ｽ莉墓ｧ假ｼ・: while cond: (縺ｮ ( ) 縺ｦ縺ｪ縺・)
         let cond = self.parse_expr()?;
-        self.expect(Token::RParen)?;
 
         self.expect(Token::Colon)?;
 
@@ -1347,7 +1463,6 @@ impl Parser {
 
         self.expect(Token::Colon)?;
 
-        eprintln!("DEBUG parse_fn body of '{}' current={:?}", name, self.current());
         let body = self.parse_block()?;
 
             arms.push((Pattern::Variant { name, bindings }, body));
@@ -1481,7 +1596,7 @@ impl Parser {
                         // 蜈郁ｪｭ縺ｿ: (...) 縺悟梛蠑墓焚繝ｪ繧ｹ繝医↑繧・Point(int) 縺ｨ縺励※謇ｱ縺・
                         let save = self.pos;
                         if let Some(type_args) =
-                            self.try_parse_type_args()
+                            self.try_parse_type_args(&mut Vec::new())
                         {
                             let typed_name = format!("{}({})", func, type_args.join(", "));
                             // 逶ｴ蠕後↓ (values) 縺檎ｶ壹￠縺ｰ讒狗ｯ牙他縺ｳ蜃ｺ縺・
@@ -1673,6 +1788,8 @@ enum Value {
 #[derive(Clone)]
 struct FunctionDef {
     type_params: Vec<String>,
+    // Generic 蝙区枚蟄怜・ -> 蟷ｻ蜈･繝｡繧ｽ繝・ラ鄂ｲ蜷阪・: (type_param, iface)
+    constraints: Vec<(String, String)>,
     params: Vec<(String, String)>,
     return_type: Option<String>,
     body: Vec<Stmt>,
@@ -1683,6 +1800,8 @@ struct FunctionDef {
 struct StructDef {
     // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蝙九ヱ繝ｩ繝｡繝ｼ繧ｿ・ｽE・ｽ髱槭ず繧ｧ繝阪Μ繝・・ｽ・ｽ縺ｪ繧臥ｩｺ・ｽE・ｽE
     type_params: Vec<String>,
+    // Generic 蝙区枚蟄怜・ -> 蟷ｻ蜈･繝｡繧ｽ繝・ラ鄂ｲ蜷阪・: (type_param, iface)
+    constraints: Vec<(String, String)>,
     // 繝輔ぅ繝ｼ繝ｫ繝・(繝輔ぅ繝ｼ繝ｫ繝牙錐, 蝙句錐) 繧貞ｮ夂ｾｩ鬆・・ｽ・ｽ菫晄戟
     fields: Vec<(String, String)>,
     // 繝｡繧ｽ繝・・ｽ・ｽ蜷・-> 螳夂ｾｩ
@@ -1693,6 +1812,7 @@ struct StructDef {
 #[derive(Clone)]
 struct InterfaceDef {
     type_params: Vec<String>,
+    constraints: Vec<(String, String)>,
     methods: Vec<InterfaceMethod>,
 }
 
@@ -1728,6 +1848,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
             Stmt::Struct {
                 name,
                 type_params,
+                constraints,
                 fields,
                 methods,
             } => {
@@ -1736,6 +1857,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                     if let Stmt::Fn {
                         name: mname,
                         type_params: mtp,
+                        constraints: mc,
                         params,
                         return_type,
                         body,
@@ -1745,6 +1867,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                             mname.clone(),
                             FunctionDef {
                                 type_params: mtp.clone(),
+                                constraints: mc.clone(),
                                 params: params.clone(),
                                 return_type: return_type.clone(),
                                 body: body.clone(),
@@ -1756,6 +1879,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                     name.clone(),
                     StructDef {
                         type_params: type_params.clone(),
+                        constraints: constraints.clone(),
                         fields: fields.clone(),
                         methods: method_map,
                     },
@@ -1764,13 +1888,14 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
             Stmt::Interface {
                 name,
                 type_params,
+                constraints,
                 methods,
             } => {
-                eprintln!("DEBUG collect interface name={} nmethods={}", name, methods.len());
                 defs.interfaces.insert(
                     name.clone(),
                     InterfaceDef {
                         type_params: type_params.clone(),
+                        constraints: constraints.clone(),
                         methods: methods.clone(),
                     },
                 );
@@ -1790,6 +1915,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
             Stmt::Fn {
                 name,
                 type_params,
+                constraints,
                 params,
                 return_type,
                 body,
@@ -1798,6 +1924,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                     name.clone(),
                     FunctionDef {
                         type_params: type_params.clone(),
+                        constraints: constraints.clone(),
                         params: params.clone(),
                         return_type: return_type.clone(),
                         body: body.clone(),
@@ -1868,18 +1995,23 @@ enum Type {
     Option(Box<Type>),
     Unit,
     Unknown,
+    // Generic 蝙区枚蟄怜・縺ｮ蝙九→蜷・: T 縺ｯ繝莠ｧ｣縺ｿ繝・・ｽ・ｽ闡ｺ縺・
+    Var(String),
 }
 
 // 螟画焚蜷・-> 蝙・繧堤ｮ｡逅・・ｽ・ｽ繧狗腸蠅・
 #[derive(Debug, Clone)]
 struct TypeEnv {
     vars: HashMap<String, Type>,
+    // Generic 蝙区枚蟄怜・ -> 蟷ｻ蜈･繝｡繧ｽ繝・ラ鄂ｲ蜷阪・蝣ｴ蜷・縲∝ｽｮ縺ｮ縺ｿ縺ｪ縺・
+    constraints: HashMap<String, Vec<String>>,
 }
 
 impl TypeEnv {
     fn new() -> Self {
         TypeEnv {
             vars: HashMap::new(),
+            constraints: HashMap::new(),
         }
     }
 
@@ -1889,6 +2021,10 @@ impl TypeEnv {
 
     fn insert(&mut self, name: String, ty: Type) {
         self.vars.insert(name, ty);
+    }
+
+    fn add_constraint(&mut self, tv: String, iface: String) {
+        self.constraints.entry(tv).or_default().push(iface);
     }
 }
 
@@ -1902,6 +2038,12 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
     }
     if let Some(inner) = s.strip_suffix('?') {
         return Type::Option(Box::new(type_from_str(inner, defs)));
+    }
+    // List(X) 縺ｾ縺滂ｿｽE List 繧呈ｶ郁ｲｻ
+    if let Some(inner) = s.strip_prefix("List(") {
+        if let Some(inner) = inner.strip_suffix(')') {
+            return Type::List(Box::new(type_from_str(inner, defs)));
+        }
     }
     match s {
         "int" => Type::Int,
@@ -1936,7 +2078,8 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
                 };
                 Type::Interface(base.to_string(), args)
             } else {
-                Type::Unknown
+                // 繧ｸ繧ｧ繝阪Μ繝・け蝙区枚蟄怜・ (T) 縺ｯ繝・・ｽ・ｽ Var 繧定ｿ斐＠縲∝ｽｮ縺ｮ縺ｿ縺ｪ縺・
+                Type::Var(base.to_string())
             }
         }
     }
@@ -1949,6 +2092,8 @@ fn type_eq(a: &Type, b: &Type) -> bool {
         (Type::Option(inner_a), Type::Option(inner_b)) => type_eq(inner_a, inner_b),
         (Type::List(inner_a), Type::List(inner_b)) => type_eq(inner_a, inner_b),
         (Type::Array(inner_a), Type::Array(inner_b)) => type_eq(inner_a, inner_b),
+        // Generic 蝙区枚蟄怜・ Var 縺ｯ Unknown 繧定ｿ斐＠縲∝ｽｮ縺ｮ縺ｿ縺ｪ縺・
+        (Type::Var(_), _) | (_, Type::Var(_)) => true,
         _ => a == b,
     }
 }
@@ -2051,7 +2196,35 @@ fn resolve_operator_interface(
     lt: &Type,
     rt: &Type,
     op: &str,
+    constraints: &HashMap<String, Vec<String>>,
 ) -> Option<(String, Type)> {
+    // Generic 蝙区枚蟄怜・ Var(T) 縺ｧ繧｢蜷ｦ縺ｮ interface 蜈･繧｢蜷阪″繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・蜷・
+    if let (Type::Var(a), Type::Var(b)) = (lt, rt) {
+        if a == b {
+            let iface = match op {
+                "+" => "Add",
+                "==" | "!=" => "Equal",
+                "<" | ">" | "<=" | ">=" => "Compare",
+                _ => return None,
+            };
+            if let Some(ifaces) = constraints.get(a) {
+                if ifaces.iter().any(|x| x == iface) {
+                    let rty = match op {
+                        "==" | "!=" | "<" | ">" | "<=" | ">=" => Type::Bool,
+                        _ => Type::Var(a.clone()),
+                    };
+                    let method = match op {
+                        "+" => "add".to_string(),
+                        "==" | "!=" => "equal".to_string(),
+                        "<" | ">" | "<=" | ">=" => "compare".to_string(),
+                        _ => return None,
+                    };
+                    return Some((method, rty));
+                }
+            }
+        }
+        return None;
+    }
     // 荳｡霎ｺ縺悟酔荳縺ｮ繝ｦ繝ｼ繧ｶ繝ｼ struct 蝙九・縺ｨ縺阪・縺ｿ Interface 隗｣豎ｺ繧定ｩｦ縺ｿ繧・
     let sname = match (lt, rt) {
         (Type::Struct(a), Type::Struct(b)) if a == b => a.clone(),
@@ -2090,64 +2263,139 @@ fn resolve_operator_interface(
 //
 // 隗｣豎ｺ縺ｯ蝙区､懈渊迺ｰ蠅・ｼ・et 譚溽ｸ帙・蠑墓焚縺ｮ蝙具ｼ峨°繧蛾撕逧・↓陦後≧縲ゅ％縺ｮ迺ｰ蠅・・
 // 譛ｬ繝代せ蜀・〒 let / fn 繧定ｵｰ譟ｻ縺励※讒狗ｯ峨☆繧具ｼ・heck_expr 縺ｮ full env 縺ｯ荳崎ｦ・ｼ峨・
-fn resolve_operators_stmts(stmts: &mut [Stmt], defs: &Defs) {
-    let mut env: HashMap<String, Type> = HashMap::new();
+fn resolve_operators_stmts(
+    stmts: &mut [Stmt],
+    defs: &Defs,
+    constraints: &HashMap<String, Vec<String>>,
+    initial_env: &HashMap<String, Type>,
+) {
+    let mut env = initial_env.clone();
     for s in stmts.iter_mut() {
-        resolve_operators_stmt(s, defs, &mut env);
+        resolve_operators_stmt(s, defs, &mut env, constraints);
     }
 }
 
-fn resolve_operators_stmt(s: &mut Stmt, defs: &Defs, env: &mut HashMap<String, Type>) {
+// collect_defs 縺ｧ defs 縺ｮ蝙九・縺ｮ蜻ｼ縺ｳ蜃ｺ縺ｧ繧｢蜷阪→繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・縺ｮ蝙区､懈渊縺ｮ resolved_operator 縺ｦ縺ｪ縺ｿ縺ｪ縺・
+// 蟷ｻ蜈･繝｡繧ｽ繝・ラ蜷阪・縺ｮ蝙区枚蟄怜・繝峨ｒ繧｢蜷阪″ type_params/constraints 繧剃ｿ晄戟縺ｯ髱槭ず・・
+fn resolve_operators_defs(defs: &mut Defs) {
+    // 繝｡繧ｽ繝・ラ蜷阪・縺ｮ constraints/params 繧剃ｿ晄戟縺ｪ蝙九・縺ｮ蜻ｼ縺ｳ蜃ｺ縺ｧ繧｢蜷阪→繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・縺ｮ
+    // 髱槭ず繝｡繧ｽ繝・ラ蜷阪・縺ｮ蝙区枚蟄怜・縺ｪ type_from_str 縺ｯ defs 縺ｮ蝗ｲ繧・ｽE・ｽ蛻･蜈壹↓縺ｦ縺・ｋ縺ｮ縺ｿ縺ｪ縺・
+    let mut fworks: Vec<(
+        String,
+        HashMap<String, Vec<String>>,
+        HashMap<String, Type>,
+        Vec<Stmt>,
+    )> = Vec::new();
+    for (name, fdef) in defs.functions.iter() {
+        let mut cons: HashMap<String, Vec<String>> = HashMap::new();
+        for (tv, iface) in &fdef.constraints {
+            cons.entry(tv.clone()).or_default().push(iface.clone());
+        }
+        let mut env: HashMap<String, Type> = HashMap::new();
+        for (pname, ptype) in &fdef.params {
+            env.insert(pname.clone(), type_from_str(ptype, defs));
+        }
+        fworks.push((name.clone(), cons, env, fdef.body.clone()));
+    }
+    for (name, cons, env, mut body) in fworks {
+        resolve_operators_stmts(&mut body, defs, &cons, &env);
+        if let Some(fdef) = defs.functions.get_mut(&name) {
+            fdef.body = body;
+        }
+    }
+
+    let mut mworks: Vec<(String, String, HashMap<String, Vec<String>>, HashMap<String, Type>, Vec<Stmt>)> =
+        Vec::new();
+    for (sname, sdef) in defs.structs.iter() {
+        for (mname, mdef) in &sdef.methods {
+            let mut cons: HashMap<String, Vec<String>> = HashMap::new();
+            for (tv, iface) in &mdef.constraints {
+                cons.entry(tv.clone()).or_default().push(iface.clone());
+            }
+            let mut env: HashMap<String, Type> = HashMap::new();
+            for (fname, ftype) in &sdef.fields {
+                env.insert(fname.clone(), type_from_str(ftype, defs));
+            }
+            for (pname, ptype) in &mdef.params {
+                env.insert(pname.clone(), type_from_str(ptype, defs));
+            }
+            mworks.push((
+                sname.clone(),
+                mname.clone(),
+                cons,
+                env,
+                mdef.body.clone(),
+            ));
+        }
+    }
+    for (sname, mname, cons, env, mut body) in mworks {
+        resolve_operators_stmts(&mut body, defs, &cons, &env);
+        if let Some(sdef) = defs.structs.get_mut(&sname) {
+            if let Some(mdef) = sdef.methods.get_mut(&mname) {
+                mdef.body = body;
+            }
+        }
+    }
+}
+
+fn resolve_operators_stmt(
+    s: &mut Stmt,
+    defs: &Defs,
+    env: &mut HashMap<String, Type>,
+    constraints: &HashMap<String, Vec<String>>,
+) {
     match s {
-        Stmt::Expr(e) => resolve_operators_expr(e, defs, env),
+        Stmt::Expr(e) => resolve_operators_expr(e, defs, env, constraints),
         Stmt::Let { name, value, .. } => {
-            if let Ok(t) = infer_type(value, env, defs) {
+            if let Ok(t) = infer_type(value, env, defs, constraints) {
                 env.insert(name.clone(), t);
             }
-            resolve_operators_expr(value, defs, env);
+            resolve_operators_expr(value, defs, env, constraints);
         }
-        Stmt::Assign { value, .. } => resolve_operators_expr(value, defs, env),
+        Stmt::Assign { value, .. } => resolve_operators_expr(value, defs, env, constraints),
         Stmt::If { cond, then_branch, else_branch } => {
-            resolve_operators_expr(cond, defs, env);
-            resolve_operators_stmts(then_branch, defs);
+            resolve_operators_expr(cond, defs, env, constraints);
+            resolve_operators_stmts(then_branch, defs, constraints, env);
             if let Some(b) = else_branch {
-                resolve_operators_stmts(b, defs);
+                resolve_operators_stmts(b, defs, constraints, env);
             }
         }
         Stmt::While { cond, body } => {
-            resolve_operators_expr(cond, defs, env);
-            resolve_operators_stmts(body, defs);
+            resolve_operators_expr(cond, defs, env, constraints);
+            resolve_operators_stmts(body, defs, constraints, env);
         }
         Stmt::For { var, iterable, body } => {
             // iterable 縺ｮ隕∫ｴ蝙九ｒ var 縺ｮ蝙九→縺励※迺ｰ蠅・↓霑ｽ蜉
-            if let Ok(it_ty) = infer_type(iterable, env, defs) {
+            if let Ok(it_ty) = infer_type(iterable, env, defs, constraints) {
                 let elem = match &it_ty {
                     Type::List(e) => (**e).clone(),
                     _ => Type::Unknown,
                 };
                 env.insert(var.clone(), elem);
             }
-            resolve_operators_expr(iterable, defs, env);
-            resolve_operators_stmts(body, defs);
+            resolve_operators_expr(iterable, defs, env, constraints);
+            resolve_operators_stmts(body, defs, constraints, env);
         }
-        Stmt::Return(Some(e)) => resolve_operators_expr(e, defs, env),
+        Stmt::Return(Some(e)) => resolve_operators_expr(e, defs, env, constraints),
         Stmt::Match { expr, arms, .. } => {
-            resolve_operators_expr(expr, defs, env);
+            resolve_operators_expr(expr, defs, env, constraints);
             for (_, body) in arms.iter_mut() {
-                resolve_operators_stmts(body, defs);
+                resolve_operators_stmts(body, defs, constraints, env);
             }
         }
-        Stmt::Fn { params, body, .. } => {
+        Stmt::Fn { params, body, constraints: fc, .. } => {
             let mut fenv = env.clone();
+            let mut fcons = constraints.clone();
+            for (tv, iface) in fc {
+                fcons.entry(tv.clone()).or_default().push(iface.clone());
+            }
             for (pname, ptype) in params {
                 fenv.insert(pname.clone(), type_from_str(ptype, defs));
             }
-            resolve_operators_stmts(body, defs);
-            // 豕ｨ: Fn 蜀・・迺ｰ蠅・・蜻ｼ縺ｳ蜃ｺ縺玲ｯ弱↓讒狗ｯ峨＆繧後ｋ縺溘ａ縲∝､門・ env 縺ｫ縺ｯ蜿肴丐縺励↑縺・
-            let _ = fenv;
+            resolve_operators_stmts(body, defs, &fcons, &fenv);
         }
         Stmt::Struct { methods, .. } => {
-            resolve_operators_stmts(methods, defs);
+            resolve_operators_stmts(methods, defs, constraints, env);
         }
         _ => {}
     }
@@ -2155,7 +2403,12 @@ fn resolve_operators_stmt(s: &mut Stmt, defs: &Defs, env: &mut HashMap<String, T
 
 // 貍皮ｮ怜ｭ占ｧ｣豎ｺ縺ｮ縺溘ａ縺ｮ霆ｽ驥丞梛謗ｨ隲厄ｼ・nv 縺ｯ let/蠑墓焚縺ｮ蝙九・縺ｿ・峨・
 // check_expr 縺ｮ full env 縺ｯ荳崎ｦ√よ綾繧雁､縺悟ｾ励ｉ繧後↑縺・ｴ蜷医・ Unknown 繧定ｿ斐☆縲・
-fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type, String> {
+fn infer_type(
+    e: &Expr,
+    env: &HashMap<String, Type>,
+    defs: &Defs,
+    constraints: &HashMap<String, Vec<String>>,
+) -> Result<Type, String> {
     match e {
         Expr::IntLit(_) => Ok(Type::Int),
         Expr::FloatLit(_) => Ok(Type::Float),
@@ -2171,7 +2424,9 @@ fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type
             } else if defs.states.contains_key(func) {
                 Ok(Type::Struct(func.clone()))
             } else if func == "Some" && args.len() == 1 {
-                Ok(Type::Option(Box::new(infer_type(&args[0], env, defs)?)))
+                Ok(Type::Option(Box::new(
+                    infer_type(&args[0], env, defs, constraints)?,
+                )))
             } else if func == "None" {
                 Ok(Type::Option(Box::new(Type::Unknown)))
             } else if let Some(f) = defs.functions.get(func) {
@@ -2184,7 +2439,7 @@ fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type
             }
         }
         Expr::MethodCall { object, method, .. } => {
-            let ot = infer_type(object, env, defs)?;
+            let ot = infer_type(object, env, defs, constraints)?;
             match ot {
                 Type::Struct(s) => {
                     if let Some(sd) = defs.structs.get(&s) {
@@ -2196,14 +2451,22 @@ fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type
                     }
                     Ok(Type::Unknown)
                 }
+                // List 繝｡繧ｽ繝・・ｽ・ｽ: get/set -> 蜈・荳、 add -> List、 len -> int
+                Type::List(elem) => match method.as_str() {
+                    "get" | "set" => Ok((*elem).clone()),
+                    "add" => Ok(Type::List(elem)),
+                    "add" => Ok(Type::List(elem)),
+                    "len" => Ok(Type::Int),
+                    _ => Ok(Type::Unknown),
+                },
                 _ => Ok(Type::Unknown),
             }
         }
-        Expr::UnOp { operand, .. } => infer_type(operand, env, defs),
+        Expr::UnOp { operand, .. } => infer_type(operand, env, defs, constraints),
         Expr::BinOp { left, op, right, .. } => {
-            let lt = infer_type(left, env, defs)?;
-            let rt = infer_type(right, env, defs)?;
-            if let Some((_, t)) = resolve_operator_interface(defs, &lt, &rt, op) {
+            let lt = infer_type(left, env, defs, constraints)?;
+            let rt = infer_type(right, env, defs, constraints)?;
+            if let Some((_, t)) = resolve_operator_interface(defs, &lt, &rt, op, constraints) {
                 Ok(t)
             } else {
                 match op.as_str() {
@@ -2213,7 +2476,7 @@ fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type
             }
         }
         Expr::FieldAccess { object, field } => {
-            let ot = infer_type(object, env, defs)?;
+            let ot = infer_type(object, env, defs, constraints)?;
             match ot {
                 Type::Struct(s) => {
                     if let Some(sd) = defs.structs.get(&s) {
@@ -2230,7 +2493,7 @@ fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type
         }
         Expr::Array(items) => {
             if let Some(first) = items.first() {
-                let et = infer_type(first, env, defs)?;
+                let et = infer_type(first, env, defs, constraints)?;
                 Ok(Type::List(Box::new(et)))
             } else {
                 Ok(Type::List(Box::new(Type::Unknown)))
@@ -2241,17 +2504,22 @@ fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type
     }
 }
 
-fn resolve_operators_expr(e: &mut Expr, defs: &Defs, env: &HashMap<String, Type>) {
+fn resolve_operators_expr(
+    e: &mut Expr,
+    defs: &Defs,
+    env: &HashMap<String, Type>,
+    constraints: &HashMap<String, Vec<String>>,
+) {
     match e {
         Expr::BinOp { left, right, op, resolved_operator } => {
             // 蟄舌ｒ蜈医↓隗｣豎ｺ・医ロ繧ｹ繝医＠縺・BinOp 繧ょ性繧・・
-            resolve_operators_expr(left, defs, env);
-            resolve_operators_expr(right, defs, env);
-            let lt = infer_type(left, env, defs);
-            let rt = infer_type(right, env, defs);
+            resolve_operators_expr(left, defs, env, constraints);
+            resolve_operators_expr(right, defs, env, constraints);
+            let lt = infer_type(left, env, defs, constraints);
+            let rt = infer_type(right, env, defs, constraints);
             let res = match (lt, rt) {
                 (Ok(lt), Ok(rt)) => {
-                    match resolve_operator_interface(defs, &lt, &rt, op) {
+                    match resolve_operator_interface(defs, &lt, &rt, op, constraints) {
                         Some((method, _)) => ResolvedOperator::MethodCall {
                             method,
                             op: op.clone(),
@@ -2263,27 +2531,29 @@ fn resolve_operators_expr(e: &mut Expr, defs: &Defs, env: &HashMap<String, Type>
             };
             *resolved_operator = Some(res);
         }
-        Expr::UnOp { operand, .. } => resolve_operators_expr(operand, defs, env),
+        Expr::UnOp { operand, .. } => resolve_operators_expr(operand, defs, env, constraints),
         Expr::Call { args, .. } => {
             for a in args.iter_mut() {
-                resolve_operators_expr(a, defs, env);
+                resolve_operators_expr(a, defs, env, constraints);
             }
         }
         Expr::MethodCall { object, args, .. } => {
-            resolve_operators_expr(object, defs, env);
+            resolve_operators_expr(object, defs, env, constraints);
             for a in args.iter_mut() {
-                resolve_operators_expr(a, defs, env);
+                resolve_operators_expr(a, defs, env, constraints);
             }
         }
-        Expr::FieldAccess { object, .. } => resolve_operators_expr(object, defs, env),
+        Expr::FieldAccess { object, .. } => {
+            resolve_operators_expr(object, defs, env, constraints)
+        }
         Expr::Array(items) => {
             for it in items.iter_mut() {
-                resolve_operators_expr(it, defs, env);
+                resolve_operators_expr(it, defs, env, constraints);
             }
         }
         Expr::Range { start, end } => {
-            resolve_operators_expr(start, defs, env);
-            resolve_operators_expr(end, defs, env);
+            resolve_operators_expr(start, defs, env, constraints);
+            resolve_operators_expr(end, defs, env, constraints);
         }
         _ => {}
     }
@@ -2330,6 +2600,51 @@ fn type_matches(defs: &Defs, actual: &Type, expected: &Type) -> bool {
         }
     }
     type_eq(actual, expected)
+}
+
+// Generic constraint 縺ｮ蜈ｨ菴薙→: 蟷ｻ蜈･繝｡繧ｽ繝・ラ鄂ｲ蜷阪・縺ｧ縲悟梛縺ｮ蝙九→繝｡繧ｽ繝・ラ蜷阪″蝣ｴ蜷蜈･繧｢蜷阪→
+// 繊･繝・・ｽ・ｽ縺ｮ縺溘ａ縺ｮ菴ｿ逕ｨ・峨ｂ險ｱ蜿ｯ・・
+// 蟷ｻ蜈･: List(T where T: Compare) 縺ｮ莠∩縺ｮ List(Vec2) 縺ｪ豌･縺ｮ -> Vec2 縺ｧ Compare 繧呈囓鮟吝ｮ溯｡梧枚｡縺ｮ縺溘ａ縺ｮ
+fn check_constraint(
+    defs: &Defs,
+    constraints: &[(String, String)],
+    actual: &Type,
+    expected: &Type,
+) -> Result<(), String> {
+    match (expected, actual) {
+        (Type::List(e_exp), Type::List(e_act)) => {
+            check_constraint(defs, constraints, e_act, e_exp)
+        }
+        (Type::Option(e_exp), Type::Option(e_act)) => {
+            check_constraint(defs, constraints, e_act, e_exp)
+        }
+        (Type::Array(e_exp), Type::Array(e_act)) => {
+            check_constraint(defs, constraints, e_act, e_exp)
+        }
+        // 蝙区枚蟄怜・ Var(T) 縺ｧ繧｢蜷ｦ縺ｮ interface 蜈･繧｢蜷阪″縺ｮ縺ｮ謌ｻ繧雁､縺・
+        (Type::Var(tv), concrete) => {
+            for (ctv, iface) in constraints {
+                if ctv == tv {
+                    let ok = match concrete {
+                        Type::Struct(sname) => {
+                            struct_satisfies_interface(defs, sname, iface)
+                        }
+                        Type::Interface(iname, _) => iname == iface,
+                        Type::Unknown => true,
+                        _ => false,
+                    };
+                    if !ok {
+                        return Err(format!(
+                            "Type error: type {:?} does not satisfy constraint '{}: {}'",
+                            concrete, tv, iface
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     match expr {
@@ -2395,7 +2710,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 // 豈碑ｼ・・ｽ・ｽ邂・ 邨先棡縺ｯ蟶ｸ縺ｫ Bool
                 "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                     if let Some((_, result_ty)) =
-                        resolve_operator_interface(defs, &lt, &rt, op)
+                        resolve_operator_interface(defs, &lt, &rt, op, &env.constraints)
                     {
                         // 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・ Operator Interface 縺ｧ隗｣豎ｺ
                         Ok(result_ty)
@@ -2423,7 +2738,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 // 邂苓｡捺ｼ皮ｮ・ 蟾ｦ蜿ｳ蜷悟梛
                 "+" | "-" | "*" | "/" | "%" => {
                     if let Some((_, result_ty)) =
-                        resolve_operator_interface(defs, &lt, &rt, op)
+                        resolve_operator_interface(defs, &lt, &rt, op, &env.constraints)
                     {
                         // 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・ Operator Interface 縺ｧ隗｣豎ｺ
                         Ok(result_ty)
@@ -2553,6 +2868,13 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                                 return Err(format!(
                                     "Type error: argument '{}' of {} expects {:?}, got {:?}",
                                     pname, base, expected, at
+                                ));
+                            }
+                            if let Err(e) = check_constraint(defs, &fdef.constraints, &at, &expected)
+                            {
+                                return Err(format!(
+                                    "Type error: argument '{}' of {}: {}",
+                                    pname, base, e
                                 ));
                             }
                         }
@@ -3009,11 +3331,15 @@ fn check_stmts(
 // 髢｢謨ｰ譛ｬ譁・・ｽ・ｽ讀懈渊・ｽE・ｽEarams 繧堤腸蠅・・ｽ・ｽ豕ｨ蜈･・ｽE・ｽE
 fn check_function(
     params: &[(String, String)],
+    constraints: &[(String, String)],
     return_type: &Option<String>,
     body: &[Stmt],
     defs: &Defs,
 ) -> Result<(), String> {
     let mut env = TypeEnv::new();
+    for (tv, iface) in constraints {
+        env.add_constraint(tv.clone(), iface.clone());
+    }
     for (pname, ptype) in params {
         env.insert(pname.clone(), type_from_str(ptype, defs));
     }
@@ -3029,22 +3355,27 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
             Stmt::Fn {
                 name,
                 type_params,
+                constraints,
                 params,
                 return_type,
                 body,
             } => {
                 let _ = type_params;
-                check_function(params, return_type, body, defs)
+                check_function(params, constraints, return_type, body, defs)
                     .map_err(|e| format!("In function '{}': {}", name, e))?;
             }
             Stmt::Struct {
                 name,
                 type_params,
+                constraints,
                 fields,
                 methods,
             } => {
                 // 繝｡繧ｽ繝・・ｽ・ｽ讀懈渊: 繝輔ぅ繝ｼ繝ｫ繝峨ｒ迺ｰ蠅・・ｽ・ｽ豕ｨ蜈･
                 let mut env = TypeEnv::new();
+                for (tv, iface) in constraints {
+                    env.add_constraint(tv.clone(), iface.clone());
+                }
                 for (fname, ftype) in fields {
                     env.insert(fname.clone(), type_from_str(ftype, defs));
                 }
@@ -3052,6 +3383,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                     if let Stmt::Fn {
                         name: mname,
                         type_params: _,
+                        constraints: mc,
                         params,
                         return_type,
                         body,
@@ -3059,6 +3391,9 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                     {
                         // 繝輔ぅ繝ｼ繝ｫ繝臥腸蠅・+ 蠑墓焚繧呈ｳｨ蜈･
                         let mut menv = env.clone();
+                        for (tv, iface) in mc {
+                            menv.add_constraint(tv.clone(), iface.clone());
+                        }
                         for (pname, ptype) in params {
                             menv.insert(pname.clone(), type_from_str(ptype, defs));
                         }
@@ -3072,7 +3407,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
             // 繝医ャ繝励Ξ繝吶Ν縺ｮ let 蜷悟｣ｫ縺悟盾辣ｧ縺怜粋縺医ｋ繧医≧縲∝・譛・env 繧剃ｽｿ縺・・
             Stmt::Let { name, value, .. } => {
                 let _ = check_expr(value, &top_env, defs)?;
-                let v_ty = infer_type(value, &top_env.vars, defs);
+                let v_ty = infer_type(value, &top_env.vars, defs, &top_env.constraints);
                 let mut env = top_env.clone();
                 if let Ok(t) = &v_ty {
                     env.insert(name.clone(), t.clone());
@@ -3579,14 +3914,7 @@ fn call_function(
 
     match execute_stmts(&func.body, &mut local, defs)? {
         ExecResult::Return(v) => Ok(v),
-        ExecResult::Continue => {
-            // 譛ｫ蟆ｾ縺悟ｼ乗枚縺ｪ繧峨◎縺ｮ蛟､繧呈囓鮟呵ｿ泌唆・亥ｼ乗欠蜷代Γ繧ｽ繝・ラ/髢｢謨ｰ・・
-            if let Some(Stmt::Expr(e)) = func.body.last() {
-                eval_expr(e, &mut local, defs)
-            } else {
-                Ok(Value::Int(0))
-            }
-        }
+        ExecResult::Continue => Ok(Value::Int(0)),
     }
 }
 
@@ -3607,6 +3935,7 @@ fn call_method(
         .get(method)
         .cloned()
         .ok_or_else(|| format!("Unknown method: {} on {}", method, struct_name))?;
+
 
     if args.len() != func.params.len() {
         return Err(format!(
@@ -3631,14 +3960,7 @@ fn call_method(
 
     match execute_stmts(&func.body, &mut local, defs)? {
         ExecResult::Return(v) => Ok(v),
-        ExecResult::Continue => {
-            // 譛ｫ蟆ｾ縺悟ｼ乗枚縺ｪ繧峨◎縺ｮ蛟､繧呈囓鮟呵ｿ泌唆・亥ｼ乗欠蜷代Γ繧ｽ繝・ラ/髢｢謨ｰ・・
-            if let Some(Stmt::Expr(e)) = func.body.last() {
-                eval_expr(e, &mut local, defs)
-            } else {
-                Ok(Value::Int(0))
-            }
-        }
+        ExecResult::Continue => Ok(Value::Int(0)),
     }
 }
 
@@ -3654,7 +3976,16 @@ fn execute_stmts(
     defs: &Defs,
 ) -> Result<ExecResult, String> {
     let mut result = ExecResult::Continue;
-    for stmt in stmts {
+    let len = stmts.len();
+    for (idx, stmt) in stmts.iter().enumerate() {
+        if idx == len - 1 {
+            // 縺ｮ繝医≧繝ｩ繝ｼ繧ｶ繝ｼ螳夂ｾｩ縺ｯ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨◎縺ｮ蛟､繧呈囓鮟・
+            // 繝ｭ繝ｼ繧ｫ繝ｫ繧｢蜷阪″ Expr 縺ｧ蟇ｾ蜉ｻ縺ｿ縺ｪ縺・(匝ｍ豌ｴ繝・→縺ｯ繝医≧繝ｩ繝ｼ縺ｧ繧｢蜷阪→)
+            if let Stmt::Expr(e) = stmt {
+                let v = eval_expr(e, env, defs)?;
+                return Ok(ExecResult::Return(v));
+            }
+        }
         result = execute_stmt(stmt, env, defs)?;
         if let ExecResult::Return(_) = result {
             break;
