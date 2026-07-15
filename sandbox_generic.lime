@@ -1,0 +1,11 @@
+fn max(T)(T: a, T: b): T:
+    if a > b:
+        return a
+    else:
+        return b
+
+fn main():
+    let m = max(i64)(10, 20)
+    println(m)
+    let m2 = max(i64)(30, 5)
+    println(m2)

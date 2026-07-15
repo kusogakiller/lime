@@ -82,16 +82,25 @@ fn main() {
                 return;
             }
 
-            // Memory Analysis (Escape Analysis) - Step 9
-            if let Err(e) = memory_analyze(&stmts, &defs) {
-                eprintln!("{}", e);
+            // Phase 6: Generic Monomorphization (after type check, before memory analysis)
+            if let Err(e) = monomorphize_all(&mut defs, &mut stmts) {
+                eprintln!("Type error: {}", e);
                 return;
             }
+
+            // Memory Analysis (Escape Analysis) - Step 9
+            let memory = match memory_analyze(&stmts, &defs) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return;
+                }
+            };
 
             // Phase 0 (Step 10): LLVM backend foundation.
             // --emit-ll 縺ｯ LLVM IR (text) 縺ｦ .ll 縺ｯ榆帥蜴ｻ縺ｦ縺ｪ縺ｿ縺ｪ縺・
             if emit_ll {
-                let out = codegen::emit_llvm(&stmts, &defs);
+                let out = codegen::emit_llvm(&stmts, &defs, &memory);
                 let base = source_path.trim_end_matches(".lime");
                 let ll_path = format!("{}.ll", base);
                 match fs::write(&ll_path, &out) {
@@ -967,21 +976,9 @@ impl Parser {
                 type_params.push(tv.clone());
             }
         }
-        // return_type 縺ｮ蝙区枚蟄怜・縺ｪ縺ｯ type_params 縺ｮ蝣ｴ蜷隗｣譫・
-        if let Some(rt) = &return_type {
-            let base = rt.split('(').next().unwrap_or(rt);
-            let base = if let Some(stripped) = base.strip_suffix('?') {
-                stripped
-            } else {
-                base
-            };
-            if base.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && !matches!(base, "int" | "float" | "str" | "bool")
-                && !type_params.contains(&base.to_string())
-            {
-                type_params.push(base.to_string());
-            }
-        }
+        // return_type縺ｮ蝙区枚蟄怜・縺ｯ type_params縺ｫ蝣ｴ蜷・繧峨☆縺ｪ縺・
+        // (concrete type name 縺ｨ type parameter 縺ｮ蝙区､懈淵縺ｯ parse蛟､縺ｧ縺ｯ蝣ｴ蜷医☆)
+        // type_params縺ｯ fn name(T)(...) 縺ｮ (T) 縺ｯ繧｢蜷阪→縺ｫ縺励※縺ｯ蜷医ｒ縲√ｒ蝗ｲ繧
 
         Ok(Stmt::Fn {
             name,
@@ -2191,10 +2188,10 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
         }
     }
     match s {
-        "int" => Type::Int,
-        "float" => Type::Float,
-        "bool" => Type::Bool,
-        "str" => Type::String,
+        "int" | "i64" => Type::Int,
+        "float" | "double" | "f64" => Type::Float,
+        "bool" | "i1" => Type::Bool,
+        "str" | "i8*" => Type::String,
         _ => {
             // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蝙句盾辣ｧ Base(Arg, ...) 縺ｯ繝呻ｿｽE繧ｹ蜷阪〒辣ｧ蜷・
             let base = match s.find('(') {
@@ -3936,8 +3933,516 @@ fn analyze_block(
     Ok(())
 }
 
+// ===== Phase 6: Generic Monomorphization =====
+
+fn type_to_string(ty: &Type) -> String {
+    match ty {
+        Type::Int => "int".to_string(),
+        Type::Float => "float".to_string(),
+        Type::Bool => "bool".to_string(),
+        Type::String => "str".to_string(),
+        Type::Struct(name) => name.clone(),
+        Type::State(name) => name.clone(),
+        Type::List(inner) => format!("List({})", type_to_string(inner)),
+        Type::Option(inner) => format!("Option({})", type_to_string(inner)),
+        Type::Interface(name, args) => {
+            let args_str: Vec<String> = args.iter().map(type_to_string).collect();
+            format!("{}({})", name, args_str.join(", "))
+        }
+        Type::Var(name) => name.clone(),
+        Type::Unit => "void".to_string(),
+        Type::Unknown => "unknown".to_string(),
+        Type::Array(inner) => format!("Array({})", type_to_string(inner)),
+    }
+}
+
+fn mangled_name(base: &str, type_args: &[String]) -> String {
+    format!("{}.{}", base, type_args.join("."))
+}
+
+/// Parse "func(Type1, Type2)" into ("func", ["Type1", "Type2"])
+fn parse_generic_call_name(func: &str) -> Option<(&str, Vec<&str>)> {
+    if let Some(paren_idx) = func.find('(') {
+        let base = &func[..paren_idx];
+        let inner = &func[paren_idx + 1..func.len() - 1];
+        let args: Vec<&str> = if inner.is_empty() {
+            Vec::new()
+        } else {
+            inner.split(", ").collect()
+        };
+        Some((base, args))
+    } else {
+        None
+    }
+}
+
+fn monomorphize_type_str(t: &str, type_params: &[String], type_args: &[&str]) -> String {
+    let mut result = t.to_string();
+    for (i, tp) in type_params.iter().enumerate() {
+        if i < type_args.len() {
+            result = result.replace(tp.as_str(), type_args[i]);
+        }
+    }
+    result
+}
+
+fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: &[&str]) -> FunctionDef {
+    let params: Vec<(String, String)> = fdef.params.iter()
+        .map(|(n, t)| (n.clone(), monomorphize_type_str(t, type_params, type_args)))
+        .collect();
+    let return_type = fdef.return_type.as_ref()
+        .map(|rt| monomorphize_type_str(rt, type_params, type_args));
+    FunctionDef {
+        type_params: Vec::new(),
+        constraints: Vec::new(),
+        params,
+        return_type,
+        body: fdef.body.clone(),
+        is_async: fdef.is_async,
+    }
+}
+
+/// Infer concrete type arguments from call arguments for a generic function.
+fn infer_generic_args(
+    func_name: &str,
+    call_args: &[Expr],
+    env: &HashMap<String, Type>,
+    defs: &Defs,
+) -> Result<Vec<String>, String> {
+    let fdef = defs.functions.get(func_name).ok_or_else(|| {
+        format!("function '{}' not found", func_name)
+    })?;
+    if fdef.type_params.is_empty() {
+        return Err(format!("'{}' is not a generic function", func_name));
+    }
+
+    let mut type_map: HashMap<String, String> = HashMap::new();
+    for (arg, (_, ptype_str)) in call_args.iter().zip(fdef.params.iter()) {
+        let arg_type = infer_type(arg, env, defs, &HashMap::new())?;
+        let arg_str = type_to_string(&arg_type);
+        let ptype = type_from_str(ptype_str, defs);
+        match &ptype {
+            Type::Var(tv) => {
+                if let Some(existing) = type_map.get(tv) {
+                    if existing != &arg_str {
+                        return Err(format!(
+                            "Type mismatch for type parameter '{}': inferred '{}' and '{}'",
+                            tv, existing, arg_str
+                        ));
+                    }
+                }
+                type_map.insert(tv.clone(), arg_str);
+            }
+            _ => {
+                // For non-Var param types like List(T), infer from inner types
+                collect_var_bindings(&arg_type, &ptype, &mut type_map)?;
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+    for tp in &fdef.type_params {
+        match type_map.get(tp) {
+            Some(s) => result.push(s.clone()),
+            None => {
+                // Check if this type param is used in constraints only (phantom param)
+                // Try to infer from constraints or use the default
+                return Err(format!(
+                    "Cannot infer type parameter '{}' from call arguments in '{}'",
+                    tp, func_name
+                ));
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Collect type variable bindings by matching concrete types against pattern types.
+fn collect_var_bindings(
+    concrete: &Type,
+    pattern: &Type,
+    type_map: &mut HashMap<String, String>,
+) -> Result<(), String> {
+    match (pattern, concrete) {
+        (Type::Var(tv), _) => {
+            let s = type_to_string(concrete);
+            if let Some(existing) = type_map.get(tv) {
+                if existing != &s {
+                    return Err(format!(
+                        "Type mismatch for type parameter '{}': '{}' vs '{}'",
+                        tv, existing, s
+                    ));
+                }
+            }
+            type_map.insert(tv.clone(), s);
+            Ok(())
+        }
+        (Type::List(p_inner), Type::List(c_inner)) => {
+            collect_var_bindings(c_inner, p_inner, type_map)
+        }
+        (Type::Option(p_inner), Type::Option(c_inner)) => {
+            collect_var_bindings(c_inner, p_inner, type_map)
+        }
+        (Type::Array(p_inner), Type::Array(c_inner)) => {
+            collect_var_bindings(c_inner, p_inner, type_map)
+        }
+        // Exact match - no bindings
+        _ => Ok(()),
+    }
+}
+
+/// Check that concrete type args satisfy the generic function's constraints.
+/// Uses the same constraint system as the type checker.
+fn check_generic_constraints(
+    fdef: &FunctionDef,
+    type_args: &[String],
+    defs: &Defs,
+) -> Result<(), String> {
+    for (tv, iface) in &fdef.constraints {
+        for (i, tp) in fdef.type_params.iter().enumerate() {
+            if tp == tv && i < type_args.len() {
+                let concrete_type = type_from_str(&type_args[i], defs);
+                // Use the same logic as check_constraint for struct types
+                let ok = match &concrete_type {
+                    Type::Struct(sname) => struct_satisfies_interface(defs, sname, iface),
+                    Type::Interface(iname, _) => iname == iface,
+                    Type::Unknown => true,
+                    // Primitives (Int, Float, Bool, String) have built-in operators
+                    // and satisfy the corresponding operator interfaces
+                    Type::Int | Type::Float | Type::Bool | Type::String => true,
+                    _ => false,
+                };
+                if !ok {
+                    return Err(format!(
+                        "Type error: {:?} does not satisfy constraint '{}: {}'",
+                        concrete_type, tv, iface
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Walk expression, collect generic calls and create monomorphized functions.
+fn collect_mono_from_expr(
+    e: &Expr,
+    env: &mut HashMap<String, Type>,
+    defs: &Defs,
+    mono_fdefs: &mut HashMap<String, FunctionDef>,
+    call_updates: &mut HashMap<String, String>,
+    worklist: &mut Vec<String>,
+) -> Result<(), String> {
+    match e {
+        Expr::Call { func, args } => {
+            let base_name;
+            let explicit_type_args: Option<Vec<String>>;
+
+            // Check if func has explicit type args like "max(i64)"
+            if let Some((base, type_strs)) = parse_generic_call_name(func) {
+                base_name = base.to_string();
+                explicit_type_args = Some(type_strs.iter().map(|s| s.to_string()).collect());
+            } else {
+                base_name = func.clone();
+                explicit_type_args = None;
+            }
+
+            // Check if the base function is a generic template
+            if let Some(fdef) = defs.functions.get(&base_name) {
+                if !fdef.type_params.is_empty() {
+                    // Infer or use explicit type args
+                    let type_args: Vec<String> = if let Some(ref explicit) = explicit_type_args {
+                        explicit.clone()
+                    } else {
+                        infer_generic_args(&base_name, args, env, defs)?
+                    };
+
+                    // Check constraints
+                    check_generic_constraints(fdef, &type_args, defs)?;
+
+                    // Create mangled name
+                    let mangled = mangled_name(&base_name, &type_args);
+
+                    // Only create monomorphized function if not already created
+                    if !mono_fdefs.contains_key(&mangled) {
+                        let type_param_strs: Vec<&str> = type_args.iter().map(|s| s.as_str()).collect();
+                        let mono = monomorphize_function(fdef, &fdef.type_params, &type_param_strs);
+                        mono_fdefs.insert(mangled.clone(), mono);
+                        worklist.push(mangled.clone());
+                    }
+
+                    // Record the call update (only if name changed)
+                    if func != &mangled {
+                        call_updates.insert(func.clone(), mangled);
+                    }
+                }
+            }
+
+            // Walk sub-expressions (with env tracking for let bindings etc.)
+            // Note: for Call, the args don't introduce new bindings in the caller's env
+            for a in args {
+                // But we still need to walk the arg expressions for nested generic calls
+                // Use a fresh env (or the current one) since args are evaluated in the current scope
+                let mut arg_env = env.clone();
+                collect_mono_from_expr(a, &mut arg_env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            collect_mono_from_expr(left, env, defs, mono_fdefs, call_updates, worklist)?;
+            collect_mono_from_expr(right, env, defs, mono_fdefs, call_updates, worklist)?;
+        }
+        Expr::UnOp { operand, .. } => {
+            collect_mono_from_expr(operand, env, defs, mono_fdefs, call_updates, worklist)?;
+        }
+        Expr::MethodCall { object, args, .. } => {
+            collect_mono_from_expr(object, env, defs, mono_fdefs, call_updates, worklist)?;
+            for a in args {
+                collect_mono_from_expr(a, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+        }
+        Expr::FieldAccess { object, .. } => {
+            collect_mono_from_expr(object, env, defs, mono_fdefs, call_updates, worklist)?;
+        }
+        Expr::Array(items) => {
+            for it in items {
+                collect_mono_from_expr(it, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+        }
+        Expr::Range { start, end } => {
+            collect_mono_from_expr(start, env, defs, mono_fdefs, call_updates, worklist)?;
+            collect_mono_from_expr(end, env, defs, mono_fdefs, call_updates, worklist)?;
+        }
+        Expr::Await(inner) => {
+            collect_mono_from_expr(inner, env, defs, mono_fdefs, call_updates, worklist)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Walk statements to find generic calls, maintaining env for type inference.
+fn collect_mono_from_stmts(
+    stmts: &[Stmt],
+    env: &mut HashMap<String, Type>,
+    defs: &Defs,
+    mono_fdefs: &mut HashMap<String, FunctionDef>,
+    call_updates: &mut HashMap<String, String>,
+    worklist: &mut Vec<String>,
+) -> Result<(), String> {
+    for s in stmts {
+        match s {
+            Stmt::Let { name, value, .. } => {
+                // Infer type and update env before walking the value
+                if let Ok(t) = infer_type(value, env, defs, &HashMap::new()) {
+                    env.insert(name.clone(), t);
+                }
+                collect_mono_from_expr(value, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+            Stmt::Return(e) => {
+                if let Some(e) = e {
+                    collect_mono_from_expr(e, env, defs, mono_fdefs, call_updates, worklist)?;
+                }
+            }
+            Stmt::Expr(e) => {
+                collect_mono_from_expr(e, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+            Stmt::Assign { name, value } => {
+                if let Ok(t) = infer_type(value, env, defs, &HashMap::new()) {
+                    env.insert(name.clone(), t);
+                }
+                collect_mono_from_expr(value, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+            Stmt::If { cond, then_branch, else_branch } => {
+                collect_mono_from_expr(cond, env, defs, mono_fdefs, call_updates, worklist)?;
+                let mut then_env = env.clone();
+                collect_mono_from_stmts(then_branch, &mut then_env, defs, mono_fdefs, call_updates, worklist)?;
+                if let Some(eb) = else_branch {
+                    let mut else_env = env.clone();
+                    collect_mono_from_stmts(eb, &mut else_env, defs, mono_fdefs, call_updates, worklist)?;
+                }
+            }
+            Stmt::While { cond, body } => {
+                collect_mono_from_expr(cond, env, defs, mono_fdefs, call_updates, worklist)?;
+                collect_mono_from_stmts(body, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+            Stmt::For { var, iterable, body } => {
+                if let Ok(it_ty) = infer_type(iterable, env, defs, &HashMap::new()) {
+                    let elem = match &it_ty {
+                        Type::List(e) => (**e).clone(),
+                        _ => Type::Unknown,
+                    };
+                    env.insert(var.clone(), elem);
+                }
+                collect_mono_from_expr(iterable, env, defs, mono_fdefs, call_updates, worklist)?;
+                collect_mono_from_stmts(body, env, defs, mono_fdefs, call_updates, worklist)?;
+            }
+            Stmt::Match { expr, arms } => {
+                collect_mono_from_expr(expr, env, defs, mono_fdefs, call_updates, worklist)?;
+                for (_, body) in arms {
+                    let mut arm_env = env.clone();
+                    collect_mono_from_stmts(body, &mut arm_env, defs, mono_fdefs, call_updates, worklist)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Update Expr::Call.func in an expression tree using the call_updates mapping.
+fn update_call_in_expr(e: &mut Expr, call_updates: &HashMap<String, String>) {
+    match e {
+        Expr::Call { func, .. } => {
+            if let Some(new_name) = call_updates.get(func.as_str()) {
+                *func = new_name.clone();
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            update_call_in_expr(left, call_updates);
+            update_call_in_expr(right, call_updates);
+        }
+        Expr::UnOp { operand, .. } => {
+            update_call_in_expr(operand, call_updates);
+        }
+        Expr::MethodCall { object, args, .. } => {
+            update_call_in_expr(object, call_updates);
+            for a in args {
+                update_call_in_expr(a, call_updates);
+            }
+        }
+        Expr::FieldAccess { object, .. } => {
+            update_call_in_expr(object, call_updates);
+        }
+        Expr::Array(items) => {
+            for it in items {
+                update_call_in_expr(it, call_updates);
+            }
+        }
+        Expr::Range { start, end } => {
+            update_call_in_expr(start, call_updates);
+            update_call_in_expr(end, call_updates);
+        }
+        Expr::Await(inner) => {
+            update_call_in_expr(inner, call_updates);
+        }
+        _ => {}
+    }
+}
+
+/// Update Expr::Call.func in statements using the call_updates mapping.
+fn update_call_in_stmts(stmts: &mut [Stmt], call_updates: &HashMap<String, String>) {
+    for s in stmts.iter_mut() {
+        match s {
+            Stmt::Let { value, .. } => update_call_in_expr(value, call_updates),
+            Stmt::Return(e) => {
+                if let Some(e) = e {
+                    update_call_in_expr(e, call_updates);
+                }
+            }
+            Stmt::Expr(e) => update_call_in_expr(e, call_updates),
+            Stmt::Assign { value, .. } => update_call_in_expr(value, call_updates),
+            Stmt::If { cond, then_branch, else_branch } => {
+                update_call_in_expr(cond, call_updates);
+                update_call_in_stmts(then_branch, call_updates);
+                if let Some(eb) = else_branch {
+                    update_call_in_stmts(eb, call_updates);
+                }
+            }
+            Stmt::While { cond, body } => {
+                update_call_in_expr(cond, call_updates);
+                update_call_in_stmts(body, call_updates);
+            }
+            Stmt::For { iterable, body, .. } => {
+                update_call_in_expr(iterable, call_updates);
+                update_call_in_stmts(body, call_updates);
+            }
+            Stmt::Match { expr, arms } => {
+                update_call_in_expr(expr, call_updates);
+                for (_, body) in arms {
+                    update_call_in_stmts(body, call_updates);
+                }
+            }
+            Stmt::Fn { body, .. } => {
+                update_call_in_stmts(body, call_updates);
+            }
+            Stmt::Struct { methods, .. } => {
+                update_call_in_stmts(methods, call_updates);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Main monomorphization pass: discovers generic calls, creates concrete instances,
+/// updates call names, and adds monomorphized functions to defs.
+/// Runs after type checking, before memory analysis and codegen.
+fn monomorphize_all(defs: &mut Defs, stmts: &mut [Stmt]) -> Result<(), String> {
+    let mut mono_fdefs: HashMap<String, FunctionDef> = HashMap::new();
+    let mut call_updates: HashMap<String, String> = HashMap::new();
+
+    let mut worklist: Vec<String> = defs.functions.keys().cloned().collect();
+    let mut processed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Also scan top-level statements for generic calls
+    let mut env: HashMap<String, Type> = HashMap::new();
+    collect_mono_from_stmts(
+        stmts,
+        &mut env,
+        defs,
+        &mut mono_fdefs,
+        &mut call_updates,
+        &mut worklist,
+    )?;
+
+    // Iterative worklist: process functions and their newly created monomorphized clones
+    while let Some(func_name) = worklist.pop() {
+        if processed.contains(&func_name) {
+            continue;
+        }
+        processed.insert(func_name.clone());
+
+        let fdef = match defs.functions.get(&func_name) {
+            Some(f) => f.clone(),
+            None => continue,
+        };
+
+        // Build env from function parameters for type inference
+        let mut env: HashMap<String, Type> = HashMap::new();
+        for (pname, ptype) in &fdef.params {
+            env.insert(pname.clone(), type_from_str(ptype, defs));
+        }
+
+        collect_mono_from_stmts(
+            &fdef.body,
+            &mut env,
+            defs,
+            &mut mono_fdefs,
+            &mut call_updates,
+            &mut worklist,
+        )?;
+    }
+
+    // Add monomorphized functions to defs
+    for (mangled, fdef) in &mono_fdefs {
+        if !defs.functions.contains_key(mangled) {
+            defs.functions.insert(mangled.clone(), fdef.clone());
+        }
+    }
+
+    // Update Expr::Call.func in all function bodies to use mangled names
+    for (_name, fdef) in defs.functions.iter_mut() {
+        update_call_in_stmts(&mut fdef.body, &call_updates);
+    }
+    // Also update top-level statements (after scanning so env is fresh)
+    update_call_in_stmts(stmts, &call_updates);
+
+    Ok(())
+}
+
 // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
-fn memory_analyze(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
+// 蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・(let name -> Stack/Heap) 縺ｦ縺ｪ縺ｿ縺ｪ縺・縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// (LLVM Backend 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・蛻・蜈･縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+fn memory_analyze(stmts: &[Stmt], defs: &Defs) -> Result<HashMap<String, MemoryPlace>, String> {
     let mut report: Vec<(String, MemoryPlace)> = Vec::new();
     // 蝗ｲ繧險ｱ蜿ｯ: 蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・蜻蜷代″螂ｲ縺ｮ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・(非 async)
     //   Stmt::Fn 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・analyze_block 縺ｯ繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE
@@ -3945,15 +4450,17 @@ fn memory_analyze(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
     analyze_block(stmts, false, defs, &mut report)?;
 
     println!("=== Memory ===");
+    let mut map: HashMap<String, MemoryPlace> = HashMap::new();
     for (name, place) in &report {
         let p = match place {
             MemoryPlace::Stack => "stack",
             MemoryPlace::Heap => "heap",
         };
         println!("  {} -> {}", name, p);
+        map.insert(name.clone(), *place);
     }
     println!();
-    Ok(())
+    Ok(map)
 }
 
 // String 縺ｮ繝｡繧ｽ繝・・ｽ・ｽ隧穂ｾ｡・ｽE・ｽElen / .byte_len / .chars / .bytes / .slice・ｽE・ｽE
