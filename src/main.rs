@@ -2,14 +2,30 @@ use std::env;
 use std::fs;
 use std::collections::HashMap;
 
+// Phase 0 (Step 10): LLVM backend foundation (textual IR emitter).
+// Inkwell 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// 謨ｰ蛟､縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｯ蜈ｷ雎｡繝｡繧ｽ繝・ラ蜷代″縺ｮ LLVM IR 縺ｦ榆帥蜴ｻ縺ｦ縺ｪ縺ｿ縺ｪ縺・
+#[path = "codegen/mod.rs"]
+mod codegen;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: lime <file.lime>");
+        eprintln!("Usage: lime <file.lime> [--emit-ll]");
         return;
     }
 
-    let source = match fs::read_to_string(&args[1]) {
+    // Phase 0 (Step 10): LLVM backend foundation. --emit-ll 縺ｯ LLVM IR (text) 縺ｦ
+    // 蟋ｩ蜉ｨ縺ｮ .ll 縺ｯ榆帥蜴ｻ縺ｦ縺ｪ縺ｿ縺ｪ縺・(Inkwell 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+    let emit_ll = args.iter().any(|a| a == "--emit-ll");
+    let source_path = if args[1].starts_with("--") {
+        eprintln!("Usage: lime <file.lime> [--emit-ll]");
+        return;
+    } else {
+        args[1].clone()
+    };
+
+    let source = match fs::read_to_string(&source_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading file: {}", e);
@@ -70,6 +86,18 @@ fn main() {
             if let Err(e) = memory_analyze(&stmts, &defs) {
                 eprintln!("{}", e);
                 return;
+            }
+
+            // Phase 0 (Step 10): LLVM backend foundation.
+            // --emit-ll 縺ｯ LLVM IR (text) 縺ｦ .ll 縺ｯ榆帥蜴ｻ縺ｦ縺ｪ縺ｿ縺ｪ縺・
+            if emit_ll {
+                let out = codegen::emit_llvm(&stmts, &defs);
+                let base = source_path.trim_end_matches(".lime");
+                let ll_path = format!("{}.ll", base);
+                match fs::write(&ll_path, &out) {
+                    Ok(_) => eprintln!("LLVM IR written to {}", ll_path),
+                    Err(e) => eprintln!("Failed to write LLVM IR: {}", e),
+                }
             }
 
             if defs.functions.contains_key("main") {
