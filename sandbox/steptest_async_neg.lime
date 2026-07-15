@@ -1,0 +1,6 @@
+fn sync_fn(): str:
+    return "hi"
+
+fn main():
+    let x = await sync_fn()
+    print(x)

@@ -1,0 +1,24 @@
+lime request(str: url): Result(str, str):
+    let body = "response from " + url
+    return Success(body)
+
+lime fetch_all(): Result(str, str):
+    let first = await request("https://a.example.com")
+    match first:
+        Success(value):
+            let second = await request("https://b.example.com")
+            match second:
+                Success(v2):
+                    return Success(value + " | " + v2)
+                Error(_):
+                    return Error("second failed")
+        Error(_):
+            return Error("first failed")
+
+fn main():
+    let result = await fetch_all()
+    match result:
+        Success(v):
+            print(v)
+        Error(e):
+            print("error: " + e)

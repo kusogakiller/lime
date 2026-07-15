@@ -88,7 +88,7 @@ fn main() {
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     // Keywords
-    Fn, Struct, Interface, State, Let, Mut, If, Else, Match, Return,
+    Fn, Lime, Struct, Interface, State, Let, Mut, If, Else, Match, Return,
     Async, Await, Unsafe, True, False, Where, For, While,
     Int, Float, Str, Bool, Option,
 
@@ -260,6 +260,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
 
             let token = match ident.as_str() {
                 "fn" => Token::Fn,
+                "lime" => Token::Lime,
                 "struct" => Token::Struct,
                 "interface" => Token::Interface,
                 "state" => Token::State,
@@ -523,6 +524,9 @@ enum Expr {
         start: Box<Expr>,
         end: Box<Expr>,
     },
+    // 蜈郁ｪｭ繝｡繧ｽ繝・ラ蜷代″縺ｮ await 縺ｧ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE
+    // 蝗ｲ繧・ｽE・ｽRuntime 縺ｮ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE(lime 繧｡繧ｽ繝・ラ蝣ｴ蜷隗｣譫怜ｸ・繝｡繧ｽ繝・ラ蜷代″)
+    Await(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -566,6 +570,8 @@ enum Stmt {
         params: Vec<(String, String)>,
         return_type: Option<String>,
         body: Vec<Stmt>,
+        // lime 繧｡繧ｽ繝・ラ蜷代″縺ｮ true (fn 縺ｯ false)。await 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+        is_async: bool,
     },
     Struct {
         name: String,
@@ -665,7 +671,7 @@ impl Parser {
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
         match self.current() {
             Token::Let => self.parse_let(),
-            Token::Fn => self.parse_fn(),
+            Token::Fn | Token::Lime => self.parse_fn(),
             Token::Struct => self.parse_struct(),
             Token::State => self.parse_state(),
             Token::Interface => self.parse_interface(),
@@ -777,7 +783,13 @@ impl Parser {
     }
 
     fn parse_fn(&mut self) -> Result<Stmt, String> {
-        self.expect(Token::Fn)?;
+        // fn (同期) または lime (非同期) を許可。両者は戻り値型システムを完全共有。
+        let is_async = match self.current() {
+            Token::Fn => false,
+            Token::Lime => true,
+            other => return Err(format!("Expected 'fn' or 'lime', got {:?}", other)),
+        };
+        self.advance();
 
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
@@ -871,6 +883,7 @@ impl Parser {
             params,
             return_type,
             body,
+            is_async,
         })
     }
 
@@ -1543,6 +1556,11 @@ impl Parser {
                 let operand = self.parse_unary()?;
                 Ok(Expr::UnOp { op: "not".to_string(), operand: Box::new(operand) })
             }
+            Token::Await => {
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expr::Await(Box::new(operand)))
+            }
             _ => self.parse_postfix(),
         }
     }
@@ -1778,6 +1796,13 @@ enum Value {
         name: String,
         fields: Vec<(String, Value)>,
     },
+    // lime 繧｡繧ｽ繝・ラ蜷代″縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE: 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+    // 蜈郁ｪｭ縺ｿ縺ｧ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE(lime 繧｡繧ｽ繝・ラ蝣ｴ蜷隗｣譫怜ｸ・)縲∝ｽ硅 Country.縺ｮ縺ｪ縺ｿ縺ｪ縺・
+    // await 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+    Future {
+        func: String,
+        args: Vec<Value>,
+    },
 }
 
 // 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ髢｢謨ｰ
@@ -1789,6 +1814,8 @@ struct FunctionDef {
     params: Vec<(String, String)>,
     return_type: Option<String>,
     body: Vec<Stmt>,
+    // lime 繧｡繧ｽ繝・ラ蜷代″縺ｮ true (fn 縺ｯ false)
+    is_async: bool,
 }
 
 // struct螳夂ｾｩ・ｽE・ｽ繝輔ぅ繝ｼ繝ｫ繝・+ 繝｡繧ｽ繝・・ｽ・ｽ・ｽE・ｽE
@@ -1867,6 +1894,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                         params,
                         return_type,
                         body,
+                        is_async: _,
                     } = m
                     {
                         method_map.insert(
@@ -1877,6 +1905,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                                 params: params.clone(),
                                 return_type: return_type.clone(),
                                 body: body.clone(),
+                                is_async: false,
                             },
                         );
                     }
@@ -1925,6 +1954,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                 params,
                 return_type,
                 body,
+                is_async,
             } => {
                 defs.functions.insert(
                     name.clone(),
@@ -1934,6 +1964,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                         params: params.clone(),
                         return_type: return_type.clone(),
                         body: body.clone(),
+                        is_async: *is_async,
                     },
                 );
                 collect_defs(body, defs);
@@ -1979,6 +2010,7 @@ impl Value {
                 }
             }
             Value::Struct { name, .. } => format!("{}(...)", name),
+            Value::Future { func, .. } => format!("<future {}>", func),
         }
     }
 }
@@ -2506,6 +2538,7 @@ fn infer_type(
             }
         }
         Expr::Range { .. } => Ok(Type::List(Box::new(Type::Int))),
+        Expr::Await(inner) => infer_type(inner, env, defs, constraints),
         _ => Ok(Type::Unknown),
     }
 }
@@ -2561,6 +2594,7 @@ fn resolve_operators_expr(
             resolve_operators_expr(start, defs, env, constraints);
             resolve_operators_expr(end, defs, env, constraints);
         }
+        Expr::Await(inner) => resolve_operators_expr(inner, defs, env, constraints),
         _ => {}
     }
 }
@@ -3111,6 +3145,41 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 )),
             }
         }
+
+        Expr::Await(inner) => {
+            // await 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE縺ｧ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE
+            // (lime 繧｡繧ｽ繝・ラ蜷代″)縲∝ｽ硅 Country.縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            // fn 縺･ lime 縺ｯ戻ｨ蜈ｰ繝｡繧ｽ繝・ラ蜷代″縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            if let Expr::Call { func, .. } = inner.as_ref() {
+                match defs.functions.get(func) {
+                    Some(fdef) if fdef.is_async => {
+                        // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・縺楂ользов된繝｡繧ｽ繝・ラ蜷代″縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE縺ｧ繧｢蜷阪→
+                        if let Some(rt) = &fdef.return_type {
+                            Ok(type_from_str(rt, defs))
+                        } else {
+                            Ok(Type::Unit)
+                        }
+                    }
+                    Some(_) => {
+                        // 岍ｵ蜈ｰ縺ｴ繝｡繧ｽ繝・ラ蜷代″(fn) 縺ｯ await 縺ｮ縺ｪ縺ｿ縺ｪ縺・
+                        return Err(format!(
+                            "Type error: await can only be applied to a lime (async) function, but '{}' is a synchronous fn",
+                            func
+                        ));
+                    }
+                    None => {
+                        return Err(format!(
+                            "Type error: await target '{}' is not a known function",
+                            func
+                        ));
+                    }
+                }
+            } else {
+                return Err(
+                    "Type error: await can only be applied to a lime function call".to_string(),
+                );
+            }
+        }
     }
 }
 
@@ -3120,6 +3189,7 @@ fn check_stmt(
     env: &mut TypeEnv,
     defs: &Defs,
     expected_return: Option<&Type>,
+    is_async: bool,
 ) -> Result<(), String> {
     match stmt {
         Stmt::Let { name, type_hint, value, .. } => {
@@ -3175,9 +3245,9 @@ fn check_stmt(
                     c_ty
                 ));
             }
-            check_stmts(then_branch, env, defs, expected_return)?;
+            check_stmts(then_branch, env, defs, expected_return, is_async)?;
             if let Some(els) = else_branch {
-                check_stmts(els, env, defs, expected_return)?;
+                check_stmts(els, env, defs, expected_return, is_async)?;
             }
             Ok(())
         }
@@ -3192,7 +3262,7 @@ fn check_stmt(
             };
             let mut loop_env = env.clone();
             loop_env.insert(var.clone(), elem_ty);
-            check_stmts(body, &mut loop_env, defs, expected_return)?;
+            check_stmts(body, &mut loop_env, defs, expected_return, is_async)?;
             Ok(())
         }
 
@@ -3204,7 +3274,7 @@ fn check_stmt(
                     c_ty
                 ));
             }
-            check_stmts(body, env, defs, expected_return)?;
+            check_stmts(body, env, defs, expected_return, is_async)?;
             Ok(())
         }
 
@@ -3237,7 +3307,7 @@ fn check_stmt(
                                 arm_env.insert(b.clone(), Type::Unknown);
                             }
                         }
-                        check_stmts(body, &mut arm_env, defs, expected_return)?;
+                        check_stmts(body, &mut arm_env, defs, expected_return, is_async)?;
                     }
                 }
 
@@ -3269,7 +3339,7 @@ fn check_stmt(
                                 arm_env.insert(b.clone(), Type::Unknown);
                             }
                         }
-                        check_stmts(body, &mut arm_env, defs, expected_return)?;
+                        check_stmts(body, &mut arm_env, defs, expected_return, is_async)?;
                     }
                 }
                 for v in &variants {
@@ -3283,7 +3353,7 @@ fn check_stmt(
             } else {
                 // State / Option 蝙倶ｻ･螟厄ｿｽE蜷・・ｽE縺ｮ繝懊ョ繧｣縺ｮ縺ｿ讀懈渊・ｽE・ｽ譚溽ｸ帙↑縺暦ｼ・
                 for (_, body) in arms {
-                    check_stmts(body, env, defs, expected_return)?;
+            check_stmts(body, env, defs, expected_return, is_async)?;
                 }
             }
             Ok(())
@@ -3327,9 +3397,10 @@ fn check_stmts(
     env: &mut TypeEnv,
     defs: &Defs,
     expected_return: Option<&Type>,
+    is_async: bool,
 ) -> Result<(), String> {
     for s in stmts {
-        check_stmt(s, env, defs, expected_return)?;
+        check_stmt(s, env, defs, expected_return, is_async)?;
     }
     Ok(())
 }
@@ -3341,6 +3412,7 @@ fn check_function(
     return_type: &Option<String>,
     body: &[Stmt],
     defs: &Defs,
+    is_async: bool,
 ) -> Result<(), String> {
     let mut env = TypeEnv::new();
     for (tv, iface) in constraints {
@@ -3350,7 +3422,7 @@ fn check_function(
         env.insert(pname.clone(), type_from_str(ptype, defs));
     }
     let rt = return_type.as_ref().map(|r| type_from_str(r, defs));
-    check_stmts(body, &mut env, defs, rt.as_ref())
+    check_stmts(body, &mut env, defs, rt.as_ref(), is_async)
 }
 
 // 繝励Ο繧ｰ繝ｩ繝蜈ｨ菴難ｿｽE蝙区､懈渊
@@ -3365,9 +3437,10 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                 params,
                 return_type,
                 body,
+                is_async,
             } => {
                 let _ = type_params;
-                check_function(params, constraints, return_type, body, defs)
+                check_function(params, constraints, return_type, body, defs, *is_async)
                     .map_err(|e| format!("In function '{}': {}", name, e))?;
             }
             Stmt::Struct {
@@ -3393,6 +3466,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                         params,
                         return_type,
                         body,
+                        is_async: _,
                     } = m
                     {
                         // 繝輔ぅ繝ｼ繝ｫ繝臥腸蠅・+ 蠑墓焚繧呈ｳｨ蜈･
@@ -3404,7 +3478,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                             menv.insert(pname.clone(), type_from_str(ptype, defs));
                         }
                         let rt = return_type.as_ref().map(|r| type_from_str(r, defs));
-                        check_stmts(body, &mut menv, defs, rt.as_ref())
+                        check_stmts(body, &mut menv, defs, rt.as_ref(), false)
                             .map_err(|e| format!("In method '{}.{}': {}", name, mname, e))?;
                     }
                 }
@@ -3418,7 +3492,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                 if let Ok(t) = &v_ty {
                     env.insert(name.clone(), t.clone());
                 }
-                check_stmt(stmt, &mut env, defs, None)?;
+                check_stmt(stmt, &mut env, defs, None, false)?;
                 if let Ok(t) = v_ty {
                     top_env.insert(name.clone(), t);
                 }
@@ -3429,7 +3503,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
             | Stmt::Expr(_)
             | Stmt::Assign { .. } => {
                 let mut env = top_env.clone();
-                check_stmt(stmt, &mut env, defs, None)?;
+                check_stmt(stmt, &mut env, defs, None, false)?;
             }
             _ => {}
         }
@@ -3890,6 +3964,19 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 _ => Err("Range requires integer bounds".to_string()),
             }
         }
+        Expr::Await(inner) => {
+            let fut = eval_expr(inner, env, defs)?;
+            match fut {
+                Value::Future { func, args } => {
+                    // force_run: true 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・
+                    call_function_impl(&func, args, defs, true)
+                }
+                other => Err(format!(
+                    "await can only be applied to a lime (async) function call, got {:?}",
+                    other
+                )),
+            }
+        }
     }
 }
 
@@ -3897,6 +3984,17 @@ fn call_function(
     name: &str,
     args: Vec<Value>,
     defs: &Defs,
+) -> Result<Value, String> {
+    call_function_impl(name, args, defs, false)
+}
+
+// force_run: true 縺ｯ縺ｧ繧｢蜷阪→縺ｮ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・繧｢繝ｩ繝ｼ・ｽE・ｽE繧定ｧ｣繝ｼ繝牙ｒ繝・・ｽ・ｽ辷ｰ縺ｮ縺ｿ縺ｪ縺・
+// (await 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+fn call_function_impl(
+    name: &str,
+    args: Vec<Value>,
+    defs: &Defs,
+    force_run: bool,
 ) -> Result<Value, String> {
     let func = defs
         .functions
@@ -3914,8 +4012,17 @@ fn call_function(
     }
 
     let mut local: HashMap<String, Value> = HashMap::new();
-    for ((param_name, _param_type), val) in func.params.iter().zip(args.into_iter()) {
+    for ((param_name, _param_type), val) in func.params.iter().zip(args.iter().cloned()) {
         local.insert(param_name.clone(), val);
+    }
+
+    // lime 繧｡繧ｽ繝・ラ蜷代″縺ｮ蟷ｻ蜈･: 蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE(Future) 縺ｦ縺ｪ縺ｿ縺ｪ縺・、
+    // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・await 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・
+    if func.is_async && !force_run {
+        return Ok(Value::Future {
+            func: name.to_string(),
+            args,
+        });
     }
 
     Ok(exec_value(execute_stmts(&func.body, &mut local, defs)?))
