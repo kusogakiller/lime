@@ -94,6 +94,29 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
         out.push_str(&func_ir);
     }
 
+    // Phase 7: Struct method function definitions
+    for (sname, sdef) in &defs.structs {
+        for (mname, mdef) in &sdef.methods {
+            if !mdef.type_params.is_empty() {
+                continue;
+            }
+            let method_func_name = format!("{}_{}", sname, mname);
+            // Prepend self parameter (struct type name, not LLVM IR notation)
+            let mut params = vec![(String::from("self"), sname.clone())];
+            params.extend(mdef.params.clone());
+            let method_fdef = FunctionDef {
+                type_params: Vec::new(),
+                constraints: Vec::new(),
+                params,
+                return_type: mdef.return_type.clone(),
+                body: mdef.body.clone(),
+                is_async: false,
+            };
+            let func_ir = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, &method_func_name, &method_fdef);
+            out.push_str(&func_ir);
+        }
+    }
+
     // C runtime main wrapper
     emit_main_wrapper(&mut out, defs);
 
@@ -124,6 +147,12 @@ fn collect_string_literals(defs: &Defs) -> HashMap<String, String> {
     let mut idx = 0usize;
     for (_, fdef) in &defs.functions {
         collect_strings_from_stmts(&fdef.body, &mut strings, &mut idx);
+    }
+    // Phase 7: also scan struct method bodies
+    for (_, sdef) in &defs.structs {
+        for (_, mdef) in &sdef.methods {
+            collect_strings_from_stmts(&mdef.body, &mut strings, &mut idx);
+        }
     }
     strings
 }

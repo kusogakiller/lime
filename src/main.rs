@@ -521,7 +521,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
 
 // BinOp 縺ｮ貍皮ｮ怜ｭ占ｧ｣豎ｺ邨先棡・・ypeChecker 縺ｮ縺ｿ縺瑚ｨｭ螳壹＠縲。ackend 縺ｯ縺昴・縺ｾ縺ｾ螳溯｡鯉ｼ・
 #[derive(Debug, Clone, PartialEq)]
-enum ResolvedOperator {
+pub enum ResolvedOperator {
     // 邨・∩霎ｼ縺ｿ貍皮ｮ暦ｼ・nt/float/str 遲峨・譌｢蟄俶ｼ皮ｮ励ｒ邯ｭ謖・ｼ・
     Builtin,
     // Operator Interface 邨檎罰縺ｮ隗｣豎ｺ: 蜻ｼ縺ｳ蜃ｺ縺吶Γ繧ｽ繝・ラ蜷阪→蜈・・貍皮ｮ怜ｭ舌・
