@@ -143,7 +143,8 @@ un_op         ::= "-" | "not"
 | `Set(T)` | 集合 |
 | `Tuple(T1, T2, ...)` | タプル |
 | `Option(T)` | Null 安全（`T?` 省略記法可） |
-| `State` 派生 | `state Result(T):` で定義 |
+| `Result(T, E)` | 成功/失敗の結果型。`Success(T)` / `Error(E)` の組（`Ok`/`Err` は不使用）。`state` 宣言不要の組み込み（既存の State + Generic 仕組みで実装）。 |
+| `State` 派生 | `state Name(T):` で定義 |
 | `Struct` 派生 | `struct User:` で定義 |
 | `Interface` 派生 | `interface Animal:` で定義 |
 | `T*` | Pointer（unsafe のみ） |

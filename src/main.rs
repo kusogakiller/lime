@@ -826,14 +826,10 @@ impl Parser {
             Token::Int |
             Token::Float |
             Token::Str |
-            Token::Bool => {
+            Token::Bool |
+            Token::Ident(_) |
+            Token::Option => {
                 Some(self.parse_type(&mut constraints)?)
-            }
-
-            Token::Ident(name) => {
-                let t = name.clone();
-                self.advance();
-                Some(t)
             }
 
             _ => None,
@@ -1832,13 +1828,23 @@ struct Defs {
 
 impl Defs {
     fn new() -> Self {
-        Defs {
+        let mut defs = Defs {
             structs: HashMap::new(),
             state_variants: HashMap::new(),
             states: HashMap::new(),
             functions: HashMap::new(),
             interfaces: HashMap::new(),
-        }
+        };
+        // Result(T, E) 繧ｳ繝ｳ繧ｹ繝医Λ繧ｯ繧ｿ蜊ｻ蜉: 蟷ｻ蜈･繝｡繧ｽ繝・ラ鄂ｲ蜷阪→縺ｮ繝｡繧ｽ繝・ラ/State 繝｡繧ｽ繝・ラ縺ｮ繝繧ｿ蜿悶ｊ蟆ら畑
+        // 蟷ｻ蜈･ Success / Error 縺ｮ蝠�社･繝｡繧ｽ繝・ラ蜷代″縺ｮ蝙句錐譁・險繝｡繧ｽ繝・ラ隕ｧ・ｽE・ｽ繧｢蜷阪→
+        // Ok / Err 縺ｯ莉｣蜈･纏ｯ縺ｿ縺ｪ縺・
+        defs.state_variants.insert("Success".to_string(), "Result".to_string());
+        defs.state_variants.insert("Error".to_string(), "Result".to_string());
+        defs.states.insert(
+            "Result".to_string(),
+            vec!["Success".to_string(), "Error".to_string()],
+        );
+        defs
     }
 }
 
@@ -3912,10 +3918,7 @@ fn call_function(
         local.insert(param_name.clone(), val);
     }
 
-    match execute_stmts(&func.body, &mut local, defs)? {
-        ExecResult::Return(v) => Ok(v),
-        ExecResult::Continue => Ok(Value::Int(0)),
-    }
+    Ok(exec_value(execute_stmts(&func.body, &mut local, defs)?))
 }
 
 fn call_method(
@@ -3958,16 +3961,27 @@ fn call_method(
         local.insert(param_name.clone(), val);
     }
 
-    match execute_stmts(&func.body, &mut local, defs)? {
-        ExecResult::Return(v) => Ok(v),
-        ExecResult::Continue => Ok(Value::Int(0)),
-    }
+    Ok(exec_value(execute_stmts(&func.body, &mut local, defs)?))
 }
 
 #[derive(Debug)]
 enum ExecResult {
+    // 繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE
     Continue,
+    // 繝医≧繝ｩ繝ｼ繧ｶ繝ｼ螳夂ｾｩ縺ｯ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨◎縺ｮ蛟､繧呈囓鮟・
+    // (return 繧ｫ繝ｼ繝ｫ繧｢蜷阪″縺ｮ縺ｪ縺ｿ縺ｪ縺・匝ｍ豌ｴ縺ｯ縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧｢蜷阪→)
+    Value(Value),
+    // 繝｡繧ｽ繝・ラ蜷代″縺ｮ return 繧ｫ繝ｼ繝ｫ繧｢蜷阪″縺ｮ縺ｪ縺ｿ縺ｪ縺・(繝医≧繝ｩ繝ｼ縺ｧ繧｢蜷阪→縺ｮ髢｢謨ｰ/繝｡繧ｽ繝・ラ縺ｮ縺ｪ縺ｿ縺ｪ縺・)
     Return(Value),
+}
+
+// 繝｡繧ｽ繝・ラ/繝｡繧ｽ繝・ラ蜷代″縺ｮ蛟､繧呈囓鮟・: return 繧ｫ繝ｼ繝ｫ繧｢蜷阪″縺ｮ縺ｪ縺ｿ縺ｪ縺・ Value 繧定ｿ斐＠、
+// Continue 縺ｯ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE縺ｮ繝医≧繝ｩ繝ｼ縺ｧ繧｢蜷阪→縺ｯ縺ｪ縺ｿ縺ｪ縺・
+fn exec_value(r: ExecResult) -> Value {
+    match r {
+        ExecResult::Return(v) | ExecResult::Value(v) => v,
+        ExecResult::Continue => Value::Int(0),
+    }
 }
 
 fn execute_stmts(
@@ -3975,23 +3989,23 @@ fn execute_stmts(
     env: &mut HashMap<String, Value>,
     defs: &Defs,
 ) -> Result<ExecResult, String> {
-    let mut result = ExecResult::Continue;
+    let mut last: ExecResult = ExecResult::Continue;
     let len = stmts.len();
     for (idx, stmt) in stmts.iter().enumerate() {
-        if idx == len - 1 {
-            // 縺ｮ繝医≧繝ｩ繝ｼ繧ｶ繝ｼ螳夂ｾｩ縺ｯ繧｢蜷阪→縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨◎縺ｮ蛟､繧呈囓鮟・
-            // 繝ｭ繝ｼ繧ｫ繝ｫ繧｢蜷阪″ Expr 縺ｧ蟇ｾ蜉ｻ縺ｿ縺ｪ縺・(匝ｍ豌ｴ繝・→縺ｯ繝医≧繝ｩ繝ｼ縺ｧ繧｢蜷阪→)
-            if let Stmt::Expr(e) = stmt {
-                let v = eval_expr(e, env, defs)?;
-                return Ok(ExecResult::Return(v));
+        let r = execute_stmt(stmt, env, defs)?;
+        match r {
+            // return 繧ｫ繝ｼ繝ｫ繧｢蜷阪″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｧ繧｢蜷阪→縺ｯ髢｢謨ｰ/繝｡繧ｽ繝・ラ縺ｮ縺ｪ縺ｿ縺ｪ縺・
+            ExecResult::Return(v) => return Ok(ExecResult::Return(v)),
+            // 繝医≧繝ｩ繝ｼ繧ｶ繝ｼ螳夂ｾｩ縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧峨お繝ｩ繝ｼ・ｽE・ｽE: 繝ｭ繝ｼ繧ｫ繝ｫ繧｢蜷阪″ Expr 縺ｧ蟇ｾ蜉ｻ縺ｿ縺ｪ縺・
+            // 匝ｍ豌ｴ縺ｯ縺ｮ蝙区枚蜿ｷ蜃ｺ縺ｧ繧｢蜷阪→縺ｮ蛟､繧呈囓鮟・(繝｡繧ｽ繝・ラ/return 縺ｯ縺ｪ縺ｿ縺ｪ縺・繝医≧繝ｩ繝ｼ縺ｧ繧｢蜷阪→)
+            other => {
+                if idx == len - 1 {
+                    last = other;
+                }
             }
         }
-        result = execute_stmt(stmt, env, defs)?;
-        if let ExecResult::Return(_) = result {
-            break;
-        }
     }
-    Ok(result)
+    Ok(last)
 }
 
 fn execute_stmt(
@@ -4006,8 +4020,8 @@ fn execute_stmt(
             Ok(ExecResult::Continue)
         }
         Stmt::Expr(e) => {
-            eval_expr(e, env, defs)?;
-            Ok(ExecResult::Continue)
+            let v = eval_expr(e, env, defs)?;
+            Ok(ExecResult::Value(v))
         }
         Stmt::Assign { name, value } => {
             let v = eval_expr(value, env, defs)?;
@@ -4053,7 +4067,7 @@ fn execute_stmt(
                 env.insert(var.clone(), item);
                 match execute_stmts(body, env, defs)? {
                     ExecResult::Return(v) => return Ok(ExecResult::Return(v)),
-                    ExecResult::Continue => {}
+                    ExecResult::Continue | ExecResult::Value(_) => {}
                 }
             }
             Ok(ExecResult::Continue)
@@ -4076,7 +4090,7 @@ fn execute_stmt(
                 }
                 match execute_stmts(body, env, defs)? {
                     ExecResult::Return(v) => return Ok(ExecResult::Return(v)),
-                    ExecResult::Continue => {}
+                    ExecResult::Continue | ExecResult::Value(_) => {}
                 }
             }
             Ok(ExecResult::Continue)
