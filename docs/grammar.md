@@ -175,21 +175,43 @@ un_op         ::= "-" | "not"
 | `.len()` | `int`（Unicode 文字数） |
 | `.byte_len()` | `int`（バイト長） |
 
-### 4.5 Operator Interface（数値型のみ）
+### 4.5 Operator Interface（ユーザー定義型対象）
 
-| Interface | 対応演算子 |
-|-----------|-----------|
-| `Add` | `+` |
-| `Equal` | `==` `!=` |
-| `Compare` | `<` `>` `<=` `>=` |
+| Interface | 対応演算子 | 解決メソッド | 戻り値解釈 |
+|-----------|-----------|-------------|-----------|
+| `Add` | `+` | `add` | そのまま（構造体） |
+| `Equal` | `==` `!=` | `equal` | bool（`!=` は否定） |
+| `Compare` | `<` `>` `<=` `>=` | `compare` | int の符号と比較（`<` : 符号<0 等） |
 
 `Sub` / `Mul` / `Div` は今後追加（順次拡張）。
-ユーザーは `fn add(...)` 等を実装するだけで演算子が使用可能。
-文字列は対象外（String API 経由）。
+ユーザーは `fn add(...)` 等を実装するだけで演算子が使用可能（暗黙実装）。
+文字列は対象外（String API 経由）。組み込み数値・bool・文字列は従来の組み込み演算を維持。
 
 命名は初心者にも役割が伝わること（Easy. Simple. Fast.）を優先：
 - `Eq` は略語で直感的でないため採用せず `Equal`。
 - `Ord` は "Order" の略で意味が伝わりにくいため採用せず `Compare`。
+
+#### 静的型解決（AST 格納方式）
+
+演算子の解決は **TypeChecker のみ**が担当し、結果を AST の `BinOp.resolved_operator`
+に格納する。Interpreter / 将来の LLVM Backend はこの情報だけを見て実行し、
+**Runtime での型検索や Struct 名からの Interface 検索は一切行わない**。
+
+```
+BinOp:
+  - 左式
+  - 演算子
+  - 右式
+  - resolved_operator: Option<ResolvedOperator>
+
+ResolvedOperator:
+  - Builtin                         # 組み込み型（int/float/str 等）の既存演算
+  - MethodCall { method, op }       # Operator Interface 経由（例: Add.add / Equal.equal / Compare.compare）
+```
+
+- ユーザー定義型（両辺が同一の struct）のみ Operator Interface を解決対象とする。
+- `!=` は `equal()` の結果を否定、`<` `>` `<=` `>=` は `compare()` の戻り int と 0 を比較して bool を生成。
+- 組み込み型は解決せず `Builtin` とする（既存演算を維持）。
 
 ### 4.6 Generic / Constraint
 

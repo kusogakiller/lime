@@ -34,7 +34,7 @@ fn main() {
 
     // Parser
     match parse(tokens) {
-        Ok(stmts) => {
+        Ok(mut stmts) => {
             println!("=== AST ===");
             for stmt in &stmts {
                 println!("{:#?}", stmt);
@@ -46,13 +46,16 @@ fn main() {
             let mut defs = Defs::new();
             collect_defs(&stmts, &mut defs);
 
-            // Interface 適合検証（struct が宣言した interface を満たすか）
+            // Interface 驕ｩ蜷域､懆ｨｼ・・truct 縺悟ｮ｣險縺励◆ interface 繧呈ｺ縺溘☆縺具ｼ・
             if let Err(e) = check_interface_conformance(&defs) {
                 eprintln!("Type error: {}", e);
                 return;
             }
 
-            // Type Checker�E�実行前に型的に正しいか検査�E�E
+            // 貍皮ｮ怜ｭ舌ｒ髱咏噪縺ｫ隗｣豎ｺ縺・AST 縺ｫ譖ｸ縺崎ｾｼ繧・亥ｮ溯｡梧凾縺ｯ縺薙・諠・ｱ縺ｮ縺ｿ菴ｿ逕ｨ・・
+            resolve_operators_stmts(&mut stmts, &defs);
+
+            // Type Checker・ｽE・ｽ螳溯｡悟燕縺ｫ蝙狗噪縺ｫ豁｣縺励＞縺区､懈渊・ｽE・ｽE
             if let Err(e) = type_check(&stmts, &defs) {
                 eprintln!("Type error: {}", e);
                 return;
@@ -63,7 +66,7 @@ fn main() {
                     eprintln!("Runtime error: {}", e);
                 }
             } else {
-                // main が無ぁE��合�Eトップレベル斁E��実衁E
+                // main 縺檎┌縺・・ｽ・ｽ蜷茨ｿｽE繝医ャ繝励Ξ繝吶Ν譁・・ｽ・ｽ螳溯｡・
                 let mut env = HashMap::new();
                 if let Err(e) = execute_stmts(&stmts, &mut env, &defs) {
                     eprintln!("Runtime error: {}", e);
@@ -118,30 +121,30 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
     while i < n {
         let ch = chars[i];
 
-        // 改衁E
+        // 謾ｹ陦・
         if ch == '\n' {
             tokens.push(Token::Newline);
             line += 1;
             col = 1;
             i += 1;
-            // 空行�Eコメント行をスキチE�Eし、次の実コード行�EインチE��トで調整する
+            // 遨ｺ陦鯉ｿｽE繧ｳ繝｡繝ｳ繝郁｡後ｒ繧ｹ繧ｭ繝・・ｽE縺励∵ｬ｡縺ｮ螳溘さ繝ｼ繝芽｡鯉ｿｽE繧､繝ｳ繝・・ｽ・ｽ繝医〒隱ｿ謨ｴ縺吶ｋ
             let mut indent = 0usize;
             loop {
-                // 行頭の空白を消費してインチE��トを計測
+                // 陦碁ｭ縺ｮ遨ｺ逋ｽ繧呈ｶ郁ｲｻ縺励※繧､繝ｳ繝・・ｽ・ｽ繝医ｒ險域ｸｬ
                 indent = 0;
                 while i < n && (chars[i] == ' ' || chars[i] == '\t') {
                     indent += 1;
                     i += 1;
                 }
                 if i < n && chars[i] == '#' {
-                    // コメント行をスキチE�E
+                    // 繧ｳ繝｡繝ｳ繝郁｡後ｒ繧ｹ繧ｭ繝・・ｽE
                     while i < n && chars[i] != '\n' {
                         i += 1;
                     }
                     continue;
                 }
                 if i < n && chars[i] == '\n' {
-                    // 空衁E 改行を記録して次の行へ
+                    // 遨ｺ陦・ 謾ｹ陦後ｒ險倬鹸縺励※谺｡縺ｮ陦後∈
                     tokens.push(Token::Newline);
                     line += 1;
                     i += 1;
@@ -164,7 +167,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // コメンチE
+        // 繧ｳ繝｡繝ｳ繝・
         if ch == '#' {
             while i < n && chars[i] != '\n' {
                 i += 1;
@@ -172,14 +175,14 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 空白
+        // 遨ｺ逋ｽ
         if ch == ' ' || ch == '\t' {
             i += 1;
             col += 1;
             continue;
         }
 
-        // 斁E���EリチE��ル
+        // 譁・・ｽ・ｽ・ｽE繝ｪ繝・・ｽ・ｽ繝ｫ
         if ch == '"' {
             i += 1;
             let mut s = String::new();
@@ -210,15 +213,15 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 数孁E
+        // 謨ｰ蟄・
         if ch.is_ascii_digit() {
             let start = i;
             let mut is_float = false;
             while i < n && chars[i].is_ascii_digit() {
                 i += 1;
             }
-            // 小数点: '.' の直後が数字�E場合�Eみ浮動小数とする
-            // �E�E..' は Range 演算子なので消費しなぁE��E
+            // 蟆乗焚轤ｹ: '.' 縺ｮ逶ｴ蠕後′謨ｰ蟄暦ｿｽE蝣ｴ蜷茨ｿｽE縺ｿ豬ｮ蜍募ｰ乗焚縺ｨ縺吶ｋ
+            // ・ｽE・ｽE..' 縺ｯ Range 貍皮ｮ怜ｭ舌↑縺ｮ縺ｧ豸郁ｲｻ縺励↑縺・・ｽ・ｽE
             if i < n && chars[i] == '.' && i + 1 < n && chars[i + 1].is_ascii_digit() {
                 is_float = true;
                 i += 1; // '.'
@@ -241,7 +244,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 識別孁E/ キーワーチE
+        // 隴伜挨蟄・/ 繧ｭ繝ｼ繝ｯ繝ｼ繝・
         if ch.is_alphabetic() || ch == '_' {
             let start = i;
             while i < n && (chars[i].is_alphanumeric() || chars[i] == '_') {
@@ -277,6 +280,10 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
                 "for" => Token::For,
                 "while" => Token::While,
 
+                "and" => Token::And,
+                "or" => Token::Or,
+                "not" => Token::Not,
+
                 _ => Token::Ident(ident),
             };
 
@@ -285,7 +292,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             continue;
         }
 
-        // 演算孁E
+        // 貍皮ｮ怜ｭ・
         let op = match ch {
             '+' => {
                 i += 1;
@@ -450,7 +457,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
         col += 1;
     }
 
-    // 末尾のインチE��トを閉じめE
+    // 譛ｫ蟆ｾ縺ｮ繧､繝ｳ繝・・ｽ・ｽ繝医ｒ髢峨§繧・
     while indent_stack.len() > 1 {
         indent_stack.pop();
         tokens.push(Token::Dedent);
@@ -462,6 +469,19 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
 }
 
 // ===== Parser =====
+
+// BinOp 縺ｮ貍皮ｮ怜ｭ占ｧ｣豎ｺ邨先棡・・ypeChecker 縺ｮ縺ｿ縺瑚ｨｭ螳壹＠縲。ackend 縺ｯ縺昴・縺ｾ縺ｾ螳溯｡鯉ｼ・
+#[derive(Debug, Clone, PartialEq)]
+enum ResolvedOperator {
+    // 邨・∩霎ｼ縺ｿ貍皮ｮ暦ｼ・nt/float/str 遲峨・譌｢蟄俶ｼ皮ｮ励ｒ邯ｭ謖・ｼ・
+    Builtin,
+    // Operator Interface 邨檎罰縺ｮ隗｣豎ｺ: 蜻ｼ縺ｳ蜃ｺ縺吶Γ繧ｽ繝・ラ蜷阪→蜈・・貍皮ｮ怜ｭ舌・
+    // 萓・ Add.add / Equal.equal / Compare.compare縲・
+    // Interpreter/Backend 縺ｯ method 繧貞他縺ｳ蜃ｺ縺励｛p 縺ｧ邨先棡繧定ｧ｣驥医☆繧・
+    // ・・= 縺ｯ equal() 縺ｮ蜷ｦ螳壹・ > <= >= 縺ｯ compare() 縺ｮ隨ｦ蜿ｷ縺ｨ豈碑ｼ・ｼ峨・
+    MethodCall { method: String, op: String },
+}
+
 #[derive(Debug, Clone)]
 enum Expr {
     IntLit(i64),
@@ -473,6 +493,8 @@ enum Expr {
         left: Box<Expr>,
         op: String,
         right: Box<Expr>,
+        // TypeChecker 縺瑚ｧ｣豎ｺ貂医∩諠・ｱ繧呈ｼ邏搾ｼ域悴隗｣豎ｺ譎ゅ・ None・・
+        resolved_operator: Option<ResolvedOperator>,
     },
     UnOp {
         op: String,
@@ -504,16 +526,24 @@ enum Pattern {
         name: String,
         bindings: Vec<String>,
     },
-    // 予紁E パ�Eサからは生�EしなぁE��Eatch-all は else禁止のため不採用�E�E
+    // 莠育ｴ・ 繝托ｿｽE繧ｵ縺九ｉ縺ｯ逕滂ｿｽE縺励↑縺・・ｽ・ｽEatch-all 縺ｯ else遖∵ｭ｢縺ｮ縺溘ａ荳肴治逕ｨ・ｽE・ｽE
     Ignore,
 }
 
-// interface のメソッド署名（本体なし）
+// interface 縺ｮ繝｡繧ｽ繝・ラ鄂ｲ蜷搾ｼ域悽菴薙↑縺暦ｼ・
 #[derive(Debug, Clone)]
 struct InterfaceMethod {
     name: String,
     params: Vec<(String, String)>,
     return_type: Option<String>,
+}
+
+// interface 螳夂ｾｩ・医ず繧ｧ繝阪Μ繝・け蝙句ｼ墓焚繧剃ｿ晄戟・・
+#[derive(Debug, Clone)]
+struct InterfaceDefAst {
+    name: String,
+    type_params: Vec<String>,
+    methods: Vec<InterfaceMethod>,
 }
 
 #[derive(Debug, Clone)]
@@ -562,6 +592,7 @@ enum Stmt {
     },
     Interface {
         name: String,
+        type_params: Vec<String>,
         methods: Vec<InterfaceMethod>,
     },
     Return(Option<Expr>),
@@ -636,7 +667,7 @@ impl Parser {
             Token::For => self.parse_for(),
             Token::While => self.parse_while(),
             _ => {
-                // 代入斁E Ident '=' expr
+                // 莉｣蜈･譁・ Ident '=' expr
                 if let Token::Ident(name) = self.current().clone() {
                     if self.peek() == &Token::Assign {
                         self.advance(); // Ident
@@ -667,8 +698,8 @@ impl Parser {
             false
         };
 
-        // Lime構文: let [mut] <type>: <name> = <expr>
-        // 型推論時は型を省略可: let [mut] <name> = <expr>
+        // Lime讒区枚: let [mut] <type>: <name> = <expr>
+        // 蝙区耳隲匁凾縺ｯ蝙九ｒ逵∫払蜿ｯ: let [mut] <name> = <expr>
         let has_type = match self.current() {
             Token::Int | Token::Float | Token::Str | Token::Bool | Token::Option => true,
             Token::Ident(_) => self.peek() == &Token::Colon,
@@ -702,12 +733,12 @@ impl Parser {
     fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
         let mut stmts = Vec::new();
 
-        // 改行を消費
+        // 謾ｹ陦後ｒ豸郁ｲｻ
         if self.current() == &Token::Newline {
             self.advance();
         }
 
-        // インチE��ト開姁E
+        // 繧､繝ｳ繝・・ｽ・ｽ繝磯幕蟋・
         if self.current() == &Token::Indent {
             self.advance();
         } else {
@@ -728,7 +759,7 @@ impl Parser {
             stmts.push(self.parse_stmt()?);
         }
 
-        // インチE��ト終亁E
+        // 繧､繝ｳ繝・・ｽ・ｽ繝育ｵゆｺ・
         if self.current() == &Token::Dedent {
             self.advance();
         }
@@ -745,7 +776,7 @@ impl Parser {
         };
         self.advance();
 
-        // ジェネリック関数: fn name(T)(args): の (T) 部分
+        // 繧ｸ繧ｧ繝阪Μ繝・け髢｢謨ｰ: fn name(T)(args): 縺ｮ (T) 驛ｨ蛻・
         let type_params = self.parse_type_params(true)?;
 
         self.expect(Token::LParen)?;
@@ -753,7 +784,7 @@ impl Parser {
         let mut params = Vec::new();
 
         while self.current() != &Token::RParen {
-            // Lime構文: <type>: <name>  （名前は省略可: 型のみの場合は "_" とする）
+            // Lime讒区枚: <type>: <name>  ・亥錐蜑阪・逵∫払蜿ｯ: 蝙九・縺ｿ縺ｮ蝣ｴ蜷医・ "_" 縺ｨ縺吶ｋ・・
             let param_type = self.parse_type()?;
 
             if self.current() == &Token::Colon {
@@ -778,7 +809,7 @@ impl Parser {
 
         self.expect(Token::RParen)?;
 
-        // 署名終端の : （戻り型省略時はこれが終端）
+        // 鄂ｲ蜷咲ｵらｫｯ縺ｮ : ・域綾繧雁梛逵∫払譎ゅ・縺薙ｌ縺檎ｵらｫｯ・・
         self.expect(Token::Colon)?;
 
         let return_type = match self.current() {
@@ -798,7 +829,7 @@ impl Parser {
             _ => None,
         };
 
-        // 戻り型指定時はさらに終端の : が続く
+        // 謌ｻ繧雁梛謖・ｮ壽凾縺ｯ縺輔ｉ縺ｫ邨らｫｯ縺ｮ : 縺檎ｶ壹￥
         if return_type.is_some() {
             self.expect(Token::Colon)?;
         }
@@ -815,7 +846,7 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<String, String> {
-        // Option(T) 記況E Option キーワード�E直後が ( なめEGeneric 引数を解极E
+        // Option(T) 險俶ｳ・ Option 繧ｭ繝ｼ繝ｯ繝ｼ繝会ｿｽE逶ｴ蠕後′ ( 縺ｪ繧・Generic 蠑墓焚繧定ｧ｣譫・
         if let Token::Option = self.current() {
             self.advance();
             self.expect(Token::LParen)?;
@@ -847,7 +878,7 @@ impl Parser {
             }
             _ => return Err(format!("Expected type, got {:?}", self.current())),
         };
-        // T? 省略記況E 後ろに ? が続く場合�E Option(T) とする
+        // T? 逵∫払險俶ｳ・ 蠕後ｍ縺ｫ ? 縺檎ｶ壹￥蝣ｴ蜷茨ｿｽE Option(T) 縺ｨ縺吶ｋ
         if self.current() == &Token::Question {
             self.advance();
             return Ok(format!("Option({})", base));
@@ -855,9 +886,9 @@ impl Parser {
         Ok(base)
     }
 
-    // 先読み: 現在位置の (...) が「型引数リスト」として解析できるか試す。
-    // 成功すれば Some([型文字列...]) を返し、位置は ) の直後に進む。
-    // 失敗(値引数など)なら None を返し、位置は元に戻る。
+    // 蜈郁ｪｭ縺ｿ: 迴ｾ蝨ｨ菴咲ｽｮ縺ｮ (...) 縺後悟梛蠑墓焚繝ｪ繧ｹ繝医阪→縺励※隗｣譫舌〒縺阪ｋ縺玖ｩｦ縺吶・
+    // 謌仙粥縺吶ｌ縺ｰ Some([蝙区枚蟄怜・...]) 繧定ｿ斐＠縲∽ｽ咲ｽｮ縺ｯ ) 縺ｮ逶ｴ蠕後↓騾ｲ繧縲・
+    // 螟ｱ謨・蛟､蠑墓焚縺ｪ縺ｩ)縺ｪ繧・None 繧定ｿ斐＠縲∽ｽ咲ｽｮ縺ｯ蜈・↓謌ｻ繧九・
     fn try_parse_type_args(&mut self) -> Option<Vec<String>> {
         let save = self.pos;
         if self.current() != &Token::LParen {
@@ -892,12 +923,12 @@ impl Parser {
         }
     }
 
-    // ジェネリチE��型パラメータ: Name(T, U) の (T, U) 部刁E��解极E
-    // require_paren_after = true の場吁E関数)、最初�E (...) の直後が ( ならジェネリチE��、E
-    //   そうでなければそれは引数リストなのでジェネリチE��無し、E
-    // require_paren_after = false の場吁Estruct/state)、E...) があれ�E常にジェネリチE��、E
+    // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蝙九ヱ繝ｩ繝｡繝ｼ繧ｿ: Name(T, U) 縺ｮ (T, U) 驛ｨ蛻・・ｽ・ｽ隗｣譫・
+    // require_paren_after = true 縺ｮ蝣ｴ蜷・髢｢謨ｰ)縲∵怙蛻晢ｿｽE (...) 縺ｮ逶ｴ蠕後′ ( 縺ｪ繧峨ず繧ｧ繝阪Μ繝・・ｽ・ｽ縲・
+    //   縺昴≧縺ｧ縺ｪ縺代ｌ縺ｰ縺昴ｌ縺ｯ蠑墓焚繝ｪ繧ｹ繝医↑縺ｮ縺ｧ繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ辟｡縺励・
+    // require_paren_after = false 縺ｮ蝣ｴ蜷・struct/state)縲・...) 縺後≠繧鯉ｿｽE蟶ｸ縺ｫ繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ縲・
     fn parse_type_params(&mut self, require_paren_after: bool) -> Result<Vec<String>, String> {
-        // 現在ぁE( で、その対応すめE) の直後が ( ならジェネリチE��とみなぁE
+        // 迴ｾ蝨ｨ縺・( 縺ｧ縲√◎縺ｮ蟇ｾ蠢懊☆繧・) 縺ｮ逶ｴ蠕後′ ( 縺ｪ繧峨ず繧ｧ繝阪Μ繝・・ｽ・ｽ縺ｨ縺ｿ縺ｪ縺・
         if self.current() == &Token::LParen {
             let mut depth = 0usize;
             let mut i = self.pos;
@@ -911,19 +942,19 @@ impl Parser {
                     Token::RParen => {
                         depth -= 1;
                         if depth == 0 {
-                            // ) の次のト�Eクンを覗く
+                            // ) 縺ｮ谺｡縺ｮ繝茨ｿｽE繧ｯ繝ｳ繧定ｦ励￥
                             let next_is_paren =
                                 i + 1 < tokens.len() && tokens[i + 1] == Token::LParen;
                             if require_paren_after {
                                 if next_is_paren {
-                                    // ジェネリチE��あり
+                                    // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ縺ゅｊ
                                     break;
                                 } else {
-                                    // 引数リストとみなぁE
+                                    // 蠑墓焚繝ｪ繧ｹ繝医→縺ｿ縺ｪ縺・
                                     return Ok(Vec::new());
                                 }
                             } else {
-                                // struct/state: (...) は常にジェネリチE��
+                                // struct/state: (...) 縺ｯ蟶ｸ縺ｫ繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ
                                 break;
                             }
                         }
@@ -936,7 +967,7 @@ impl Parser {
             return Ok(Vec::new());
         }
 
-        // ジェネリチE�� (T, U) を消費
+        // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ (T, U) 繧呈ｶ郁ｲｻ
         self.advance(); // '('
         let mut params = Vec::new();
         while self.current() != &Token::RParen && self.current() != &Token::Eof {
@@ -968,7 +999,7 @@ impl Parser {
 
         self.expect(Token::Colon)?;
 
-        // ブロチE��開姁E
+        // 繝悶Ο繝・・ｽ・ｽ髢句ｧ・
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -986,13 +1017,13 @@ impl Parser {
                 continue;
             }
 
-            // メソチE��定義
+            // 繝｡繧ｽ繝・・ｽ・ｽ螳夂ｾｩ
             if self.current() == &Token::Fn {
                 methods.push(self.parse_fn()?);
                 continue;
             }
 
-            // Lime構文: <type>: <name>
+            // Lime讒区枚: <type>: <name>
             let field_type = self.parse_type()?;
 
             self.expect(Token::Colon)?;
@@ -1027,9 +1058,12 @@ impl Parser {
         };
         self.advance();
 
+        // 繧ｸ繧ｧ繝阪Μ繝・け蝙句ｼ墓焚: interface Add(T):
+        let type_params = self.parse_type_params(false)?;
+
         self.expect(Token::Colon)?;
 
-        // ブロチE��開姁E
+        // 繝悶Ο繝・・ｽ・ｽ髢句ｧ・
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1046,7 +1080,7 @@ impl Parser {
                 continue;
             }
 
-            // メソチE��署名: fn name(params) ret:  （本体なし）
+            // 繝｡繧ｽ繝・・ｽ・ｽ鄂ｲ蜷・ fn name(params) ret:  ・域悽菴薙↑縺暦ｼ・
             if self.current() == &Token::Fn {
                 self.advance();
                 let mname = match self.current() {
@@ -1054,13 +1088,11 @@ impl Parser {
                     _ => return Err("Expected method name".to_string()),
                 };
                 self.advance();
-                // 型引数は interface では非対象（Phase 1）
-                let _ = self.parse_type_params(true);
                 self.expect(Token::LParen)?;
                 let mut params = Vec::new();
                 while self.current() != &Token::RParen && self.current() != &Token::Eof {
                     let param_type = self.parse_type()?;
-                    // 名前は省略可能（型のみの署名を許可）
+                    // 蜷榊燕縺ｯ逵∫払蜿ｯ閭ｽ・亥梛縺ｮ縺ｿ縺ｮ鄂ｲ蜷阪ｒ險ｱ蜿ｯ・・
                     if self.current() == &Token::Colon {
                         self.advance();
                         let pname = match self.current() {
@@ -1077,7 +1109,7 @@ impl Parser {
                     }
                 }
                 self.expect(Token::RParen)?;
-                // 署名終端の : （戻り型省略時はこれが終端）
+                // 鄂ｲ蜷咲ｵらｫｯ縺ｮ : ・域綾繧雁梛逵∫払譎ゅ・縺薙ｌ縺檎ｵらｫｯ・・
                 self.expect(Token::Colon)?;
                 let return_type = match self.current() {
                     Token::Int | Token::Float | Token::Str | Token::Bool => {
@@ -1090,7 +1122,7 @@ impl Parser {
                     }
                     _ => None,
                 };
-                // 戻り型指定時はさらに終端の : が続く
+                // 謌ｻ繧雁梛謖・ｮ壽凾縺ｯ縺輔ｉ縺ｫ邨らｫｯ縺ｮ : 縺檎ｶ壹￥
                 if return_type.is_some() {
                     self.expect(Token::Colon)?;
                 }
@@ -1111,7 +1143,11 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Stmt::Interface { name, methods })
+        Ok(Stmt::Interface {
+            name,
+            type_params,
+            methods,
+        })
     }
 
     fn parse_state(&mut self) -> Result<Stmt, String> {
@@ -1123,12 +1159,12 @@ impl Parser {
         };
         self.advance();
 
-        // ジェネリチE��引数 state Result(T): を保持
+        // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蠑墓焚 state Result(T): 繧剃ｿ晄戟
         let type_params = self.parse_type_params(false)?;
 
         self.expect(Token::Colon)?;
 
-        // ブロチE��開姁E
+        // 繝悶Ο繝・・ｽ・ｽ髢句ｧ・
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1151,7 +1187,7 @@ impl Parser {
             };
             self.advance();
 
-            // Variant のペイロード指定�E今回はスキチE�E
+            // Variant 縺ｮ繝壹う繝ｭ繝ｼ繝画欠螳夲ｿｽE莉雁屓縺ｯ繧ｹ繧ｭ繝・・ｽE
             if self.current() == &Token::LParen {
                 self.advance();
                 let mut depth = 1;
@@ -1241,7 +1277,7 @@ impl Parser {
     fn parse_while(&mut self) -> Result<Stmt, String> {
         self.expect(Token::While)?;
 
-        // 条件式�E括弧で囲む�E�仕様！E
+        // 譚｡莉ｶ蠑擾ｿｽE諡ｬ蠑ｧ縺ｧ蝗ｲ繧・ｽE・ｽ莉墓ｧ假ｼ・
         self.expect(Token::LParen)?;
         let cond = self.parse_expr()?;
         self.expect(Token::RParen)?;
@@ -1259,7 +1295,7 @@ impl Parser {
         let expr = self.parse_expr()?;
         self.expect(Token::Colon)?;
 
-        // ブロチE��開姁E
+        // 繝悶Ο繝・・ｽ・ｽ髢句ｧ・
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1276,19 +1312,19 @@ impl Parser {
                 continue;
             }
 
-            // else は禁止
+            // else 縺ｯ遖∵ｭ｢
             if self.current() == &Token::Else {
                 return Err("Match else is not allowed (exhaustive match required)".to_string());
             }
 
-            // Variant吁E
+            // Variant蜷・
             let name = match self.current() {
                 Token::Ident(n) => n.clone(),
                 other => return Err(format!("Expected variant name in match, got {:?}", other)),
             };
             self.advance();
 
-            // 束縛！Egnore を含む�E�E
+            // 譚溽ｸ幢ｼ・gnore 繧貞性繧・ｽE・ｽE
             let mut bindings = Vec::new();
             if self.current() == &Token::LParen {
                 self.advance();
@@ -1328,7 +1364,7 @@ impl Parser {
         self.parse_binary(0)
     }
 
-    // 演算子優先頁E��（高�E低！E not > * / % > + - > < > <= >= > == != > and > or
+    // 貍皮ｮ怜ｭ仙━蜈磯・・ｽ・ｽ・磯ｫ假ｿｽE菴趣ｼ・ not > * / % > + - > < > <= >= > == != > and > or
     fn bin_prec(op: &str) -> Option<u8> {
         match op {
             "or" => Some(1),
@@ -1377,6 +1413,7 @@ impl Parser {
                 left: Box::new(left),
                 op,
                 right: Box::new(right),
+                resolved_operator: None,
             };
         }
 
@@ -1399,7 +1436,7 @@ impl Parser {
         }
     }
 
-    // 後置修飾�E�呼び出し�EメソチE��・フィールドアクセス�E�を処琁E
+    // 蠕檎ｽｮ菫ｮ鬟ｾ・ｽE・ｽ蜻ｼ縺ｳ蜃ｺ縺暦ｿｽE繝｡繧ｽ繝・・ｽ・ｽ繝ｻ繝輔ぅ繝ｼ繝ｫ繝峨い繧ｯ繧ｻ繧ｹ・ｽE・ｽ繧貞・逅・
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_atom()?;
 
@@ -1409,7 +1446,7 @@ impl Parser {
                     self.advance();
                     let name = match self.current().clone() {
                         Token::Ident(n) => n,
-                        // 明示変換メソチE��: .int() / .float() / .str()
+                        // 譏守､ｺ螟画鋤繝｡繧ｽ繝・・ｽ・ｽ: .int() / .float() / .str()
                         Token::Int => "int".to_string(),
                         Token::Float => "float".to_string(),
                         Token::Str => "str".to_string(),
@@ -1439,15 +1476,15 @@ impl Parser {
                     }
                 }
                 Token::LParen => {
-                    // 識別子に対する呼び出し。ジェネリック構築 Point(int)(1, 2) を判別。
+                    // 隴伜挨蟄舌↓蟇ｾ縺吶ｋ蜻ｼ縺ｳ蜃ｺ縺励ゅず繧ｧ繝阪Μ繝・け讒狗ｯ・Point(int)(1, 2) 繧貞愛蛻･縲・
                     if let Expr::Ident(func) = &expr {
-                        // 先読み: (...) が型引数リストなら Point(int) として扱う
+                        // 蜈郁ｪｭ縺ｿ: (...) 縺悟梛蠑墓焚繝ｪ繧ｹ繝医↑繧・Point(int) 縺ｨ縺励※謇ｱ縺・
                         let save = self.pos;
                         if let Some(type_args) =
                             self.try_parse_type_args()
                         {
                             let typed_name = format!("{}({})", func, type_args.join(", "));
-                            // 直後に (values) が続けば構築呼び出し
+                            // 逶ｴ蠕後↓ (values) 縺檎ｶ壹￠縺ｰ讒狗ｯ牙他縺ｳ蜃ｺ縺・
                             if self.current() == &Token::LParen {
                                 self.advance();
                                 let mut args = Vec::new();
@@ -1465,7 +1502,7 @@ impl Parser {
                                     args,
                                 };
                             } else {
-                                // (values) が続かない場合は通常の関数呼び出しとする: 位置を戻す
+                                // (values) 縺檎ｶ壹°縺ｪ縺・ｴ蜷医・騾壼ｸｸ縺ｮ髢｢謨ｰ蜻ｼ縺ｳ蜃ｺ縺励→縺吶ｋ: 菴咲ｽｮ繧呈綾縺・
                                 self.pos = save;
                                 self.advance();
                                 let mut args = Vec::new();
@@ -1484,7 +1521,7 @@ impl Parser {
                                 };
                             }
                         } else {
-                            // 通常の関数呼び出し: 位置を戻して値引数を解析
+                            // 騾壼ｸｸ縺ｮ髢｢謨ｰ蜻ｼ縺ｳ蜃ｺ縺・ 菴咲ｽｮ繧呈綾縺励※蛟､蠑墓焚繧定ｧ｣譫・
                             self.pos = save;
                             self.advance();
                             let mut args = Vec::new();
@@ -1545,7 +1582,7 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                // None は引数なし�E Option コンストラクタ�E�括弧不要E��E
+                // None 縺ｯ蠑墓焚縺ｪ縺暦ｿｽE Option 繧ｳ繝ｳ繧ｹ繝医Λ繧ｯ繧ｿ・ｽE・ｽ諡ｬ蠑ｧ荳崎ｦ・・ｽ・ｽE
                 if name == "None" {
                     Ok(Expr::Call {
                         func: "None".to_string(),
@@ -1555,9 +1592,9 @@ impl Parser {
                     Ok(Expr::Ident(name))
                 }
             }
-            // 明示型変換 API: int(..) / float(..) / str(..)
-            // これら�E Lexer キーワーチE(Token::Int 筁E だが、E
-            // 直後に '(' が続く場合�E変換呼び出しとして扱ぁE��E
+            // 譏守､ｺ蝙句､画鋤 API: int(..) / float(..) / str(..)
+            // 縺薙ｌ繧会ｿｽE Lexer 繧ｭ繝ｼ繝ｯ繝ｼ繝・(Token::Int 遲・ 縺縺後・
+            // 逶ｴ蠕後↓ '(' 縺檎ｶ壹￥蝣ｴ蜷茨ｿｽE螟画鋤蜻ｼ縺ｳ蜃ｺ縺励→縺励※謇ｱ縺・・ｽ・ｽE
             Token::Int | Token::Float | Token::Str => {
                 if self.peek() == &Token::LParen {
                     let name = match self.current() {
@@ -1566,8 +1603,8 @@ impl Parser {
                         Token::Str => "str".to_string(),
                         _ => unreachable!(),
                     };
-                    self.advance(); // キーワードを消費
-                    self.advance(); // '(' を消費
+                    self.advance(); // 繧ｭ繝ｼ繝ｯ繝ｼ繝峨ｒ豸郁ｲｻ
+                    self.advance(); // '(' 繧呈ｶ郁ｲｻ
                     let mut args = Vec::new();
                     while self.current() != &Token::RParen && self.current() != &Token::Eof {
                         args.push(self.parse_expr()?);
@@ -1632,7 +1669,7 @@ enum Value {
     },
 }
 
-// ユーザー定義関数
+// 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ髢｢謨ｰ
 #[derive(Clone)]
 struct FunctionDef {
     type_params: Vec<String>,
@@ -1641,34 +1678,35 @@ struct FunctionDef {
     body: Vec<Stmt>,
 }
 
-// struct定義�E�フィールチE+ メソチE���E�E
+// struct螳夂ｾｩ・ｽE・ｽ繝輔ぅ繝ｼ繝ｫ繝・+ 繝｡繧ｽ繝・・ｽ・ｽ・ｽE・ｽE
 #[derive(Clone)]
 struct StructDef {
-    // ジェネリチE��型パラメータ�E�非ジェネリチE��なら空�E�E
+    // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蝙九ヱ繝ｩ繝｡繝ｼ繧ｿ・ｽE・ｽ髱槭ず繧ｧ繝阪Μ繝・・ｽ・ｽ縺ｪ繧臥ｩｺ・ｽE・ｽE
     type_params: Vec<String>,
-    // フィールチE(フィールド名, 型名) を定義頁E��保持
+    // 繝輔ぅ繝ｼ繝ｫ繝・(繝輔ぅ繝ｼ繝ｫ繝牙錐, 蝙句錐) 繧貞ｮ夂ｾｩ鬆・・ｽ・ｽ菫晄戟
     fields: Vec<(String, String)>,
-    // メソチE��吁E-> 定義
+    // 繝｡繧ｽ繝・・ｽ・ｽ蜷・-> 螳夂ｾｩ
     methods: HashMap<String, FunctionDef>,
 }
 
-// interface 定義: メソッド署名の集合
+// interface 螳夂ｾｩ: 繧ｸ繧ｧ繝阪Μ繝・け蝙句ｼ墓焚 + 繝｡繧ｽ繝・ラ鄂ｲ蜷阪・髮・粋
 #[derive(Clone)]
 struct InterfaceDef {
+    type_params: Vec<String>,
     methods: Vec<InterfaceMethod>,
 }
 
-// プログラム全体で共有する型定義�E�読み取り専用�E�E
+// 繝励Ο繧ｰ繝ｩ繝蜈ｨ菴薙〒蜈ｱ譛峨☆繧句梛螳夂ｾｩ・ｽE・ｽ隱ｭ縺ｿ蜿悶ｊ蟆ら畑・ｽE・ｽE
 struct Defs {
-    // struct吁E-> 定義
+    // struct蜷・-> 螳夂ｾｩ
     structs: HashMap<String, StructDef>,
-    // state variant吁E-> 所属すめEstate吁E
+    // state variant蜷・-> 謇螻槭☆繧・state蜷・
     state_variants: HashMap<String, String>,
-    // state吁E-> variant名一覧�E�網羁E��検査用�E�E
+    // state蜷・-> variant蜷堺ｸ隕ｧ・ｽE・ｽ邯ｲ鄒・・ｽ・ｽ讀懈渊逕ｨ・ｽE・ｽE
     states: HashMap<String, Vec<String>>,
-    // 関数吁E-> 定義
+    // 髢｢謨ｰ蜷・-> 螳夂ｾｩ
     functions: HashMap<String, FunctionDef>,
-    // interface吁E-> 定義
+    // interface蜷・-> 螳夂ｾｩ
     interfaces: HashMap<String, InterfaceDef>,
 }
 
@@ -1723,10 +1761,16 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                     },
                 );
             }
-            Stmt::Interface { name, methods } => {
+            Stmt::Interface {
+                name,
+                type_params,
+                methods,
+            } => {
+                eprintln!("DEBUG collect interface name={} nmethods={}", name, methods.len());
                 defs.interfaces.insert(
                     name.clone(),
                     InterfaceDef {
+                        type_params: type_params.clone(),
                         methods: methods.clone(),
                     },
                 );
@@ -1740,7 +1784,7 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                     defs.state_variants.insert(v.clone(), name.clone());
                 }
                 defs.states.insert(name.clone(), variants.clone());
-                // type_params は Phase 1 では保持のみ�E�未使用�E�E
+                // type_params 縺ｯ Phase 1 縺ｧ縺ｯ菫晄戟縺ｮ縺ｿ・ｽE・ｽ譛ｪ菴ｿ逕ｨ・ｽE・ｽE
                 let _ = type_params;
             }
             Stmt::Fn {
@@ -1808,8 +1852,8 @@ impl Value {
 
 // ===== Type Checker =====
 
-// 型を表現する、Eime は暗黙型変換を許さなぁE��め、厳寁E��一致を検査する、E
-// Unknown は「型が判明しなぁE��絁E��み/StringBuilder等）」また�E「検査を緩和する」用途、E
+// 蝙九ｒ陦ｨ迴ｾ縺吶ｋ縲・ime 縺ｯ證鈴ｻ吝梛螟画鋤繧定ｨｱ縺輔↑縺・・ｽ・ｽ繧√∝宍蟇・・ｽ・ｽ荳閾ｴ繧呈､懈渊縺吶ｋ縲・
+// Unknown 縺ｯ縲悟梛縺悟愛譏弱＠縺ｪ縺・・ｽ・ｽ邨・・ｽ・ｽ縺ｿ/StringBuilder遲会ｼ峨阪∪縺滂ｿｽE縲梧､懈渊繧堤ｷｩ蜥後☆繧九咲畑騾斐・
 #[derive(Debug, Clone, PartialEq)]
 enum Type {
     Int,
@@ -1819,14 +1863,14 @@ enum Type {
     Array(Box<Type>),
     Struct(String),
     State(String),
-    Interface(String),
+    Interface(String, Vec<Type>),
     List(Box<Type>),
     Option(Box<Type>),
     Unit,
     Unknown,
 }
 
-// 変数吁E-> 垁Eを管琁E��る環墁E
+// 螟画焚蜷・-> 蝙・繧堤ｮ｡逅・・ｽ・ｽ繧狗腸蠅・
 #[derive(Debug, Clone)]
 struct TypeEnv {
     vars: HashMap<String, Type>,
@@ -1848,9 +1892,9 @@ impl TypeEnv {
     }
 }
 
-// 型名斁E���E -> Type への変換�E�宣言型と値型�E比輁E��使用�E�E
+// 蝙句錐譁・・ｽ・ｽ・ｽE -> Type 縺ｸ縺ｮ螟画鋤・ｽE・ｽ螳｣險蝙九→蛟､蝙具ｿｽE豈碑ｼ・・ｽ・ｽ菴ｿ逕ｨ・ｽE・ｽE
 fn type_from_str(s: &str, defs: &Defs) -> Type {
-    // Option(T) また�E T? 記法をサポ�EチE
+    // Option(T) 縺ｾ縺滂ｿｽE T? 險俶ｳ輔ｒ繧ｵ繝晢ｿｽE繝・
     if let Some(inner) = s.strip_prefix("Option(") {
         if let Some(inner) = inner.strip_suffix(')') {
             return Type::Option(Box::new(type_from_str(inner, defs)));
@@ -1865,7 +1909,7 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
         "bool" => Type::Bool,
         "str" => Type::String,
         _ => {
-            // ジェネリチE��型参照 Base(Arg, ...) はベ�Eス名で照吁E
+            // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ蝙句盾辣ｧ Base(Arg, ...) 縺ｯ繝呻ｿｽE繧ｹ蜷阪〒辣ｧ蜷・
             let base = match s.find('(') {
                 Some(i) => &s[..i],
                 None => s,
@@ -1875,7 +1919,22 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
             } else if defs.states.contains_key(base) {
                 Type::State(base.to_string())
             } else if defs.interfaces.contains_key(base) {
-                Type::Interface(base.to_string())
+                // 蝙句ｼ墓焚繧呈歓蜃ｺ: Interface(T) / Interface()
+                let args = if let Some(i) = s.find('(') {
+                    let inner = &s[i + 1..];
+                    let inner = inner.strip_suffix(')').unwrap_or(inner);
+                    if inner.trim().is_empty() {
+                        Vec::new()
+                    } else {
+                        inner
+                            .split(',')
+                            .map(|a| type_from_str(a.trim(), defs))
+                            .collect()
+                    }
+                } else {
+                    Vec::new()
+                };
+                Type::Interface(base.to_string(), args)
             } else {
                 Type::Unknown
             }
@@ -1883,7 +1942,7 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
     }
 }
 
-// Unknown を含む比輁E��許容する等価判宁E
+// Unknown 繧貞性繧豈碑ｼ・・ｽ・ｽ險ｱ螳ｹ縺吶ｋ遲我ｾ｡蛻､螳・
 fn type_eq(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Unknown, _) | (_, Type::Unknown) => true,
@@ -1894,8 +1953,8 @@ fn type_eq(a: &Type, b: &Type) -> bool {
     }
 }
 
-// interface メソッド署名と struct メソッド署名が一致するか
-// （名前は同一と仮定し、引数数・引数型・戻り型を照合）
+// interface 繝｡繧ｽ繝・ラ鄂ｲ蜷阪→ struct 繝｡繧ｽ繝・ラ鄂ｲ蜷阪′荳閾ｴ縺吶ｋ縺・
+// ・亥錐蜑阪・蜷御ｸ縺ｨ莉ｮ螳壹＠縲∝ｼ墓焚謨ｰ繝ｻ蠑墓焚蝙九・謌ｻ繧雁梛繧堤・蜷茨ｼ・
 fn method_sig_matches(defs: &Defs, mdef: &FunctionDef, im: &InterfaceMethod) -> bool {
     if mdef.params.len() != im.params.len() {
         return false;
@@ -1918,8 +1977,8 @@ fn method_sig_matches(defs: &Defs, mdef: &FunctionDef, im: &InterfaceMethod) -> 
     type_eq(&got_ret, &want_ret)
 }
 
-// struct が interface を暗黙に実装しているか
-// （interface の全メソッドを、一致する署名で持っていること）
+// struct 縺・interface 繧呈囓鮟吶↓螳溯｣・＠縺ｦ縺・ｋ縺・
+// ・・nterface 縺ｮ蜈ｨ繝｡繧ｽ繝・ラ繧偵∽ｸ閾ｴ縺吶ｋ鄂ｲ蜷阪〒謖√▲縺ｦ縺・ｋ縺薙→・・
 fn struct_satisfies_interface(defs: &Defs, sname: &str, iface_name: &str) -> bool {
     let sdef = match defs.structs.get(sname) {
         Some(s) => s,
@@ -1938,8 +1997,301 @@ fn struct_satisfies_interface(defs: &Defs, sname: &str, iface_name: &str) -> boo
     true
 }
 
-// 暗黙実装の検証: すべての struct について、メソッド名が interface と
-// 一致するが署名が異なる場合はエラー（親切な診断のため）
+// 蝙区枚蟄怜・荳ｭ縺ｮ蝙九ヱ繝ｩ繝｡繝ｼ繧ｿ繧・arg 縺ｫ鄂ｮ謠幢ｼ・eneric Operator Interface 縺ｮ螳滉ｽ灘喧・・
+fn subst_type(t: &str, type_params: &[String], arg: &str) -> String {
+    let mut result = t.to_string();
+    for tp in type_params {
+        result = result.replace(tp, arg);
+    }
+    result
+}
+
+// struct 縺・interface 繧貞梛蠑墓焚 arg 縺ｧ螳溯｣・＠縺ｦ縺・ｋ縺具ｼ井ｾ・ Add(Point)・・
+fn struct_implements_interface_with(
+    defs: &Defs,
+    sname: &str,
+    iface_name: &str,
+    arg: &str,
+) -> bool {
+    let sdef = match defs.structs.get(sname) {
+        Some(s) => s,
+        None => return false,
+    };
+    let iface = match defs.interfaces.get(iface_name) {
+        Some(i) => i,
+        None => return false,
+    };
+    for im in &iface.methods {
+        let exp_params: Vec<(String, String)> = im
+            .params
+            .iter()
+            .map(|(n, t)| (n.clone(), subst_type(t, &iface.type_params, arg)))
+            .collect();
+        let exp_ret = im
+            .return_type
+            .as_ref()
+            .map(|t| subst_type(t, &iface.type_params, arg));
+        let exp_im = InterfaceMethod {
+            name: im.name.clone(),
+            params: exp_params,
+            return_type: exp_ret,
+        };
+        match sdef.methods.get(&im.name) {
+            Some(mdef) if method_sig_matches(defs, mdef, &exp_im) => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+// 莠碁・ｼ皮ｮ怜ｭ舌ｒ Operator Interface 邨檎罰縺ｧ隗｣豎ｺ縺吶ｋ・医Θ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・縺ｿ・・
+// 謌ｻ繧雁､: (繝｡繧ｽ繝・ラ蜷・ 邨先棡蝙・縲らｵ・∩霎ｼ縺ｿ蝙九ｄ隗｣豎ｺ荳崎・縺ｪ蝣ｴ蜷医・ None縲・
+fn resolve_operator_interface(
+    defs: &Defs,
+    lt: &Type,
+    rt: &Type,
+    op: &str,
+) -> Option<(String, Type)> {
+    // 荳｡霎ｺ縺悟酔荳縺ｮ繝ｦ繝ｼ繧ｶ繝ｼ struct 蝙九・縺ｨ縺阪・縺ｿ Interface 隗｣豎ｺ繧定ｩｦ縺ｿ繧・
+    let sname = match (lt, rt) {
+        (Type::Struct(a), Type::Struct(b)) if a == b => a.clone(),
+        _ => return None,
+    };
+    // 邨・∩霎ｼ縺ｿ謨ｰ蛟､繝ｻ譁・ｭ怜・縺ｯ蠕捺擂縺ｮ邨・∩霎ｼ縺ｿ貍皮ｮ励ｒ蜆ｪ蜈医☆繧九◆繧√％縺薙〒縺ｯ隗｣豎ｺ縺励↑縺・
+    match op {
+        "+" => {
+            if struct_implements_interface_with(defs, &sname, "Add", &sname) {
+                Some(("add".to_string(), Type::Struct(sname)))
+            } else {
+                None
+            }
+        }
+        "==" | "!=" => {
+            if struct_implements_interface_with(defs, &sname, "Equal", &sname) {
+                Some(("equal".to_string(), Type::Bool))
+            } else {
+                None
+            }
+        }
+        "<" | ">" | "<=" | ">=" => {
+            if struct_implements_interface_with(defs, &sname, "Compare", &sname) {
+                Some(("compare".to_string(), Type::Bool))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+// TypeChecker 蟆ら畑縺ｮ AST 繝代せ: 蜷・BinOp 縺ｫ隗｣豎ｺ貂医∩貍皮ｮ怜ｭ舌ｒ譖ｸ縺崎ｾｼ繧縲・
+// 螳溯｡梧凾・・nterpreter/LLVM Backend・峨・縺薙・諠・ｱ縺縺代ｒ隕九※貍皮ｮ励☆繧九◆繧√・
+// Runtime 縺ｧ縺ｮ蝙区､懃ｴ｢繧・Struct 蜷阪°繧峨・ Interface 讀懃ｴ｢縺ｯ荳蛻・｡後ｏ縺ｪ縺・・
+//
+// 隗｣豎ｺ縺ｯ蝙区､懈渊迺ｰ蠅・ｼ・et 譚溽ｸ帙・蠑墓焚縺ｮ蝙具ｼ峨°繧蛾撕逧・↓陦後≧縲ゅ％縺ｮ迺ｰ蠅・・
+// 譛ｬ繝代せ蜀・〒 let / fn 繧定ｵｰ譟ｻ縺励※讒狗ｯ峨☆繧具ｼ・heck_expr 縺ｮ full env 縺ｯ荳崎ｦ・ｼ峨・
+fn resolve_operators_stmts(stmts: &mut [Stmt], defs: &Defs) {
+    let mut env: HashMap<String, Type> = HashMap::new();
+    for s in stmts.iter_mut() {
+        resolve_operators_stmt(s, defs, &mut env);
+    }
+}
+
+fn resolve_operators_stmt(s: &mut Stmt, defs: &Defs, env: &mut HashMap<String, Type>) {
+    match s {
+        Stmt::Expr(e) => resolve_operators_expr(e, defs, env),
+        Stmt::Let { name, value, .. } => {
+            if let Ok(t) = infer_type(value, env, defs) {
+                env.insert(name.clone(), t);
+            }
+            resolve_operators_expr(value, defs, env);
+        }
+        Stmt::Assign { value, .. } => resolve_operators_expr(value, defs, env),
+        Stmt::If { cond, then_branch, else_branch } => {
+            resolve_operators_expr(cond, defs, env);
+            resolve_operators_stmts(then_branch, defs);
+            if let Some(b) = else_branch {
+                resolve_operators_stmts(b, defs);
+            }
+        }
+        Stmt::While { cond, body } => {
+            resolve_operators_expr(cond, defs, env);
+            resolve_operators_stmts(body, defs);
+        }
+        Stmt::For { var, iterable, body } => {
+            // iterable 縺ｮ隕∫ｴ蝙九ｒ var 縺ｮ蝙九→縺励※迺ｰ蠅・↓霑ｽ蜉
+            if let Ok(it_ty) = infer_type(iterable, env, defs) {
+                let elem = match &it_ty {
+                    Type::List(e) => (**e).clone(),
+                    _ => Type::Unknown,
+                };
+                env.insert(var.clone(), elem);
+            }
+            resolve_operators_expr(iterable, defs, env);
+            resolve_operators_stmts(body, defs);
+        }
+        Stmt::Return(Some(e)) => resolve_operators_expr(e, defs, env),
+        Stmt::Match { expr, arms, .. } => {
+            resolve_operators_expr(expr, defs, env);
+            for (_, body) in arms.iter_mut() {
+                resolve_operators_stmts(body, defs);
+            }
+        }
+        Stmt::Fn { params, body, .. } => {
+            let mut fenv = env.clone();
+            for (pname, ptype) in params {
+                fenv.insert(pname.clone(), type_from_str(ptype, defs));
+            }
+            resolve_operators_stmts(body, defs);
+            // 豕ｨ: Fn 蜀・・迺ｰ蠅・・蜻ｼ縺ｳ蜃ｺ縺玲ｯ弱↓讒狗ｯ峨＆繧後ｋ縺溘ａ縲∝､門・ env 縺ｫ縺ｯ蜿肴丐縺励↑縺・
+            let _ = fenv;
+        }
+        Stmt::Struct { methods, .. } => {
+            resolve_operators_stmts(methods, defs);
+        }
+        _ => {}
+    }
+}
+
+// 貍皮ｮ怜ｭ占ｧ｣豎ｺ縺ｮ縺溘ａ縺ｮ霆ｽ驥丞梛謗ｨ隲厄ｼ・nv 縺ｯ let/蠑墓焚縺ｮ蝙九・縺ｿ・峨・
+// check_expr 縺ｮ full env 縺ｯ荳崎ｦ√よ綾繧雁､縺悟ｾ励ｉ繧後↑縺・ｴ蜷医・ Unknown 繧定ｿ斐☆縲・
+fn infer_type(e: &Expr, env: &HashMap<String, Type>, defs: &Defs) -> Result<Type, String> {
+    match e {
+        Expr::IntLit(_) => Ok(Type::Int),
+        Expr::FloatLit(_) => Ok(Type::Float),
+        Expr::StringLit(_) => Ok(Type::String),
+        Expr::BoolLit(_) => Ok(Type::Bool),
+        Expr::Ident(n) => env
+            .get(n)
+            .cloned()
+            .ok_or_else(|| format!("undefined variable '{}'", n)),
+        Expr::Call { func, args } => {
+            if defs.structs.contains_key(func) {
+                Ok(Type::Struct(func.clone()))
+            } else if defs.states.contains_key(func) {
+                Ok(Type::Struct(func.clone()))
+            } else if func == "Some" && args.len() == 1 {
+                Ok(Type::Option(Box::new(infer_type(&args[0], env, defs)?)))
+            } else if func == "None" {
+                Ok(Type::Option(Box::new(Type::Unknown)))
+            } else if let Some(f) = defs.functions.get(func) {
+                match &f.return_type {
+                    Some(rt) => Ok(type_from_str(rt, defs)),
+                    None => Ok(Type::Unit),
+                }
+            } else {
+                Ok(Type::Unknown)
+            }
+        }
+        Expr::MethodCall { object, method, .. } => {
+            let ot = infer_type(object, env, defs)?;
+            match ot {
+                Type::Struct(s) => {
+                    if let Some(sd) = defs.structs.get(&s) {
+                        if let Some(m) = sd.methods.get(method) {
+                            if let Some(rt) = &m.return_type {
+                                return Ok(type_from_str(rt, defs));
+                            }
+                        }
+                    }
+                    Ok(Type::Unknown)
+                }
+                _ => Ok(Type::Unknown),
+            }
+        }
+        Expr::UnOp { operand, .. } => infer_type(operand, env, defs),
+        Expr::BinOp { left, op, right, .. } => {
+            let lt = infer_type(left, env, defs)?;
+            let rt = infer_type(right, env, defs)?;
+            if let Some((_, t)) = resolve_operator_interface(defs, &lt, &rt, op) {
+                Ok(t)
+            } else {
+                match op.as_str() {
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" | "and" | "or" => Ok(Type::Bool),
+                    _ => Ok(lt),
+                }
+            }
+        }
+        Expr::FieldAccess { object, field } => {
+            let ot = infer_type(object, env, defs)?;
+            match ot {
+                Type::Struct(s) => {
+                    if let Some(sd) = defs.structs.get(&s) {
+                        for (fn_, ft) in &sd.fields {
+                            if fn_ == field {
+                                return Ok(type_from_str(ft, defs));
+                            }
+                        }
+                    }
+                    Ok(Type::Unknown)
+                }
+                _ => Ok(Type::Unknown),
+            }
+        }
+        Expr::Array(items) => {
+            if let Some(first) = items.first() {
+                let et = infer_type(first, env, defs)?;
+                Ok(Type::List(Box::new(et)))
+            } else {
+                Ok(Type::List(Box::new(Type::Unknown)))
+            }
+        }
+        Expr::Range { .. } => Ok(Type::List(Box::new(Type::Int))),
+        _ => Ok(Type::Unknown),
+    }
+}
+
+fn resolve_operators_expr(e: &mut Expr, defs: &Defs, env: &HashMap<String, Type>) {
+    match e {
+        Expr::BinOp { left, right, op, resolved_operator } => {
+            // 蟄舌ｒ蜈医↓隗｣豎ｺ・医ロ繧ｹ繝医＠縺・BinOp 繧ょ性繧・・
+            resolve_operators_expr(left, defs, env);
+            resolve_operators_expr(right, defs, env);
+            let lt = infer_type(left, env, defs);
+            let rt = infer_type(right, env, defs);
+            let res = match (lt, rt) {
+                (Ok(lt), Ok(rt)) => {
+                    match resolve_operator_interface(defs, &lt, &rt, op) {
+                        Some((method, _)) => ResolvedOperator::MethodCall {
+                            method,
+                            op: op.clone(),
+                        },
+                        None => ResolvedOperator::Builtin,
+                    }
+                }
+                _ => ResolvedOperator::Builtin,
+            };
+            *resolved_operator = Some(res);
+        }
+        Expr::UnOp { operand, .. } => resolve_operators_expr(operand, defs, env),
+        Expr::Call { args, .. } => {
+            for a in args.iter_mut() {
+                resolve_operators_expr(a, defs, env);
+            }
+        }
+        Expr::MethodCall { object, args, .. } => {
+            resolve_operators_expr(object, defs, env);
+            for a in args.iter_mut() {
+                resolve_operators_expr(a, defs, env);
+            }
+        }
+        Expr::FieldAccess { object, .. } => resolve_operators_expr(object, defs, env),
+        Expr::Array(items) => {
+            for it in items.iter_mut() {
+                resolve_operators_expr(it, defs, env);
+            }
+        }
+        Expr::Range { start, end } => {
+            resolve_operators_expr(start, defs, env);
+            resolve_operators_expr(end, defs, env);
+        }
+        _ => {}
+    }
+}
+
+
+// 證鈴ｻ吝ｮ溯｣・・讀懆ｨｼ: 縺吶∋縺ｦ縺ｮ struct 縺ｫ縺､縺・※縲√Γ繧ｽ繝・ラ蜷阪′ interface 縺ｨ
+// 荳閾ｴ縺吶ｋ縺檎ｽｲ蜷阪′逡ｰ縺ｪ繧句ｴ蜷医・繧ｨ繝ｩ繝ｼ・郁ｦｪ蛻・↑險ｺ譁ｭ縺ｮ縺溘ａ・・
 fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
     for (sname, sdef) in &defs.structs {
         for (iface_name, iface) in &defs.interfaces {
@@ -1950,7 +2302,7 @@ fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
             if !satisfies {
                 continue;
             }
-            // 全メソッド名が揃っているなら、署名も一致している必要がある
+            // 蜈ｨ繝｡繧ｽ繝・ラ蜷阪′謠・▲縺ｦ縺・ｋ縺ｪ繧峨∫ｽｲ蜷阪ｂ荳閾ｴ縺励※縺・ｋ蠢・ｦ√′縺ゅｋ
             for im in &iface.methods {
                 let mdef = sdef.methods.get(&im.name).unwrap();
                 if !method_sig_matches(defs, mdef, im) {
@@ -1965,14 +2317,14 @@ fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
     Ok(())
 }
 
-// struct が interface を暗黙実装しているか
+// struct 縺・interface 繧呈囓鮟吝ｮ溯｣・＠縺ｦ縺・ｋ縺・
 fn struct_implements(defs: &Defs, struct_name: &str, iface_name: &str) -> bool {
     struct_satisfies_interface(defs, struct_name, iface_name)
 }
 
-// 型の整合判定（interface への struct 代入・引渡しを許可）
+// 蝙九・謨ｴ蜷亥愛螳夲ｼ・nterface 縺ｸ縺ｮ struct 莉｣蜈･繝ｻ蠑墓ｸ｡縺励ｒ險ｱ蜿ｯ・・
 fn type_matches(defs: &Defs, actual: &Type, expected: &Type) -> bool {
-    if let (Type::Struct(sname), Type::Interface(iface)) = (actual, expected) {
+    if let (Type::Struct(sname), Type::Interface(iface, _)) = (actual, expected) {
         if struct_implements(defs, sname, iface) {
             return true;
         }
@@ -2000,7 +2352,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             if et != Type::Int && et != Type::Unknown {
                 return Err(format!("Type error: range end must be int (got {:?})", et));
             }
-            // Range は int の List として扱ぁE
+            // Range 縺ｯ int 縺ｮ List 縺ｨ縺励※謇ｱ縺・
             Ok(Type::List(Box::new(Type::Int)))
         }
 
@@ -2035,22 +2387,28 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
         }
 
-        Expr::BinOp { left, op, right } => {
+        Expr::BinOp { left, op, right, .. } => {
             let lt = check_expr(left, env, defs)?;
             let rt = check_expr(right, env, defs)?;
 
             match op.as_str() {
-                // 比輁E��箁E 結果は常に Bool
+                // 豈碑ｼ・・ｽ・ｽ邂・ 邨先棡縺ｯ蟶ｸ縺ｫ Bool
                 "==" | "!=" | "<" | ">" | "<=" | ">=" => {
-                    if !type_eq(&lt, &rt) {
+                    if let Some((_, result_ty)) =
+                        resolve_operator_interface(defs, &lt, &rt, op)
+                    {
+                        // 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・ Operator Interface 縺ｧ隗｣豎ｺ
+                        Ok(result_ty)
+                    } else if !type_eq(&lt, &rt) {
                         return Err(format!(
                             "Type error: cannot compare {:?} with {:?}",
                             lt, rt
                         ));
+                    } else {
+                        Ok(Type::Bool)
                     }
-                    Ok(Type::Bool)
                 }
-                // 論理演箁E
+                // 隲也炊貍皮ｮ・
                 "and" | "or" => {
                     if (lt != Type::Bool && lt != Type::Unknown)
                         || (rt != Type::Bool && rt != Type::Unknown)
@@ -2062,23 +2420,29 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Bool)
                 }
-                // 算術演箁E 左右同型
+                // 邂苓｡捺ｼ皮ｮ・ 蟾ｦ蜿ｳ蜷悟梛
                 "+" | "-" | "*" | "/" | "%" => {
-                    if !type_eq(&lt, &rt) {
+                    if let Some((_, result_ty)) =
+                        resolve_operator_interface(defs, &lt, &rt, op)
+                    {
+                        // 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙九・ Operator Interface 縺ｧ隗｣豎ｺ
+                        Ok(result_ty)
+                    } else if !type_eq(&lt, &rt) {
                         return Err(format!(
                             "Type error: binary '{}' type mismatch (left {:?}, right {:?})",
                             op, lt, rt
                         ));
+                    } else {
+                        // 譁・・ｽ・ｽ・ｽE騾｣邨舌ｂ + 縺ｧ險ｱ蜿ｯ
+                        Ok(lt)
                     }
-                    // 斁E���E連結も + で許可
-                    Ok(lt)
                 }
                 other => Err(format!("Type error: unknown binary operator '{}'", other)),
             }
         }
 
         Expr::Call { func, args } => {
-            // 絁E��み
+            // 邨・・ｽ・ｽ縺ｿ
             match func.as_str() {
                 "print" | "println" => {
                     for a in args {
@@ -2099,11 +2463,11 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             "Type error: StringBuilder() takes no arguments".to_string()
                         );
                     }
-                    // StringBuilder は型モチE��になぁE��めEUnknown で緩咁E
+                    // StringBuilder 縺ｯ蝙九Δ繝・・ｽ・ｽ縺ｫ縺ｪ縺・・ｽ・ｽ繧・Unknown 縺ｧ邱ｩ蜥・
                     Ok(Type::Unknown)
                 }
-                // 明示型変換 API�E�暗黙変換禁止のための意図皁E��換�E�E
-                // bool 変換は禁止�E�数値 -> bool 不可�E�E
+                // 譏守､ｺ蝙句､画鋤 API・ｽE・ｽ證鈴ｻ吝､画鋤遖∵ｭ｢縺ｮ縺溘ａ縺ｮ諢丞峙逧・・ｽ・ｽ謠幢ｿｽE・ｽE
+                // bool 螟画鋤縺ｯ遖∵ｭ｢・ｽE・ｽ謨ｰ蛟､ -> bool 荳榊庄・ｽE・ｽE
         "int" | "float" | "str" => {
             if args.len() != 1 {
                 return Err(format!(
@@ -2111,7 +2475,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     func
                 ));
             }
-            // 引数は任意型を受容�E�Enknown も含む�E�E
+            // 蠑墓焚縺ｯ莉ｻ諢丞梛繧貞女螳ｹ・ｽE・ｽEnknown 繧ょ性繧・ｽE・ｽE
             check_expr(&args[0], env, defs)?;
             match func.as_str() {
                 "int" => Ok(Type::Int),
@@ -2120,7 +2484,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 _ => Ok(Type::Unknown),
             }
         }
-        // Option コンストラクタ: Some(x) -> Option(T), None -> Option(Unknown)
+        // Option 繧ｳ繝ｳ繧ｹ繝医Λ繧ｯ繧ｿ: Some(x) -> Option(T), None -> Option(Unknown)
         "Some" => {
             if args.len() != 1 {
                 return Err("Type error: Some() takes exactly 1 argument".to_string());
@@ -2135,7 +2499,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             Ok(Type::Option(Box::new(Type::Unknown)))
         }
         other => {
-                    // Struct / State コンストラクタ�E�ジェネリチE�� Base(Arg) も�Eース名で照合！E
+                    // Struct / State 繧ｳ繝ｳ繧ｹ繝医Λ繧ｯ繧ｿ・ｽE・ｽ繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ Base(Arg) 繧ゑｿｽE繝ｼ繧ｹ蜷阪〒辣ｧ蜷茨ｼ・
                     let base = match other.find('(') {
                         Some(i) => &other[..i],
                         None => other,
@@ -2172,7 +2536,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         return Ok(Type::State(state_name.clone()));
                     }
 
-                    // 関数呼び出ぁE
+                    // 髢｢謨ｰ蜻ｼ縺ｳ蜃ｺ縺・
                     if let Some(fdef) = defs.functions.get(base) {
                         if args.len() != fdef.params.len() {
                             return Err(format!(
@@ -2269,9 +2633,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Unknown)
                 }
-                // Interface 型へのメソチE��呼び出し: interface 署名で検査し、戻り型を返す
-                // （実際のディスパチEは実行時の具象 struct メソチEで行われる）
-                Type::Interface(iface) => {
+                // Interface 蝙九∈縺ｮ繝｡繧ｽ繝・・ｽ・ｽ蜻ｼ縺ｳ蜃ｺ縺・ interface 鄂ｲ蜷阪〒讀懈渊縺励∵綾繧雁梛繧定ｿ斐☆
+                // ・亥ｮ滄圀縺ｮ繝・ぅ繧ｹ繝代メE縺ｯ螳溯｡梧凾縺ｮ蜈ｷ雎｡ struct 繝｡繧ｽ繝・縺ｧ陦後ｏ繧後ｋ・・
+                Type::Interface(iface, _) => {
                     let idef = defs.interfaces.get(&iface).ok_or_else(|| {
                         format!("Type error: unknown interface '{}'", iface)
                     })?;
@@ -2309,7 +2673,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         None => Type::Unit,
                     });
                 }
-                // String メソチE���E�型付き�E�E
+                // String 繝｡繧ｽ繝・・ｽ・ｽ・ｽE・ｽ蝙倶ｻ倥″・ｽE・ｽE
                 Type::String => match method.as_str() {
                     "len" | "byte_len" => {
                         if !args.is_empty() {
@@ -2352,7 +2716,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
-                // List メソチE���E�型付き�E�E
+                // List 繝｡繧ｽ繝・・ｽ・ｽ・ｽE・ｽ蝙倶ｻ倥″・ｽE・ｽE
                 Type::List(elem) => match method.as_str() {
                     "len" => {
                         if !args.is_empty() {
@@ -2411,7 +2775,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
-                // StringBuilder / Array / そ�E他型モチE��夁E 緩咁E
+                // StringBuilder / Array / 縺晢ｿｽE莉門梛繝｢繝・・ｽ・ｽ螟・ 邱ｩ蜥・
                 Type::Unknown => Ok(Type::Unknown),
                 other => Err(format!(
                     "Type error: no method '{}' on type {:?}",
@@ -2422,7 +2786,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     }
 }
 
-// 斁E��検査。expected_return は直近�E関数の戻り型�E�指定なし�E None�E�E
+// 譁・・ｽ・ｽ讀懈渊縲Ｆxpected_return 縺ｯ逶ｴ霑托ｿｽE髢｢謨ｰ縺ｮ謌ｻ繧雁梛・ｽE・ｽ謖・ｮ壹↑縺暦ｿｽE None・ｽE・ｽE
 fn check_stmt(
     stmt: &Stmt,
     env: &mut TypeEnv,
@@ -2437,8 +2801,8 @@ fn check_stmt(
                 None => Type::Unknown,
             };
             if declared != Type::Unknown && !type_eq(&v_ty, &declared) {
-                // interface 型への代入: 値の具象 struct が interface を実装していれば許可
-                if let (Type::Interface(iface), Type::Struct(sname)) = (&declared, &v_ty) {
+                // interface 蝙九∈縺ｮ莉｣蜈･: 蛟､縺ｮ蜈ｷ雎｡ struct 縺・interface 繧貞ｮ溯｣・＠縺ｦ縺・ｌ縺ｰ險ｱ蜿ｯ
+                if let (Type::Interface(iface, _), Type::Struct(sname)) = (&declared, &v_ty) {
                     if !struct_implements(defs, sname, iface) {
                         return Err(format!(
                             "Type error: let '{}' expects interface '{}', but struct '{}' does not implement it",
@@ -2492,7 +2856,7 @@ fn check_stmt(
 
         Stmt::For { var, iterable, body } => {
             let iter_ty = check_expr(iterable, env, defs)?;
-            // Iterable の要素型をループ変数の型として環墁E��注入
+            // Iterable 縺ｮ隕∫ｴ蝙九ｒ繝ｫ繝ｼ繝怜､画焚縺ｮ蝙九→縺励※迺ｰ蠅・・ｽ・ｽ豕ｨ蜈･
             let elem_ty = match &iter_ty {
                 Type::List(elem) => (&**elem).clone(),
                 Type::Array(elem) => (&**elem).clone(),
@@ -2519,7 +2883,7 @@ fn check_stmt(
         Stmt::Match { expr, arms } => {
             let m_ty = check_expr(expr, env, defs)?;
 
-            // 網羁E��検査�E�Etate 型�E場合�Eみ�E�E
+            // 邯ｲ鄒・・ｽ・ｽ讀懈渊・ｽE・ｽEtate 蝙具ｿｽE蝣ｴ蜷茨ｿｽE縺ｿ・ｽE・ｽE
             if let Type::State(state_name) = &m_ty {
                 let variants = defs
                     .states
@@ -2538,7 +2902,7 @@ fn check_stmt(
                         }
                         covered.push(pname.clone());
 
-                        // 束縛変数を環墁E��追加�E�Eariant のペイロード型は未保持のため Unknown�E�E
+                        // 譚溽ｸ帛､画焚繧堤腸蠅・・ｽ・ｽ霑ｽ蜉・ｽE・ｽEariant 縺ｮ繝壹う繝ｭ繝ｼ繝牙梛縺ｯ譛ｪ菫晄戟縺ｮ縺溘ａ Unknown・ｽE・ｽE
                         let mut arm_env = env.clone();
                         for b in bindings {
                             if b != "Ignore" {
@@ -2558,7 +2922,7 @@ fn check_stmt(
                     }
                 }
             } else if let Type::Option(_) = &m_ty {
-                // Option は Some / None の両方を網羁E��E��E
+                // Option 縺ｯ Some / None 縺ｮ荳｡譁ｹ繧堤ｶｲ鄒・・ｽ・ｽE・ｽ・ｽE
                 let variants = vec!["Some".to_string(), "None".to_string()];
                 let mut covered: Vec<String> = Vec::new();
                 for (pattern, body) in arms {
@@ -2589,7 +2953,7 @@ fn check_stmt(
                     }
                 }
             } else {
-                // State / Option 型以外�E吁E�Eのボディのみ検査�E�束縛なし！E
+                // State / Option 蝙倶ｻ･螟厄ｿｽE蜷・・ｽE縺ｮ繝懊ョ繧｣縺ｮ縺ｿ讀懈渊・ｽE・ｽ譚溽ｸ帙↑縺暦ｼ・
                 for (_, body) in arms {
                     check_stmts(body, env, defs, expected_return)?;
                 }
@@ -2604,7 +2968,7 @@ fn check_stmt(
 
         Stmt::Assign { name, value } => {
             let v_ty = check_expr(value, env, defs)?;
-            // 既存変数への代入�E�未宣言ならエラー�E�E
+            // 譌｢蟄伜､画焚縺ｸ縺ｮ莉｣蜈･・ｽE・ｽ譛ｪ螳｣險縺ｪ繧峨お繝ｩ繝ｼ・ｽE・ｽE
             match env.get(name) {
                 Some(existing) => {
                     if !type_eq(existing, &v_ty) {
@@ -2622,7 +2986,7 @@ fn check_stmt(
             Ok(())
         }
 
-        // 定義系は collect_defs で登録済み。ここでは本斁E��検査する、E
+        // 螳夂ｾｩ邉ｻ縺ｯ collect_defs 縺ｧ逋ｻ骭ｲ貂医∩縲ゅ％縺薙〒縺ｯ譛ｬ譁・・ｽ・ｽ讀懈渊縺吶ｋ縲・
         Stmt::Fn { .. } => Ok(()),
         Stmt::Struct { .. } => Ok(()),
         Stmt::State { .. } => Ok(()),
@@ -2642,7 +3006,7 @@ fn check_stmts(
     Ok(())
 }
 
-// 関数本斁E��検査�E�Earams を環墁E��注入�E�E
+// 髢｢謨ｰ譛ｬ譁・・ｽ・ｽ讀懈渊・ｽE・ｽEarams 繧堤腸蠅・・ｽ・ｽ豕ｨ蜈･・ｽE・ｽE
 fn check_function(
     params: &[(String, String)],
     return_type: &Option<String>,
@@ -2657,8 +3021,9 @@ fn check_function(
     check_stmts(body, &mut env, defs, rt.as_ref())
 }
 
-// プログラム全体�E型検査
+// 繝励Ο繧ｰ繝ｩ繝蜈ｨ菴難ｿｽE蝙区､懈渊
 fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
+    let mut top_env = TypeEnv::new();
     for stmt in stmts {
         match stmt {
             Stmt::Fn {
@@ -2678,7 +3043,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                 fields,
                 methods,
             } => {
-                // メソチE��検査: フィールドを環墁E��注入
+                // 繝｡繧ｽ繝・・ｽ・ｽ讀懈渊: 繝輔ぅ繝ｼ繝ｫ繝峨ｒ迺ｰ蠅・・ｽ・ｽ豕ｨ蜈･
                 let mut env = TypeEnv::new();
                 for (fname, ftype) in fields {
                     env.insert(fname.clone(), type_from_str(ftype, defs));
@@ -2692,7 +3057,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                         body,
                     } = m
                     {
-                        // フィールド環墁E+ 引数を注入
+                        // 繝輔ぅ繝ｼ繝ｫ繝臥腸蠅・+ 蠑墓焚繧呈ｳｨ蜈･
                         let mut menv = env.clone();
                         for (pname, ptype) in params {
                             menv.insert(pname.clone(), type_from_str(ptype, defs));
@@ -2703,14 +3068,26 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
                     }
                 }
             }
-            // トップレベルの実行文�E�Eain が無ぁE�Eログラム用�E�も検査
-            Stmt::Let { .. }
-            | Stmt::If { .. }
+            // 繝医ャ繝励Ξ繝吶Ν縺ｮ螳溯｡梧枚・・ain 縺檎┌縺・・繝ｭ繧ｰ繝ｩ繝逕ｨ・峨ｂ讀懈渊縲・
+            // 繝医ャ繝励Ξ繝吶Ν縺ｮ let 蜷悟｣ｫ縺悟盾辣ｧ縺怜粋縺医ｋ繧医≧縲∝・譛・env 繧剃ｽｿ縺・・
+            Stmt::Let { name, value, .. } => {
+                let _ = check_expr(value, &top_env, defs)?;
+                let v_ty = infer_type(value, &top_env.vars, defs);
+                let mut env = top_env.clone();
+                if let Ok(t) = &v_ty {
+                    env.insert(name.clone(), t.clone());
+                }
+                check_stmt(stmt, &mut env, defs, None)?;
+                if let Ok(t) = v_ty {
+                    top_env.insert(name.clone(), t);
+                }
+            }
+            Stmt::If { .. }
             | Stmt::Match { .. }
             | Stmt::Return(_)
             | Stmt::Expr(_)
             | Stmt::Assign { .. } => {
-                let mut env = TypeEnv::new();
+                let mut env = top_env.clone();
                 check_stmt(stmt, &mut env, defs, None)?;
             }
             _ => {}
@@ -2719,7 +3096,7 @@ fn type_check(stmts: &[Stmt], defs: &Defs) -> Result<(), String> {
     Ok(())
 }
 
-// String のメソチE��評価�E�Elen / .byte_len / .chars / .bytes / .slice�E�E
+// String 縺ｮ繝｡繧ｽ繝・・ｽ・ｽ隧穂ｾ｡・ｽE・ｽElen / .byte_len / .chars / .bytes / .slice・ｽE・ｽE
 fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "len" => Ok(Value::Int(s.chars().count() as i64)),
@@ -2744,7 +3121,7 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
                 Value::Int(n) => *n,
                 _ => return Err("slice() end must be int".to_string()),
             };
-            // 斁E��単位�EインチE��クスでスライス
+            // 譁・・ｽ・ｽ蜊倅ｽ搾ｿｽE繧､繝ｳ繝・・ｽ・ｽ繧ｯ繧ｹ縺ｧ繧ｹ繝ｩ繧､繧ｹ
             let chars: Vec<char> = s.chars().collect();
             let len = chars.len() as i64;
             let s_idx = if start < 0 { len + start } else { start }.max(0) as usize;
@@ -2760,7 +3137,7 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
     }
 }
 
-// List�E�Erray 値�E��EメソチE��評価�E�Eadd / .len / .get / .set�E�E
+// List・ｽE・ｽErray 蛟､・ｽE・ｽ・ｽE繝｡繧ｽ繝・・ｽ・ｽ隧穂ｾ｡・ｽE・ｽEadd / .len / .get / .set・ｽE・ｽE
 fn eval_list_method(arr: &[Value], method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "add" => {
@@ -2814,63 +3191,109 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             .get(name)
             .cloned()
             .ok_or_else(|| format!("Undefined variable: {}", name)),
-        Expr::BinOp { left, op, right } => {
+        Expr::BinOp { left, op, right, resolved_operator } => {
             let l = eval_expr(left, env, defs)?;
             let r = eval_expr(right, env, defs)?;
-            match (&l, &r) {
-                (Value::Int(a), Value::Int(b)) => {
-                    let result = match op.as_str() {
-                        "+" => Value::Int(a + b),
-                        "-" => Value::Int(a - b),
-                        "*" => Value::Int(a * b),
-                        "/" => {
-                            if *b == 0 {
-                                return Err("Division by zero".to_string());
-                            }
-                            Value::Int(a / b)
-                        }
-                        "%" => Value::Int(a % b),
-                        "==" => Value::Bool(a == b),
-                        "!=" => Value::Bool(a != b),
-                        "<" => Value::Bool(a < b),
-                        ">" => Value::Bool(a > b),
-                        "<=" => Value::Bool(a <= b),
-                        ">=" => Value::Bool(a >= b),
-                        _ => return Err(format!("Unknown operator: {}", op)),
+            // 解決済み演算子のみを見て実行（Runtime での型検索は行わない）
+            match resolved_operator {
+                Some(ResolvedOperator::MethodCall { method, op: mop }) => {
+                    // 繝ｦ繝ｼ繧ｶ繝ｼ螳夂ｾｩ蝙・ 蟾ｦ霎ｺ縺ｮ繝｡繧ｽ繝・ラ繧貞他縺ｳ蜃ｺ縺励｛p 縺ｧ邨先棡繧定ｧ｣驥・
+                    let (sname, fields) = match &l {
+                        Value::Struct { name, fields } => (name.clone(), fields.clone()),
+                        _ => return Err("Operator interface target is not a struct".to_string()),
                     };
-                    Ok(result)
-                }
-                (Value::Float(a), Value::Float(b)) => {
-                    let result = match op.as_str() {
-                        "+" => Value::Float(a + b),
-                        "-" => Value::Float(a - b),
-                        "*" => Value::Float(a * b),
-                        "/" => {
-                            if *b == 0.0 {
-                                return Err("Division by zero".to_string());
-                            }
-                            Value::Float(a / b)
+                    let res = call_method(&sname, &fields, &method, vec![r], defs)?;
+                    match mop.as_str() {
+                        "+" => Ok(res),
+                        "==" => Ok(res),
+                        "!=" => match res {
+                            Value::Bool(b) => Ok(Value::Bool(!b)),
+                            _ => Err("equal() must return bool".to_string()),
+                        },
+                        "<" | ">" | "<=" | ">=" => {
+                            let i = match res {
+                                Value::Int(n) => n,
+                                _ => return Err("compare() must return int".to_string()),
+                            };
+                            let b = match mop.as_str() {
+                                "<" => i < 0,
+                                ">" => i > 0,
+                                "<=" => i <= 0,
+                                ">=" => i >= 0,
+                                _ => unreachable!(),
+                            };
+                            Ok(Value::Bool(b))
                         }
-                        "%" => Value::Float(a % b),
-                        "==" => Value::Bool(a == b),
-                        "!=" => Value::Bool(a != b),
-                        "<" => Value::Bool(a < b),
-                        ">" => Value::Bool(a > b),
-                        "<=" => Value::Bool(a <= b),
-                        ">=" => Value::Bool(a >= b),
-                        _ => return Err(format!("Unknown operator: {}", op)),
-                    };
-                    Ok(result)
-                }
-                (Value::String(a), Value::String(b)) => {
-                    match op.as_str() {
-                        "+" => Ok(Value::String(format!("{}{}", a, b))),
-                        "==" => Ok(Value::Bool(a == b)),
-                        "!=" => Ok(Value::Bool(a != b)),
-                        _ => Err(format!("Invalid operation on strings: {}", op)),
+                        _ => Err(format!("Unknown operator interface op: {}", mop)),
                     }
                 }
-                _ => Err("Type mismatch in binary operation".to_string()),
+                Some(ResolvedOperator::Builtin) | None => {
+                    // 邨・∩霎ｼ縺ｿ蝙九・譌｢蟄俶ｼ皮ｮ暦ｼ・nt/float/str・・
+                    match (&l, &r) {
+                        (Value::Int(a), Value::Int(b)) => {
+                            let result = match op.as_str() {
+                                "+" => Value::Int(a + b),
+                                "-" => Value::Int(a - b),
+                                "*" => Value::Int(a * b),
+                                "/" => {
+                                    if *b == 0 {
+                                        return Err("Division by zero".to_string());
+                                    }
+                                    Value::Int(a / b)
+                                }
+                                "%" => Value::Int(a % b),
+                                "==" => Value::Bool(a == b),
+                                "!=" => Value::Bool(a != b),
+                                "<" => Value::Bool(a < b),
+                                ">" => Value::Bool(a > b),
+                                "<=" => Value::Bool(a <= b),
+                                ">=" => Value::Bool(a >= b),
+                                _ => return Err(format!("Unknown operator: {}", op)),
+                            };
+                            Ok(result)
+                        }
+                        (Value::Float(a), Value::Float(b)) => {
+                            let result = match op.as_str() {
+                                "+" => Value::Float(a + b),
+                                "-" => Value::Float(a - b),
+                                "*" => Value::Float(a * b),
+                                "/" => {
+                                    if *b == 0.0 {
+                                        return Err("Division by zero".to_string());
+                                    }
+                                    Value::Float(a / b)
+                                }
+                                "%" => Value::Float(a % b),
+                                "==" => Value::Bool(a == b),
+                                "!=" => Value::Bool(a != b),
+                                "<" => Value::Bool(a < b),
+                                ">" => Value::Bool(a > b),
+                                "<=" => Value::Bool(a <= b),
+                                ">=" => Value::Bool(a >= b),
+                                _ => return Err(format!("Unknown operator: {}", op)),
+                            };
+                            Ok(result)
+                        }
+                        (Value::String(a), Value::String(b)) => {
+                            match op.as_str() {
+                                "+" => Ok(Value::String(format!("{}{}", a, b))),
+                                "==" => Ok(Value::Bool(a == b)),
+                                "!=" => Ok(Value::Bool(a != b)),
+                                _ => Err(format!("Invalid operation on strings: {}", op)),
+                            }
+                        }
+                        (Value::Bool(a), Value::Bool(b)) => {
+                            match op.as_str() {
+                                "and" => Ok(Value::Bool(*a && *b)),
+                                "or" => Ok(Value::Bool(*a || *b)),
+                                "==" => Ok(Value::Bool(a == b)),
+                                "!=" => Ok(Value::Bool(a != b)),
+                                _ => Err(format!("Invalid operation on bools: {}", op)),
+                            }
+                        }
+                        _ => Err("Type mismatch in binary operation".to_string()),
+                    }
+                }
             }
         }
         Expr::UnOp { op, operand } => {
@@ -2915,8 +3338,8 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     }
                     Ok(Value::StringBuilder(String::new()))
                 }
-                // 明示型変換 API�E�暗黙変換禁止�E�E
-                // bool 変換は禁止�E�数値 -> bool 不可�E�E
+                // 譏守､ｺ蝙句､画鋤 API・ｽE・ｽ證鈴ｻ吝､画鋤遖∵ｭ｢・ｽE・ｽE
+                // bool 螟画鋤縺ｯ遖∵ｭ｢・ｽE・ｽ謨ｰ蛟､ -> bool 荳榊庄・ｽE・ｽE
                 "int" => {
                     if args.len() != 1 {
                         return Err("int() takes exactly 1 argument".to_string());
@@ -2956,7 +3379,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             let val = eval_expr(&args[0], env, defs)?;
             Ok(Value::String(val.to_string()))
         }
-        // Option コンストラクタ: Some(x) -> Option(Some(x)), None -> Option(None)
+        // Option 繧ｳ繝ｳ繧ｹ繝医Λ繧ｯ繧ｿ: Some(x) -> Option(Some(x)), None -> Option(None)
         "Some" => {
             if args.len() != 1 {
                 return Err("Some() takes exactly 1 argument".to_string());
@@ -2971,8 +3394,8 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             Ok(Value::Option(None))
         }
         other => {
-                    // Constructor判宁E 1. Struct ↁE2. State Variant ↁE3. Function ↁE4. エラー
-                    // ジェネリチE�� Base(Arg) も�Eース名で照吁E
+                    // Constructor蛻､螳・ 1. Struct 竊・2. State Variant 竊・3. Function 竊・4. 繧ｨ繝ｩ繝ｼ
+                    // 繧ｸ繧ｧ繝阪Μ繝・・ｽ・ｽ Base(Arg) 繧ゑｿｽE繝ｼ繧ｹ蜷阪〒辣ｧ蜷・
                     let base = match other.find('(') {
                         Some(i) => &other[..i],
                         None => other,
@@ -3022,13 +3445,13 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
         }
         Expr::MethodCall { object, method, args } => {
-            // 引数を�Eに評価
+            // 蠑墓焚繧抵ｿｽE縺ｫ隧穂ｾ｡
             let mut arg_vals = Vec::new();
             for a in args {
                 arg_vals.push(eval_expr(a, env, defs)?);
             }
 
-            // 変数を対象にした呼び出し�E書き換えを反映できる
+            // 螟画焚繧貞ｯｾ雎｡縺ｫ縺励◆蜻ｼ縺ｳ蜃ｺ縺暦ｿｽE譖ｸ縺肴鋤縺医ｒ蜿肴丐縺ｧ縺阪ｋ
             if let Expr::Ident(var) = object.as_ref() {
                 let current = env
                     .get(var)
@@ -3050,7 +3473,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     },
                     Value::Array(arr) => {
                         let result = eval_list_method(&arr, method, &arg_vals)?;
-                        // add/set は値を更新、それ以外�E一時値を返す
+                        // add/set 縺ｯ蛟､繧呈峩譁ｰ縲√◎繧御ｻ･螟厄ｿｽE荳譎ょ､繧定ｿ斐☆
                         if method == "add" || method == "set" {
                             env.insert(var.clone(), result.clone());
                         }
@@ -3066,7 +3489,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     )),
                 }
             } else {
-                // 一時値に対する読み取り専用メソチE��
+                // 荳譎ょ､縺ｫ蟇ｾ縺吶ｋ隱ｭ縺ｿ蜿悶ｊ蟆ら畑繝｡繧ｽ繝・・ｽ・ｽ
                 let obj = eval_expr(object, env, defs)?;
                 match obj {
                     Value::StringBuilder(s) => match method.as_str() {
@@ -3116,7 +3539,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 (Value::Int(a), Value::Int(b)) => {
                     let mut values = Vec::new();
                     let mut i = *a;
-                    // 終端を含まなぁE��E方式！E
+                    // 邨らｫｯ繧貞性縺ｾ縺ｪ縺・・ｽ・ｽE譁ｹ蠑擾ｼ・
                     while i < *b {
                         values.push(Value::Int(i));
                         i += 1;
@@ -3156,7 +3579,14 @@ fn call_function(
 
     match execute_stmts(&func.body, &mut local, defs)? {
         ExecResult::Return(v) => Ok(v),
-        ExecResult::Continue => Ok(Value::Int(0)),
+        ExecResult::Continue => {
+            // 譛ｫ蟆ｾ縺悟ｼ乗枚縺ｪ繧峨◎縺ｮ蛟､繧呈囓鮟呵ｿ泌唆・亥ｼ乗欠蜷代Γ繧ｽ繝・ラ/髢｢謨ｰ・・
+            if let Some(Stmt::Expr(e)) = func.body.last() {
+                eval_expr(e, &mut local, defs)
+            } else {
+                Ok(Value::Int(0))
+            }
+        }
     }
 }
 
@@ -3188,20 +3618,27 @@ fn call_method(
         ));
     }
 
-    // 新しいローカル環墁E フィールドを暗黙注入�E�Eelf/this なし！E
+    // 譁ｰ縺励＞繝ｭ繝ｼ繧ｫ繝ｫ迺ｰ蠅・ 繝輔ぅ繝ｼ繝ｫ繝峨ｒ證鈴ｻ呎ｳｨ蜈･・ｽE・ｽEelf/this 縺ｪ縺暦ｼ・
     let mut local: HashMap<String, Value> = HashMap::new();
     for (fname, fval) in fields {
         local.insert(fname.clone(), fval.clone());
     }
 
-    // 引数束縛（フィールドと同名なら引数が優先！E
+    // 蠑墓焚譚溽ｸ幢ｼ医ヵ繧｣繝ｼ繝ｫ繝峨→蜷悟錐縺ｪ繧牙ｼ墓焚縺悟━蜈茨ｼ・
     for ((param_name, _param_type), val) in func.params.iter().zip(args.into_iter()) {
         local.insert(param_name.clone(), val);
     }
 
     match execute_stmts(&func.body, &mut local, defs)? {
         ExecResult::Return(v) => Ok(v),
-        ExecResult::Continue => Ok(Value::Int(0)),
+        ExecResult::Continue => {
+            // 譛ｫ蟆ｾ縺悟ｼ乗枚縺ｪ繧峨◎縺ｮ蛟､繧呈囓鮟呵ｿ泌唆・亥ｼ乗欠蜷代Γ繧ｽ繝・ラ/髢｢謨ｰ・・
+            if let Some(Stmt::Expr(e)) = func.body.last() {
+                eval_expr(e, &mut local, defs)
+            } else {
+                Ok(Value::Int(0))
+            }
+        }
     }
 }
 
@@ -3314,7 +3751,7 @@ fn execute_stmt(
             Ok(ExecResult::Continue)
         }
 
-        // 関数定義は collect_defs で登録済み。実行時は何もしなぁE��E
+        // 髢｢謨ｰ螳夂ｾｩ縺ｯ collect_defs 縺ｧ逋ｻ骭ｲ貂医∩縲ょｮ溯｡梧凾縺ｯ菴輔ｂ縺励↑縺・・ｽ・ｽE
         Stmt::Fn { .. } => Ok(ExecResult::Continue),
 
         Stmt::Match { expr, arms } => {
@@ -3373,7 +3810,7 @@ fn execute_stmt(
                                 match pattern {
                                     Pattern::Variant { name: pname, bindings } => {
                                         if pname == "None" {
-                                            // None は束縛なぁE
+                                            // None 縺ｯ譚溽ｸ帙↑縺・
                                             let _ = bindings;
                                             return execute_stmts(body, env, defs);
                                         }
@@ -3392,7 +3829,7 @@ fn execute_stmt(
             }
         }
 
-        // state 宣言は型定義。実行時は何もしなぁE��意味付けは次段階！E
+        // state 螳｣險縺ｯ蝙句ｮ夂ｾｩ縲ょｮ溯｡梧凾縺ｯ菴輔ｂ縺励↑縺・・ｽ・ｽ諢丞袖莉倥￠縺ｯ谺｡谿ｵ髫趣ｼ・
         Stmt::State { .. } => Ok(ExecResult::Continue),
 
         _ => Ok(ExecResult::Continue),
