@@ -35,3 +35,34 @@ pub fn resolve_var(ty: &Type) -> Type {
         other => other.clone(),
     }
 }
+
+pub fn is_float(ty: &Type) -> bool {
+    matches!(ty, Type::Float)
+}
+
+pub fn align_of(ty: &Type) -> usize {
+    match ty {
+        Type::Bool => 1,
+        Type::Int => 8,
+        Type::Float => 8,
+        Type::String => 8,
+        Type::List(_) => 8,
+        Type::Option(_) => 8,
+        Type::Array(_) => 8,
+        Type::Struct(_) => 8,
+        Type::State(_) => 8,
+        Type::Interface(_, _) => 8,
+        Type::Unit => 0,
+        Type::Unknown => 8,
+        Type::Var(_) => 8,
+    }
+}
+
+pub fn zero_value_for_type(ty: &Type) -> String {
+    match ty {
+        Type::Float => "0.0".to_string(),
+        Type::Bool => "false".to_string(),
+        Type::Unit => "".to_string(),
+        _ => "0".to_string(),
+    }
+}
