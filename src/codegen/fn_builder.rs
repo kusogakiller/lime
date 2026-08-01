@@ -41,6 +41,7 @@ struct Cg<'a> {
     block: usize,
     terminated: bool,
     warnings: Vec<String>,
+    fn_ret_ty: String,
 }
 
 impl<'a> Cg<'a> {
@@ -59,6 +60,7 @@ impl<'a> Cg<'a> {
             block: 0,
             terminated: false,
             warnings: Vec::new(),
+            fn_ret_ty: "void".to_string(),
         }
     }
 
@@ -87,6 +89,7 @@ impl<'a> Cg<'a> {
             Some(rt) => llvm_type_name(&type_from_str(rt, self.defs)),
             None => "void".to_string(),
         };
+        self.fn_ret_ty = ret_ty.clone();
 
         // Function params with names (%p0, %p1, ...) so alloca/store can reference them
         let mut params = Vec::new();
@@ -264,7 +267,24 @@ impl<'a> Cg<'a> {
                         Ok(())
                     }
                     None => {
-                        self.out.push_str("  ret void\n");
+                        // A bare `return` still has to satisfy the function's
+                        // (possibly inferred) return type: emit the default
+                        // value instead of `ret void` when the type is non-void.
+                        if self.fn_ret_ty == "void" {
+                            self.out.push_str("  ret void\n");
+                        } else {
+                            let zero = if self.fn_ret_ty.starts_with('%') {
+                                "zeroinitializer".to_string()
+                            } else {
+                                match self.fn_ret_ty.as_str() {
+                                    "double" => "0.0".to_string(),
+                                    "i1" => "false".to_string(),
+                                    "i8*" => "null".to_string(),
+                                    _ => "0".to_string(),
+                                }
+                            };
+                            self.out.push_str(&format!("  ret {} {}\n", self.fn_ret_ty, zero));
+                        }
                         Ok(())
                     }
                 }
@@ -1066,7 +1086,21 @@ impl<'a> Cg<'a> {
         let (obj_v, obj_t) = self.codegen_expr(object)?;
         match obj_t {
             Type::String => self.codegen_string_method(&obj_v, method, args),
-            Type::List(_) => self.codegen_list_method(&obj_v, method, args),
+            Type::List(ref elem) => {
+                // `add`/`set` mutate the receiver: the runtime returns a new
+                // list, which must be stored back into the receiver variable
+                // (mirrors the interpreter's rebind in eval_expr). Non-ident
+                // receivers (e.g. temporaries) stay pure.
+                let rebind_slot = if matches!(method, "add" | "set") {
+                    match object {
+                        Expr::Ident(name) => self.named.get(name).cloned(),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                self.codegen_list_method(&obj_v, method, args, elem, rebind_slot)
+            }
             // Phase 7: struct method call -> direct LLVM function call
             Type::Struct(ref sname) => {
                 self.codegen_struct_method_call(sname, &obj_v, method, args)
@@ -1208,7 +1242,14 @@ impl<'a> Cg<'a> {
     }
 
     // Phase 5: list method codegen (len, get, add, set)
-    fn codegen_list_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
+    fn codegen_list_method(
+        &mut self,
+        obj: &str,
+        method: &str,
+        args: &[Expr],
+        elem: &Type,
+        rebind_slot: Option<String>,
+    ) -> Result<(String, Type), String> {
         match method {
             "len" => {
                 let tmp = self.fresh_temp();
@@ -1221,6 +1262,15 @@ impl<'a> Cg<'a> {
             "get" => {
                 if args.len() != 1 {
                     return Err("get() takes exactly 1 argument".to_string());
+                }
+                if *elem != Type::Int {
+                    // The element buffer stores i64 slots; only Int lists can
+                    // be lowered faithfully today. Refuse rather than emit a
+                    // value that would be silently misinterpreted.
+                    return Err(format!(
+                        "List.get() is only supported for lists of Int (element type is {:?})",
+                        elem
+                    ));
                 }
                 let (idx_v, _) = self.codegen_expr(&args[0])?;
                 let data = self.fresh_temp();
@@ -1257,6 +1307,11 @@ impl<'a> Cg<'a> {
                     slot, arg_slot, converted
                 ));
                 self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                if let Some(slot) = rebind_slot {
+                    // Mutation semantics: write the returned list back into the
+                    // receiver variable's storage.
+                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", tmp, slot));
+                }
                 Ok((tmp, Type::List(Box::new(elem_t))))
             }
             "set" => {
@@ -1277,6 +1332,11 @@ impl<'a> Cg<'a> {
                     slot, arg_slot, self.bare_value(&idx_v), converted
                 ));
                 self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                if let Some(slot) = rebind_slot {
+                    // Mutation semantics: write the returned list back into the
+                    // receiver variable's storage.
+                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", tmp, slot));
+                }
                 Ok((tmp, Type::List(Box::new(elem_t))))
             }
             _ => Err(format!("Phase 5: unknown List method '{}'", method)),

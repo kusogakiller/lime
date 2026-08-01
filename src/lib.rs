@@ -3607,6 +3607,18 @@ pub fn compile_pipeline(
             } else {
                 eprintln!("  (re-run with --verbose for details)");
             }
+
+            // A codegen warning means at least one function body could not be
+            // fully lowered. Such a module must never be turned into an object
+            // file / executable, otherwise the binary would silently run the
+            // unlowered function as a stub that returns a default value.
+            if options.emit_object {
+                return Err(format!(
+                    "error[codegen]: {} function(s) could not be fully lowered; refusing to emit object file:\n  - {}",
+                    report.codegen_warnings.len(),
+                    report.codegen_warnings.join("\n  - ")
+                ));
+            }
         }
     }
 
@@ -4738,6 +4750,7 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
         "float" | "double" | "f64" | "f" => Type::Float,
         "bool" | "i1" | "b" => Type::Bool,
         "str" | "i8*" | "s" => Type::String,
+        "void" | "unit" | "u" => Type::Unit,
         _ => {
             // 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴取ｨ費ｽｺ繧托ｽｾ蜿悶渚繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮陷夲ｽｱ鬨ｾ・ｶ繝ｻ・ｾ鬮ｴ雜｣・ｽ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ Base(Arg, ...) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主沁笳冗ｹ晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驍ｵ・ｲ陞ｳ螟ｲ・ｽ・ｾ繝ｻ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ驛｢譎｢・ｽ・ｻ
             let base = match s.find('(') {
@@ -10775,12 +10788,26 @@ mod phase10_tests {
         assert_eq!(type_from_str("s", &d), Type::String);
     }
 
+    /// `void`/`unit` must round-trip to Type::Unit (not Var/Unknown). A Var
+    /// fallback made every void function render as `i64` in codegen, breaking
+    /// bare `return` (`ret void` in an `i64` function).
+    #[test]
+    fn type_from_str_void_maps_to_unit() {
+        let d = Defs::new();
+        assert_eq!(type_from_str("void", &d), Type::Unit);
+        assert_eq!(type_from_str("unit", &d), Type::Unit);
+        assert_eq!(type_to_string(&Type::Unit), "void");
+    }
+
     /// Phase 11 Step 2: run codegen over a body and return (ir, warnings).
     fn codegen_from_source(src: &str) -> (String, Vec<String>) {
         let (tokens, locs) = tokenize(src).expect("tokenize");
         let stmts = parse(tokens, locs).expect("parse");
         let mut defs = Defs::new();
         collect_defs(&stmts, &mut defs);
+        // Match the real pipeline: infer return types (expression-bodied
+        // functions) so codegen sees the same `return_type` it would in a build.
+        let _ = infer_function_return_types(&mut defs);
         let memory = memory_analyze(&stmts, &defs).expect("memory analyze");
         codegen::emit_llvm(&stmts, &defs, &memory)
     }
@@ -10817,6 +10844,164 @@ mod phase10_tests {
             warnings
         );
         assert!(ir.contains("define"), "expected a function definition in IR");
+    }
+
+    // ===== Phase 7 recovery regression tests (runtime ABI + backend fixes) =====
+
+    /// A list literal must be heap-backed via `runtime_alloc` and built up with
+    /// `insertvalue` on `%LimeList`.
+    #[test]
+    fn codegen_list_literal_uses_runtime_alloc() {
+        let src = "fn main():\n    let nums = [1, 2, 3]\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+        assert!(
+            ir.contains("call i8* @runtime_alloc"),
+            "list literal must allocate via runtime_alloc\n--- ir ---\n{}",
+            ir
+        );
+        assert!(
+            ir.contains("insertvalue %LimeList"),
+            "list literal must build a %LimeList\n--- ir ---\n{}",
+            ir
+        );
+    }
+
+    /// `add`/`set` are mutating: the runtime returns a new list, which must be
+    /// stored back into the receiver variable (matches the interpreter's rebind).
+    #[test]
+    fn codegen_list_add_set_store_back() {
+        let src = "fn main():\n    let nums = [1, 2, 3]\n    nums.add(4)\n    nums.set(0, 9)\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+        assert!(
+            ir.contains("call void @runtime_list_add(ptr sret(%LimeList)"),
+            "add must use the sret ABI\n--- ir ---\n{}",
+            ir
+        );
+        assert!(
+            ir.contains("call void @runtime_list_set(ptr sret(%LimeList)"),
+            "set must use the sret ABI\n--- ir ---\n{}",
+            ir
+        );
+        // one store for the initial `let`, plus one store-back per mutation
+        let stores = ir.matches("store %LimeList").count();
+        assert!(
+            stores >= 3,
+            "expected initial store + 2 store-backs, got {} store(s)\n--- ir ---\n{}",
+            stores, ir
+        );
+    }
+
+    /// `get` on a non-Int list must produce a codegen warning (refusing the
+    /// build) instead of emitting a silently-misinterpreted element.
+    #[test]
+    fn codegen_get_on_non_int_list_warns() {
+        let src = "fn main():\n    let strs = [\"a\", \"b\"]\n    println(strs.get(0))\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.iter().any(|w| w.contains("only supported for lists of Int")),
+            "expected a get() support warning, got: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+    }
+
+    /// String methods `length`/`slice`/`concat` must lower to the runtime ABI.
+    #[test]
+    fn codegen_string_runtime_methods() {
+        let src = "fn main():\n    let s = \"hello\"\n    println(s.length())\n    println(s.slice(1, 3))\n    let t = s + \"!\"\n    println(t)\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+        assert!(
+            ir.contains("call i64 @strlen"),
+            "length must lower to strlen\n--- ir ---\n{}",
+            ir
+        );
+        assert!(
+            ir.contains("call i8* @runtime_str_slice"),
+            "slice must lower to runtime_str_slice\n--- ir ---\n{}",
+            ir
+        );
+        assert!(
+            ir.contains("call i8* @runtime_str_concat"),
+            "concat must lower to runtime_str_concat\n--- ir ---\n{}",
+            ir
+        );
+    }
+
+    /// `chars`/`bytes` must use the `ptr sret(%LimeList)` ABI declarations.
+    #[test]
+    fn codegen_chars_bytes_sret_abi() {
+        let src = "fn main():\n    let cs = \"abc\".chars()\n    let bs = \"abc\".bytes()\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+        assert!(
+            ir.contains("call void @runtime_str_chars(ptr sret(%LimeList)"),
+            "chars must use the sret ABI\n--- ir ---\n{}",
+            ir
+        );
+        assert!(
+            ir.contains("call void @runtime_str_bytes(ptr sret(%LimeList)"),
+            "bytes must use the sret ABI\n--- ir ---\n{}",
+            ir
+        );
+    }
+
+    /// A bare `return` in a void function must stay `ret void` — and crucially,
+    /// `void` must not be mis-resolved to `i64` by the type-to-LLVM mapping
+    /// (type_from_str("void") must yield Unit, not Var/Unknown).
+    #[test]
+    fn codegen_bare_return_matches_inferred_type() {
+        let src = "fn main():\n    println(\"hi\")\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+        assert!(
+            ir.contains("define void @main_lime"),
+            "a function ending in a bare return must stay void\n--- ir ---\n{}",
+            ir
+        );
+        assert!(
+            ir.contains("  ret void\n"),
+            "bare return must emit ret void in a void function\n--- ir ---\n{}",
+            ir
+        );
+    }
+
+    /// A genuinely void function with a bare `return` must still emit `ret void`.
+    #[test]
+    fn codegen_bare_return_void_stays_void() {
+        let src = "fn main():\n    let x = 1\n    return\n";
+        let (ir, warnings) = codegen_from_source(src);
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected: {:?}\n--- ir ---\n{}",
+            warnings, ir
+        );
+        assert!(
+            ir.contains("define void @main_lime"),
+            "a void body must stay void\n--- ir ---\n{}",
+            ir
+        );
     }
 
     // ===== Phase 11 Step 3: type-error position reporting =====
