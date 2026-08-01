@@ -178,3 +178,204 @@ fn emit_object_refuses_unlowered_function() {
         "no executable may be produced when lowering is incomplete"
     );
 }
+
+/// Regression: `await` on an async (`lime`) function must lower to a normal
+/// synchronous LLVM call. Previously a function body containing `Expr::Await`
+/// failed `expr_supported`, so `main` was silently emitted as a `ret void`
+/// stub. The async callee must keep its real body and `main_lime` must contain
+/// the awaited call, and the executable must print `42`.
+#[test]
+fn emit_object_await_int_runs() {
+    use std::fs;
+    let dir = "target/test_emit_await_int";
+    write_project(
+        dir,
+        "lime add1(int: n):\n    return n + n\n\nfn main():\n    let x = await add1(21)\n    println(x)\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("define i64 @add1 (i64 %p0)"),
+        "async fn add1 must be emitted with its real body\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("add i64"),
+        "add1 body must contain the add instruction\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i64 @add1"),
+        "main must await add1 via a direct synchronous call\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("define i64 @add1 (i64 %p0) {\n  ret i64 0\n}"),
+        "add1 must not be emitted as a zero stub\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("define void @main_lime () {\n  ret void\n}"),
+        "main_lime must not be emitted as an empty stub\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["42"],
+        "expected lines ['42'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: an async (`lime`) function returning a string must be emitted
+/// as a real `i8*`-returning function (not a stub), and `await` must produce
+/// the awaited string at runtime. Executable must print `hi lime`.
+#[test]
+fn emit_object_await_string_runs() {
+    use std::fs;
+    let dir = "target/test_emit_await_string";
+    write_project(
+        dir,
+        "lime greet(str: name):\n    return \"hi \" + name\n\nfn main():\n    let g = await greet(\"lime\")\n    println(g)\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("define i8* @greet (i8* %p0)"),
+        "async fn greet must be emitted with its real body\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i8* @runtime_str_concat"),
+        "greet body must contain the string concat call\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i8* @greet"),
+        "main must await greet via a direct synchronous call\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("define i8* @greet (i8* %p0) {\n  ret i8* 0\n}"),
+        "greet must not be emitted as a zero stub\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("define void @main_lime () {\n  ret void\n}"),
+        "main_lime must not be emitted as an empty stub\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["hi lime"],
+        "expected lines ['hi lime'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: an async (`lime`) function whose body itself awaits another
+/// async function must lower to nested synchronous calls with no stubs.
+/// Executable must print `42`.
+#[test]
+fn emit_object_await_nested_runs() {
+    use std::fs;
+    let dir = "target/test_emit_await_nested";
+    write_project(
+        dir,
+        "lime inner(int: n):\n    return n * n\n\nlime outer(int: n):\n    return await inner(n) + n\n\nfn main():\n    let x = await outer(6)\n    println(x)\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("define i64 @inner (i64 %p0)"),
+        "inner must be emitted with its real body\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("define i64 @outer (i64 %p0)"),
+        "outer must be emitted with its real body\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("mul i64"),
+        "inner body must contain the multiply instruction\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i64 @inner"),
+        "outer must await inner via a direct call\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i64 @outer"),
+        "main must await outer via a direct call\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("define i64 @inner (i64 %p0) {\n  ret i64 0\n}")
+            && !ir.contains("define i64 @outer (i64 %p0) {\n  ret i64 0\n}")
+            && !ir.contains("define void @main_lime () {\n  ret void\n}"),
+        "no async-related function may be emitted as a stub\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["42"],
+        "expected lines ['42'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}

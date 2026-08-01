@@ -754,8 +754,10 @@ fn main():
     return
 ```
 
-Async is **interpreter-only** today. The LLVM backend does not lower `await`
-(see the compatibility table).
+The LLVM backend lowers `await` to a direct synchronous call, matching the
+interpreter's synchronous execution. There is no async runtime, scheduler, or
+coroutine lowering; async (`lime`) functions are emitted as ordinary LLVM
+functions.
 
 ---
 
@@ -789,7 +791,8 @@ compiler prints codegen warnings, and object emission is refused for safety.
 
 Known backend limitations at the time of writing:
 
-- `await` is not supported (async functions become stubs).
+- `await` is lowered to a direct synchronous call; there is no real
+  parallelism or async runtime.
 - `long` literals (`42L`) are not lowered.
 - State/enum and `Some`/`None` construction is not lowered.
 - A `let` that binds a plain scalar (`let x = 1`) currently produces invalid
@@ -896,5 +899,5 @@ Legend: **Yes** = fully supported, **No** = rejected or not implemented,
 | `time.*` module | Yes | No | `now()`, `elapsed()`, `sleep()` |
 | `fs.*` module | Yes | No | `write`, `exists`, `metadata`, … |
 | `math.*` module | Yes | No | `abs`, `max`, `min`, `sqrt`, `pow` |
-| `lime` async fn + `await` | Yes | No | Runs synchronously in the interpreter |
+| `lime` async fn + `await` | Yes | Yes | `await` lowers to a direct synchronous call; no parallelism |
 | Type-check (`lime check`) | Yes | — | Same checker feeds both paths |

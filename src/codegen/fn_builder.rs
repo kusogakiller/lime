@@ -413,6 +413,7 @@ impl<'a> Cg<'a> {
             Expr::StringLit(s) => self.codegen_string_lit(s),
             Expr::MethodCall { object, method, args } => self.codegen_method_call(object, method, args),
             Expr::Array(items) => self.codegen_array_lit(items),
+            Expr::Await(inner) => self.codegen_expr(inner),
             _ => Err("Phase 5: unsupported expression in codegen".to_string()),
         }
     }
@@ -1401,6 +1402,7 @@ fn expr_supported(e: &Expr) -> bool {
         }
         // Phase 5: array/list literals
         Expr::Array(items) => items.iter().all(|a| expr_supported(a)),
+        Expr::Await(inner) => expr_supported(inner),
         _ => false,
     }
 }
