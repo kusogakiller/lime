@@ -11,7 +11,10 @@
 //! - `List.add` / `List.set` must store the returned list back into the
 //!   receiver variable in codegen (matching the interpreter's rebind);
 //! - a function the backend cannot fully lower must cause `--emit-object` to
-//!   refuse to produce an executable rather than emit a silent stub.
+//!   refuse to produce an executable rather than emit a silent stub;
+//! - literal operands in binary ops and `let`/`return`/`assign` stores must be
+//!   emitted as bare LLVM operands (e.g. `add i64 %t, 1`, `store i64 5,
+//!   i64* %t`), never as `add i64 %t, i64 1` or `store i64 i64 5, ...`.
 
 use std::process::Command;
 
@@ -145,6 +148,278 @@ fn emit_object_list_add_set_runs() {
     assert!(
         lines == ["4", "9"],
         "expected lines ['4', '9'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: scalar `let` with a literal RHS must emit a valid store
+/// (`store i64 5, i64* %t`) instead of `store i64 i64 5, ...`, and a binop
+/// over a register and a literal must emit a bare operand (`add i64 %t, 1`).
+/// Executable must print `6`.
+#[test]
+fn emit_object_let_literal_runs() {
+    use std::fs;
+    let dir = "target/test_emit_let_literal";
+    write_project(
+        dir,
+        "fn main():\n    let a = 5\n    let b = a + 1\n    println(b)\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("store i64 5, i64*"),
+        "literal RHS must store as a bare constant\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("add i64"),
+        "a + 1 must emit an add\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("store i64 i64"),
+        "no double-typed store\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("add i64 i64"),
+        "no double-typed binop operands\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["6"],
+        "expected lines ['6'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: a binop mixing a register (`x`) with a literal (`20`) must emit
+/// valid IR. Executable must print `30`.
+#[test]
+fn emit_object_let_literal_binop_runs() {
+    use std::fs;
+    let dir = "target/test_emit_let_literal_binop";
+    write_project(dir, "fn main():\n    let x = 10\n    println(x + 20)\n    return\n");
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("store i64 10, i64*"),
+        "literal RHS must store as a bare constant\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("add i64"),
+        "x + 20 must emit an add\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("add i64 i64"),
+        "no double-typed binop operands\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["30"],
+        "expected lines ['30'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: binops where every operand is a literal (`(1 + 2) * (3 + 4)`)
+/// must emit bare constants (`add i64 1, 2`) and compose via registers.
+/// Executable must print `21`.
+#[test]
+fn emit_object_nested_literal_binop_runs() {
+    use std::fs;
+    let dir = "target/test_emit_nested_literal_binop";
+    write_project(
+        dir,
+        "fn main():\n    println((1 + 2) * (3 + 4))\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("add i64 1, 2"),
+        "literal-only add must emit bare operands\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("mul i64"),
+        "nested product must emit a mul\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("add i64 i64") && !ir.contains("mul i64 i64"),
+        "no double-typed binop operands\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["21"],
+        "expected lines ['21'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: a function whose body mixes a register and a literal
+/// (`return x + 1`) must emit a valid `add i64 %t, 1` and `ret i64 %t`, and a
+/// call passing a literal (`add(41)`) must emit `call i64 @add(i64 41)`.
+/// Executable must print `42`.
+#[test]
+fn emit_object_mixed_literal_binop_runs() {
+    use std::fs;
+    let dir = "target/test_emit_mixed_literal_binop";
+    write_project(
+        dir,
+        "fn add(int: x):\n    return x + 1\n\nfn main():\n    println(add(41))\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("define i64 @add (i64 %p0)"),
+        "add must be emitted with its real body\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i64 @add(i64 41)"),
+        "literal call arg must be typed once\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("add i64 i64"),
+        "no double-typed binop operands\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["42"],
+        "expected lines ['42'], got: {:?}\n--- stderr ---\n{}",
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// Regression: reassigning a scalar variable (`let mut x = 1; x = x + 1`)
+/// must store a bare value, never `store i64 i64`. Executable must print `2`.
+#[test]
+fn emit_object_reassignment_runs() {
+    use std::fs;
+    let dir = "target/test_emit_reassignment";
+    write_project(
+        dir,
+        "fn main():\n    let mut x = 1\n    x = x + 1\n    println(x)\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        ir.contains("store i64 1, i64*"),
+        "literal init must store as a bare constant\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("add i64"),
+        "x = x + 1 must emit an add\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("store i64 i64"),
+        "no double-typed store\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(
+        lines == ["2"],
+        "expected lines ['2'], got: {:?}\n--- stderr ---\n{}",
         lines,
         String::from_utf8_lossy(&run.stderr)
     );

@@ -251,7 +251,7 @@ impl<'a> Cg<'a> {
                 };
                 self.out.push_str(&format!(
                     "  store {} {}, {}* {}, align {}\n",
-                    llty, v, llty, ptr, align
+                    llty, self.bare_value(&v), llty, ptr, align
                 ));
                 self.env.insert(name.clone(), ty);
                 self.named.insert(name.clone(), ptr);
@@ -263,7 +263,7 @@ impl<'a> Cg<'a> {
                     Some(expr) => {
                         let (v, ty) = self.codegen_expr(expr)?;
                         let llty = llvm_type_name(&ty);
-                        self.out.push_str(&format!("  ret {} {}\n", llty, v));
+                        self.out.push_str(&format!("  ret {} {}\n", llty, self.bare_value(&v)));
                         Ok(())
                     }
                     None => {
@@ -308,7 +308,7 @@ impl<'a> Cg<'a> {
                 let llty = llvm_type_name(&ty);
                 self.out.push_str(&format!(
                     "  store {} {}, {}* {}, align {}\n",
-                    llty, v, llty, ptr, align_of(&ty)
+                    llty, self.bare_value(&v), llty, ptr, align_of(&ty)
                 ));
                 Ok(())
             }
@@ -320,11 +320,11 @@ impl<'a> Cg<'a> {
                 match else_branch {
                     Some(_) => {
                         self.out
-                            .push_str(&format!("  br i1 {}, label %{}, label %{}\n", c, then_b, else_b));
+                            .push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&c), then_b, else_b));
                     }
                     None => {
                         self.out
-                            .push_str(&format!("  br i1 {}, label %{}, label %{}\n", c, then_b, merge_b));
+                            .push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&c), then_b, merge_b));
                     }
                 }
                 self.out.push_str(&format!("{}:\n", then_b));
@@ -350,7 +350,7 @@ impl<'a> Cg<'a> {
                 self.current_block = cond_b.clone();
                 let (c, _ct) = self.codegen_expr(cond)?;
                 self.out
-                    .push_str(&format!("  br i1 {}, label %{}, label %{}\n", c, body_b, merge_b));
+                    .push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&c), body_b, merge_b));
                 self.out.push_str(&format!("{}:\n", body_b));
                 self.current_block = body_b;
                 self.codegen_stmts(body)?;
@@ -402,7 +402,7 @@ impl<'a> Cg<'a> {
                 if op == "not" {
                     let (v, _t) = self.codegen_expr(operand)?;
                     let tmp = self.fresh_temp();
-                    self.out.push_str(&format!("  {} = xor i1 {}, true\n", tmp, v));
+                    self.out.push_str(&format!("  {} = xor i1 {}, true\n", tmp, self.bare_value(&v)));
                     Ok((tmp, Type::Bool))
                 } else {
                     Err(format!("Phase 1: unsupported unary operator '{}'", op))
@@ -529,7 +529,7 @@ impl<'a> Cg<'a> {
                 };
                 self.out.push_str(&format!(
                     "  {} = {} {} {}, {}\n",
-                    tmp, instr, llty, lv, rv
+                    tmp, instr, llty, self.bare_value(&lv), self.bare_value(&rv)
                 ));
                 let ty = if float { Type::Float } else { Type::Int };
                 Ok((tmp, ty))
@@ -560,7 +560,7 @@ impl<'a> Cg<'a> {
                 };
                 self.out.push_str(&format!(
                     "  {} = {} {} {}, {}\n",
-                    tmp, instr, llty, lv, rv
+                    tmp, instr, llty, self.bare_value(&lv), self.bare_value(&rv)
                 ));
                 Ok((tmp, Type::Bool))
             }
@@ -568,7 +568,7 @@ impl<'a> Cg<'a> {
                 let prev = self.current_block.clone();
                 let rhs_b = self.fresh_block();
                 let end_b = self.fresh_block();
-                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", lv, rhs_b, end_b));
+                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&lv), rhs_b, end_b));
                 self.out.push_str(&format!("{}:\n", rhs_b));
                 self.current_block = rhs_b.clone();
                 self.out.push_str(&format!("  br label %{}\n", end_b));
@@ -577,7 +577,7 @@ impl<'a> Cg<'a> {
                 let res = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = phi i1 [ false, %{} ], [ {}, %{} ]\n",
-                    res, prev, rv, rhs_b
+                    res, prev, self.bare_value(&rv), rhs_b
                 ));
                 Ok((res, Type::Bool))
             }
@@ -585,7 +585,7 @@ impl<'a> Cg<'a> {
                 let prev = self.current_block.clone();
                 let rhs_b = self.fresh_block();
                 let end_b = self.fresh_block();
-                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", lv, end_b, rhs_b));
+                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&lv), end_b, rhs_b));
                 self.out.push_str(&format!("{}:\n", rhs_b));
                 self.current_block = rhs_b.clone();
                 self.out.push_str(&format!("  br label %{}\n", end_b));
@@ -594,7 +594,7 @@ impl<'a> Cg<'a> {
                 let res = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = phi i1 [ true, %{} ], [ {}, %{} ]\n",
-                    res, prev, rv, rhs_b
+                    res, prev, self.bare_value(&rv), rhs_b
                 ));
                 Ok((res, Type::Bool))
             }
