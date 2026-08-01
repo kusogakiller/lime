@@ -1,0 +1,25 @@
+// Phase 10.9: List indexing and slicing
+fn main():
+    // List indexing
+    let nums = [10, 20, 30]
+    println(nums[0])
+    println(nums[1])
+    println(nums[2])
+
+    // List slicing
+    let sliced = nums[0:2]
+    println(sliced.len())
+    println(sliced[0])
+    println(sliced[1])
+
+    // Full slice
+    let full = nums[0:3]
+    println(full.len())
+
+    // Empty slice
+    let empty = nums[1:1]
+    println(empty.len())
+
+    // Slice from a slice
+    let inner = sliced[0:1]
+    println(inner[0])

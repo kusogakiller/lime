@@ -1,0 +1,15 @@
+struct User:
+    str: name
+
+fn create(): User:
+    let User: user = User("Alice")
+    return user
+
+fn use_local():
+    let User(stack): point = User("Bob")
+    print(point.name)
+
+fn main():
+    let u = create()
+    print(u.name)
+    use_local()

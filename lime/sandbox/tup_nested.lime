@@ -1,0 +1,6 @@
+fn main():
+    let n = (10, (20, 30))
+    match n:
+        (x, (y, z)):
+            println(x + y + z)
+    println("ok")

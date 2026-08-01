@@ -1,0 +1,7 @@
+fn main():
+    let str: path = "sandbox/fstest/scratch.txt"
+    println(fs.write(path, "hello fs"))
+    println(fs.exists(path))
+    println(fs.read(path))
+    println(fs.remove(path))
+    println(fs.exists(path))

@@ -1,0 +1,30 @@
+fn main():
+    let List(int): xs = []
+    xs = collections.push(xs, 1)
+    xs = collections.push(xs, 2)
+    xs = collections.push(xs, 3)
+    println(xs)
+    println(collections.pop(xs))
+    println(collections.length(xs))
+    println(collections.contains(xs, 2))
+    let List(int): r = collections.reverse(xs)
+    println(r)
+
+    let HashMap(int,int): m = collections.make_hash_map()
+    m = collections.hashmap_insert(m, 1, 10)
+    m = collections.hashmap_insert(m, 2, 20)
+    println(collections.hashmap_get(m, 1))
+    println(collections.hashmap_contains_key(m, 2))
+    m = collections.hashmap_remove(m, 1)
+    println(collections.hashmap_contains_key(m, 1))
+    println(collections.hashmap_len(m))
+
+    let HashSet(int): s = collections.make_hash_set()
+    s = collections.hashset_add(s, 7)
+    s = collections.hashset_add(s, 7)
+    s = collections.hashset_add(s, 8)
+    println(collections.hashset_contains(s, 8))
+    println(collections.hashset_len(s))
+    s = collections.hashset_remove(s, 7)
+    println(collections.hashset_contains(s, 7))
+    return

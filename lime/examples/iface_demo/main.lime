@@ -1,0 +1,38 @@
+// Phase 9 interface dispatch citrusstration. Run with:
+//   cargo run -- examples/iface_demo/citrus.toml
+// and with codegen output:
+//   cargo run -- examples/iface_demo/citrus.toml --emit-ll
+
+interface Animal:
+    fn speak(str): str:
+    fn legs(): int:
+
+struct Dog:
+    str: name
+    int: legs
+    fn speak(str):
+        return "woof"
+    fn legs():
+        return 4
+
+struct Cat:
+    str: name
+    int: legs
+    fn speak(str):
+        return "meow"
+    fn legs():
+        return 4
+
+fn make_sound(Animal: a):
+    print(a.speak(""))
+
+fn main():
+    let d = Dog("Rex", 4)
+    print(d.speak(""))
+    print(d.legs())
+
+    let c = Cat("Mimi", 4)
+    print(c.speak(""))
+
+    make_sound(d)
+    make_sound(c)

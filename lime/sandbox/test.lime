@@ -1,0 +1,11 @@
+state Result:
+    Success(str)
+    Error(str)
+
+fn main():
+    let result = Error("failed")
+    match result:
+        Success(data):
+            print(data)
+        Error(Ignore):
+            print("error")

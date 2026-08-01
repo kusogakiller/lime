@@ -1,0 +1,183 @@
+struct Entry(K, V):
+    K: key
+    V: value
+
+struct Map(K, V):
+    List(Entry(K, V)): entries
+
+fn make_map(K, V)():
+    let List(Entry(K, V)): entries = []
+    return Map(entries)
+
+fn map_insert(K, V)(Map(K, V): m, K: key, V: value):
+    let List(Entry(K, V)): entries = m.entries
+    let Entry(K, V): e = Entry(key, value)
+    entries = push(entries, e)
+    return Map(entries)
+
+fn map_get(K, V)(Map(K, V): m, K: key):
+    let List(Entry(K, V)): entries = m.entries
+    for e in entries:
+        if (e.key == key):
+            return Some(e.value)
+    return None
+
+fn map_contains(K, V)(Map(K, V): m, K: key):
+    let List(Entry(K, V)): entries = m.entries
+    for e in entries:
+        if (e.key == key):
+            return true
+    return false
+
+// Remove the entry with the given key (Phase 12 Step 1).
+fn map_remove(K, V)(Map(K, V): m, K: key):
+    let List(Entry(K, V)): entries = m.entries
+    let int: idx = -1
+    let int: i = 0
+    for e in entries:
+        if (e.key == key):
+            idx = i
+        i = i + 1
+    if (idx >= 0):
+        entries = remove_at(entries, idx)
+    return Map(entries)
+
+// ---- Set(T) ----
+// 重複のない List で表現する簡易 Set。
+struct Set(T):
+    List(T): items
+
+fn make_set(T)():
+    let List(T): items = []
+    return Set(items)
+
+fn set_insert(T)(Set(T): s, T: item):
+    let List(T): items = s.items
+    if (not contains_item(items, item)):
+        items = push(items, item)
+    return Set(items)
+
+fn set_contains(T)(Set(T): s, T: item):
+    return contains_item(s.items, item)
+
+fn set_length(T)(Set(T): s):
+    return s.items.len()
+
+// Remove an item from the set (Phase 12 Step 1).
+fn set_remove(T)(Set(T): s, T: item):
+    let List(T): items = s.items
+    let int: idx = -1
+    let int: i = 0
+    for it in items:
+        if (it == item):
+            idx = i
+        i = i + 1
+    if (idx >= 0):
+        items = remove_at(items, idx)
+    return Set(items)
+
+// ===== Phase 12 Step 1 extensions =====
+
+// Reverse a list, returning a new list (non-mutating).
+fn reverse(T)(List(T): list):
+    return reverse(list)
+
+// ---- HashMap(K, V) ----
+// Prefixed names (`hashmap_*`) avoid collisions with the List/HashSet helpers
+// that share verbs like `insert`/`get`/`remove`/`len`.
+struct HashMap(K, V):
+    List(Entry(K, V)): entries
+
+fn make_hash_map(K, V)():
+    let List(Entry(K, V)): entries = []
+    return HashMap(entries)
+
+fn hashmap_insert(K, V)(HashMap(K, V): m, K: key, V: value):
+    let List(Entry(K, V)): entries = m.entries
+    let Entry(K, V): e = Entry(key, value)
+    entries = push(entries, e)
+    return HashMap(entries)
+
+fn hashmap_get(K, V)(HashMap(K, V): m, K: key):
+    let List(Entry(K, V)): entries = m.entries
+    for e in entries:
+        if (e.key == key):
+            return Some(e.value)
+    return None
+
+fn hashmap_contains_key(K, V)(HashMap(K, V): m, K: key):
+    let List(Entry(K, V)): entries = m.entries
+    for e in entries:
+        if (e.key == key):
+            return true
+    return false
+
+fn hashmap_remove(K, V)(HashMap(K, V): m, K: key):
+    let List(Entry(K, V)): entries = m.entries
+    let int: idx = -1
+    let int: i = 0
+    for e in entries:
+        if (e.key == key):
+            idx = i
+        i = i + 1
+    if (idx >= 0):
+        entries = remove_at(entries, idx)
+    return HashMap(entries)
+
+fn hashmap_len(K, V)(HashMap(K, V): m):
+    return m.entries.len()
+
+// ---- HashSet(T) ----
+struct HashSet(T):
+    List(T): items
+
+fn make_hash_set(T)():
+    let List(T): items = []
+    return HashSet(items)
+
+fn hashset_add(T)(HashSet(T): s, T: item):
+    let List(T): items = s.items
+    if (not contains_item(items, item)):
+        items = push(items, item)
+    return HashSet(items)
+
+fn hashset_remove(T)(HashSet(T): s, T: item):
+    let List(T): items = s.items
+    let int: idx = -1
+    let int: i = 0
+    for it in items:
+        if (it == item):
+            idx = i
+        i = i + 1
+    if (idx >= 0):
+        items = remove_at(items, idx)
+    return HashSet(items)
+
+fn hashset_contains(T)(HashSet(T): s, T: item):
+    return contains_item(s.items, item)
+
+fn hashset_len(T)(HashSet(T): s):
+    return s.items.len()
+
+// ===== List helper wrappers (runtime builtins) =====
+fn push(T)(List(T): list, T: item):
+    let List(T): result = push(list, item)
+    return result
+
+fn pop(T)(List(T): list):
+    return pop(list)
+
+fn first(T)(List(T): list):
+    return first(list)
+
+fn last(T)(List(T): list):
+    return last(list)
+
+fn length(T)(List(T): list):
+    return len(list)
+
+fn index_of(T)(List(T): list, T: item):
+    return index_of(list, item)
+
+fn contains(T)(List(T): list, T: item):
+    return contains_item(list, item)

@@ -1,0 +1,14 @@
+fn main():
+    let HashMap(int,int): m = collections.make_hash_map()
+    m = collections.hashmap_insert(m, 1, 10)
+    m = collections.hashmap_insert(m, 2, 20)
+    println(collections.hashmap_get(m, 1))
+    println(collections.hashmap_get(m, 2))
+    println(collections.hashmap_len(m))
+    let HashSet(int): s = collections.make_hash_set()
+    s = collections.hashset_add(s, 7)
+    s = collections.hashset_add(s, 7)
+    s = collections.hashset_add(s, 8)
+    println(collections.hashset_contains(s, 8))
+    println(collections.hashset_len(s))
+    return

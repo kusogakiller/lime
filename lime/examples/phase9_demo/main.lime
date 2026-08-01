@@ -1,0 +1,43 @@
+// Phase 9 codegen citrusstration: for-loops, structs, lists, state/match,
+// strings, and print of aggregate types. Run with:
+//   cargo run -- examples/phase9_demo/citrus.toml
+// and with codegen output:
+//   cargo run -- examples/phase9_demo/citrus.toml --emit-llvm
+
+struct Point:
+    i: x
+    i: y
+
+state Result:
+    Success(i)
+    Error(i)
+
+fn make_point(i: x, i: y):
+    return Point(x, y)
+
+fn main():
+    // for over a list
+    let nums = [10, 20, 30]
+    println(nums.len())
+    let mut total = 0
+    for v in nums:
+        total = total + v
+    println(total)
+
+    // struct
+    let p = make_point(3, 4)
+    println(p.x)
+    println(p.y)
+
+    // string methods
+    let t = "hello"
+    println(t.len())
+    println(t + " world")
+
+    // state + match
+    let r = Success(42)
+    match r:
+        Success(v):
+            println(v)
+        Error(e):
+            println(e)

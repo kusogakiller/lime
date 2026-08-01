@@ -1,0 +1,35 @@
+// std.result: Result(T, E) ヘルパ
+// Result(T, E) は言語組込み（Success(T) / Error(E)）。
+// 仕様上 Ok/Err は不使用。ここでは Success/Error をそのまま使う。
+
+// 成功値を取り出す。失敗の場合は fallback を返す。
+fn unwrap_or(T, E)(Result(T, E): res, T: fallback):
+    match res:
+        Success(value):
+            return value
+        Error(_):
+            return fallback
+
+// 成功かどうか
+fn is_ok(T, E)(Result(T, E): res):
+    match res:
+        Success(_):
+            return true
+        Error(_):
+            return false
+
+// 失敗かどうか
+fn is_err(T, E)(Result(T, E): res):
+    match res:
+        Success(_):
+            return false
+        Error(_):
+            return true
+
+// 成功値を取り出す。失敗の場合は panic する。
+fn unwrap(T, E)(Result(T, E): res):
+    match res:
+        Success(value):
+            return value
+        Error(e):
+            panic(str(e))

@@ -1,0 +1,38 @@
+# Result を Generic 型パラメータとして利用（Option と同じ型システム上の扱い）。
+# Ok/Err は使わず Success / Error を使用。
+#
+# 期待出力:
+#   100
+#   failed
+#   ok
+
+# T の Result を返す関数。T は任意の型。
+fn safe_double(int: x): Result(int, str):
+    if x < 0:
+        Error("negative")
+    else:
+        Success(x * 2)
+
+# Result(T, E) を受け取り、変換関数を適用（標準ライブラリ風マッパ）。
+fn map_ok(Result(int, str): r): str:
+    match r:
+        Success(s):
+            s
+        Error(e):
+            e
+
+let a = safe_double(50)
+match a:
+    Success(v):
+        print(v)
+    Error(e):
+        print(e)
+
+let b = safe_double(-3)
+match b:
+    Success(v):
+        print(v)
+    Error(e):
+        print("failed")
+
+print(map_ok(a))

@@ -1,0 +1,11 @@
+struct User:
+    str: name
+    int: age
+
+    fn info() str:
+        return name
+
+fn main():
+    let user = User("Alice", 15)
+    print(user.info())
+    print(user.name)

@@ -1,0 +1,10 @@
+fn swap(T, U)(T: a, U: b):
+    return (b, a)
+
+fn main():
+    let s = swap(1, 2)
+    match s:
+        (b, a):
+            println(a)
+            println(b)
+    println("ok")

@@ -1,0 +1,2 @@
+fn fa():
+    return 1

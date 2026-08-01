@@ -1,0 +1,9 @@
+// Example: コレクション標準ライブラリの利用、E// 実衁E cargo run -- examples/collections_demo/citrus.toml
+
+fn main():
+    let List(i): nums = [1, 2, 3]
+    println(collections.first(nums))
+    println(collections.last(nums))
+    println(collections.length(nums))
+    println(collections.contains(nums, 3))
+    println(collections.index_of(nums, 2))

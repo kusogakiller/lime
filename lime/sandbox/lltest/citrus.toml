@@ -1,0 +1,8 @@
+[package]
+name = "lltest"
+version = "v0.1.0"
+
+[files]
+main = "main.lime"
+
+[import]

@@ -1,0 +1,34 @@
+// std.option: Option(T) ヘルパ
+// Option(T) は言語組込み（Some(x) / None）。
+
+// 値を取り出す。None の場合は fallback を返す。
+fn unwrap_or(T)(Option(T): opt, T: fallback):
+    match opt:
+        Some(value):
+            return value
+        None:
+            return fallback
+
+// Some かどうか
+fn is_some(T)(Option(T): opt):
+    match opt:
+        Some(_):
+            return true
+        None:
+            return false
+
+// None かどうか
+fn is_none(T)(Option(T): opt):
+    match opt:
+        Some(_):
+            return false
+        None:
+            return true
+
+// 値を取り出す。None の場合は panic する。
+fn unwrap(T)(Option(T): opt):
+    match opt:
+        Some(value):
+            return value
+        None:
+            panic("called unwrap() on None")

@@ -1,0 +1,10 @@
+struct User:
+    str: name
+
+fn bad(): User:
+    let User(stack): user = User("Alice")
+    return user
+
+fn main():
+    let u = bad()
+    print(u.name)

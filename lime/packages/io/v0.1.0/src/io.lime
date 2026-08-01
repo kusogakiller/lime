@@ -1,0 +1,19 @@
+// std.io: 入出力ユーティリティ
+// 基盤となる print/println/input はランタイム組込みとして提供される。
+// ここではそれらをラップし、利便性の高いヘルパを提供する。
+
+// 改行なし出力
+fn print(str: s):
+    print(s)
+
+// 改行付き出力
+fn println(str: s):
+    println(s)
+
+// 標準入力から1行読み込む（省略時は空プロンプト）
+fn read_line():
+    return input()
+
+// プロンプト付き入力
+fn prompt(str: message):
+    return input(message)

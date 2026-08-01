@@ -1,0 +1,12 @@
+# Result(T, E) 基盤チE��チE(Step: built-in Result via State + Generic machinery).
+# Ok/Err は使わず Success / Error を使用、Eatch 完�E網羁E��E���Eelse禁止・Ignore維持、E
+#
+# 期征E�E劁E
+#   10
+#   error: divide by zero
+#   10
+#   42
+#   10
+
+# Result は特別構文ではなく、既存�E State + Generic 仕絁E��で提供される、E
+# 利用側は state 宣言不要、E
