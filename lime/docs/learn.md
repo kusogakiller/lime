@@ -1,72 +1,110 @@
-# Lime Programming Guide
+# Lime プログラミングガイド
 
-Lime is a small, statically-typed programming language with a tree-walking
-interpreter and a native-code LLVM backend. This guide describes the language
-as it is implemented today: every construct and every example below has been
-checked against the current compiler.
+Lime は、ツリーウォーキング型インタプリタとネイティブコード LLVM バックエンドを持つ、小規模な静的型付きプログラミング言語です。
 
-If you find an example that does not work, it is a bug in this document (or a
-limitation of the compiler) — please report it. Nothing in this guide describes
-a planned or idealized feature.
+このガイドでは、現在実装されている Lime の仕様を説明します。以下のすべての構文・例は現在のコンパイラで確認済みです。
 
-## Table of contents
+もし動作しない例を見つけた場合、それはこのドキュメントのバグ、またはコンパイラ側の制限です。報告してください。
 
-- [Installation and running](#installation-and-running)
-- [Basic syntax](#basic-syntax)
-- [Values and types](#values-and-types)
-- [Variables](#variables)
-- [Functions](#functions)
-- [Expressions and operators](#expressions-and-operators)
-- [Control flow](#control-flow)
-- [Strings](#strings)
-- [Lists](#lists)
-- [Structs and methods](#structs-and-methods)
-- [Interfaces](#interfaces)
-- [Generics](#generics)
-- [Async and await](#async-and-await)
-- [Compilation targets](#compilation-targets)
-- [Compiler errors](#compiler-errors)
-- [Feature compatibility table](#feature-compatibility-table)
+このガイドでは、予定されている機能や理想的な仕様ではなく、**現在実装済みの機能のみ**を説明します。
 
 ---
 
-## Installation and running
+# 目次
 
-The compiler is a Rust program. Build it with Cargo:
+* インストールと実行
+* 基本構文
+* 値と型
+* 変数
+* 関数
+* 式と演算子
+* 制御フロー
+* 文字列
+* リスト
+* Struct とメソッド
+* Interface
+* Generics
+* Async と await
+* コンパイルターゲット
+* コンパイラエラー
+* 機能互換表
+
+---
+
+# インストールと実行
+
+コンパイラは Rust プログラムです。
+
+Cargo でビルドします。
 
 ```sh
 cargo build --release
 ```
 
-This produces a `lime` executable (on Windows, `target\release\lime.exe`).
+これにより `lime` 実行ファイルが生成されます。
 
-The command-line interface is:
-
-```
-lime build <path> [--emit-ll] [--emit-object] [--release]  Build to binary
-lime run   <path> [--emit-ll]                              Build and execute (deprecated for projects)
-lime check <path>                                          Type-check only
-lime fmt   <file.lime> [--write]                           Format source
-lime <path> [--emit-ll]                                    Shorthand for `run`
-```
-
-For project builds there is also the `citrus` CLI (a wrapper around lime):
+Windows の場合：
 
 ```
-citrus new <name>        Create a new project
-citrus build [--release] Build a project (citrus.toml in the current directory)
-citrus run  [--release]  Build and run a project
+target\release\lime.exe
 ```
 
-`lime run <path>` still works for compatibility but is deprecated for projects
-(`citrus.toml`) — use `citrus run` instead.
+---
 
-`<path>` is either a single `.lime` source file or a `citrus.toml` project
-manifest.
+## コマンドラインインターフェース
 
-### Single-file programs
+```
+lime build <path> [--emit-ll] [--emit-object] [--release]
+    バイナリをビルド
 
-A file `hello.lime`:
+lime run <path> [--emit-ll]
+    ビルドして実行（プロジェクトでは非推奨）
+
+lime check <path>
+    型チェックのみ
+
+lime fmt <file.lime> [--write]
+    ソースコードを整形
+
+lime <path> [--emit-ll]
+    run の短縮形
+```
+
+---
+
+プロジェクトビルドには `citrus` CLI もあります。
+
+これは lime のラッパーです。
+
+```
+citrus new <name>
+    新しいプロジェクトを作成
+
+citrus build [--release]
+    プロジェクトをビルド
+
+citrus run [--release]
+    プロジェクトをビルドして実行
+```
+
+`lime run <path>` は互換性維持のため残されていますが、`citrus.toml` を使うプロジェクトでは非推奨です。
+
+プロジェクトでは `citrus run` を使用してください。
+
+---
+
+`<path>` は以下のどちらかです。
+
+* 単一の `.lime` ソースファイル
+* `citrus.toml` プロジェクトマニフェスト
+
+---
+
+# 単一ファイルプログラム
+
+例：
+
+`hello.lime`
 
 ```lime
 fn main():
@@ -74,31 +112,67 @@ fn main():
     return
 ```
 
-Run it with the interpreter:
+インタプリタで実行：
 
 ```sh
 lime run hello.lime
-# hello, world
 ```
 
-`lime run` (or the `lime hello.lime` shorthand) parses, type-checks, and
-executes the program with the tree-walking interpreter. If the file has no
-`main` function, the top-level statements still run:
+出力：
+
+```
+hello, world
+```
+
+---
+
+`lime run`（または `lime hello.lime`）は以下を行います。
+
+1. パース
+2. 型チェック
+3. ツリーウォーキング型インタプリタで実行
+
+`main` 関数がなくてもトップレベル文は実行されます。
+
+例：
 
 ```lime
 println("no main needed")
 ```
 
+---
+
+型チェック：
+
 ```sh
-lime check hello.lime      # type-check only, prints "type-checks cleanly"
-lime fmt hello.lime        # prints formatted source to stdout
-lime fmt hello.lime --write  # rewrites the file in place
+lime check hello.lime
 ```
 
-### Projects
+整形：
 
-A project is a directory with a `citrus.toml` manifest that lists the source
-files:
+```sh
+lime fmt hello.lime
+```
+
+標準出力へ表示：
+
+```sh
+lime fmt hello.lime
+```
+
+ファイルを書き換え：
+
+```sh
+lime fmt hello.lime --write
+```
+
+---
+
+# プロジェクト
+
+プロジェクトは `citrus.toml` を持つディレクトリです。
+
+例：
 
 ```toml
 [package]
@@ -109,29 +183,60 @@ version = "0.1.0"
 main = "main.lime"
 ```
 
-Build the whole project by pointing the CLI at the manifest file:
+---
+
+マニフェストを指定してビルドします。
 
 ```sh
 lime run path/to/dir/citrus.toml
 ```
 
-### Notes on source files
+---
 
-- Source files must use **LF line endings**. A file saved with CRLF endings
-  fails to tokenize (`Unexpected character`).
-- Source files must be **ASCII**. Non-ASCII bytes (for example in comments)
-  also fail to tokenize.
-- The interpreter does not need an LLVM installation. Native compilation
-  (`--emit-object`) requires `clang`, `llvm-as`, and `lld-link` from LLVM 22
-  on your `PATH` (or the `LIME_LLVM_PREFIX` / `LLVM_SYS_221_PREFIX` environment
-  variable pointing at the LLVM install directory).
+# ソースファイルの注意事項
+
+* ソースファイルは **LF 改行**でなければなりません。
+
+  * CRLF では tokenizer が失敗します。
+
+例：
+
+```
+Unexpected character
+```
+
+* ソースファイルは **ASCII のみ対応**です。
+
+  * コメント内の非 ASCII 文字も tokenizer エラーになります。
+
+* インタプリタ実行には LLVM は不要です。
+
+* ネイティブコンパイル（`--emit-object`）には LLVM 22 の以下が必要です。
+
+```
+clang
+llvm-as
+lld-link
+```
+
+または：
+
+```
+LIME_LLVM_PREFIX
+LLVM_SYS_221_PREFIX
+```
+
+で LLVM インストール場所を指定できます。
 
 ---
 
-## Basic syntax
+# 基本構文
 
-Blocks are introduced by a colon at the end of a line and an indented body.
-The indentation level defines the block; there are no braces.
+Lime のブロックは行末の `:` とインデントによって表現されます。
+
+波括弧 `{}` はありません。
+
+例：
 
 ```lime
 fn double(int: x):
@@ -143,15 +248,20 @@ fn main():
     return
 ```
 
-Comments start with `//` and run to the end of the line.
+---
+
+コメントは `//` から行末までです。
 
 ```lime
-// this is a comment
-println("hi")  // trailing comments work too
+// comment
+println("hi")  // trailing comment
 ```
 
-Statements end at the end of a line. A semicolon is optional and has no
-semantic effect:
+---
+
+文は基本的に行末で終了します。
+
+セミコロンは任意ですが意味はありません。
 
 ```lime
 let a = 1
@@ -160,289 +270,385 @@ let b = 2;
 
 ---
 
-## Values and types
+# 値と型
 
-Lime has the following primitive types.
+Lime の基本型：
 
-| Type | Aliases | Notes |
-|------|---------|-------|
-| `int` | `i32`, `i` | 64-bit signed integer in the interpreter |
-| `long` | `i64`, `l` | 64-bit integer; literals use the `L` suffix |
-| `float` | `f64`, `f` | 64-bit float |
-| `bool` | `i1`, `b` | `true` / `false` |
-| `str` | `s` | string (UTF-8, immutable) |
+| 型       | 別名         | 説明                   |
+| ------- | ---------- | -------------------- |
+| `int`   | `i32`, `i` | 64bit 符号付き整数         |
+| `long`  | `i64`, `l` | 64bit 整数（`L` suffix） |
+| `float` | `f64`, `f` | 64bit 浮動小数           |
+| `bool`  | `i1`, `b`  | 真偽値                  |
+| `str`   | `s`        | UTF-8 不変文字列          |
 
-The unit type exists internally (functions with no return value return unit), but
-it is inferred and cannot be written in a type annotation — omit the annotation
-and let Lime infer the type. The aliases `void`, `unit`, and `u` are rejected in
-annotations for this reason.
+---
 
-Integer literals: `42`, `-1`. Long literals carry an `L` suffix: `42L`.
-Float literals need digits on both sides of the dot: `3.14`, but `.5` is not
-accepted.
+unit 型は内部的には存在します。
 
-Boolean literals are `true` and `false`. String literals use double quotes:
-`"hello"`. Standard escapes such as `\n` and `\t` work inside strings.
+ただし型注釈には書けません。
 
-Compound types:
+以下は禁止：
 
-- `Option(T)` or the shorthand `T?` — either a value of type `T` or nothing.
-  Values are written `Some(value)` or `None`.
-- `List(T)` — a growable list of `T` (also called an array).
-- `HashMap(K, V)` — a hash map.
-- `HashSet(T)` — a hash set.
-- Tuples `(A, B, C)` — a fixed-size heterogeneous sequence.
-- User-defined types: `struct`, `state`/`enum`, and `interface` (see below).
+```
+void
+unit
+u
+```
 
-Examples:
+戻り値がない場合は Lime が推論します。
+
+---
+
+## リテラル
+
+整数：
+
+```lime
+42
+-1
+```
+
+long：
+
+```lime
+42L
+```
+
+float：
+
+```lime
+3.14
+```
+
+※ `.5` は不可。
+
+bool：
+
+```lime
+true
+false
+```
+
+string：
+
+```lime
+"hello"
+```
+
+`\n` や `\t` などのエスケープ対応。
+
+---
+
+# 複合型
+
+## Option
+
+```lime
+Option(T)
+```
+
+または：
+
+```lime
+T?
+```
+
+値：
+
+```lime
+Some(value)
+None
+```
+
+---
+
+## List
+
+```lime
+List(T)
+```
+
+可変長配列。
+
+---
+
+## その他
+
+* `HashMap(K, V)`
+* `HashSet(T)`
+* Tuple `(A, B, C)`
+* struct
+* state / enum
+* interface
+
+---
+
+例：
 
 ```lime
 let Option(int): maybe = Some(10)
-let maybe2 = None            // type is Option(unknown)
-let List(int): nums = [1, 2, 3]
-let pair = (1, "one")
-```
 
-Note that a typed annotation for a tuple (`let (int, str): pair = ...`) is not
-accepted; tuples are bound without a type annotation. Similarly, `None` alone
-has the type `Option(unknown)`, so it cannot be bound to an annotated
-`Option(int)` binding (`let int?: m = None` is a type error); bind it without
-an annotation instead.
+let List(int): nums = [1,2,3]
+
+let pair = (1,"one")
+```
 
 ---
 
-## Variables
+# 変数
 
-Use `let` to bind a value to a name. Bindings are immutable by default; add
-`mut` to allow reassignment.
+`let` で変数を作ります。
+
+デフォルトでは immutable です。
+
+変更可能にするには `mut`。
 
 ```lime
 let x = 10
+
 let mut total = 0
+
 total = total + x
-```
-
-The type of a binding is normally inferred. You can write the type explicitly
-between the `let` and the name, separated by a colon:
-
-```lime
-let int: x = 10
-let str: name = "lime"
-let List(int): nums = [1, 2, 3]
-```
-
-Type aliases are accepted in this position (`let i32: x = 10`). The `Option`
-shorthand (`T?`) also works as an annotation, but `None` alone has the type
-`Option(unknown)`, so a value like `Some(10)` is required to satisfy it.
-
-Destructuring into separate names with `let (a, b) = ...` is parsed but not
-type-checked, so it does not actually work today. Bind the whole tuple and
-destructure it with `match` instead:
-
-```lime
-let pair = (1, "one")
-match pair:
-    try (a, b):
-        println(a)   // 1
-        println(b)   // one
-    catch:
-        println("not a tuple")
-```
-
-A bare `(a, b)` arm is not accepted — tuple arms must be written as
-`try (a, b)`. The `catch:` arm replaces the old `_` wildcard and matches
-anything.
-
-An explicit memory placement can be requested after the type — `let int(heap): x`
-or `let int(stack): x`. This is an advanced hint and not required.
-
-Assignments use `=`. The compound operators (`+=`, `-=`, `*=` and `/=` are
-tokenized but are not yet accepted by the parser — use the long form):
-
-```lime
-let mut n = 1
-n = n + 1
 ```
 
 ---
 
-## Functions
+型指定：
 
-Functions are declared at the top level. Parameters are written `Type: name`
-and are separated by commas. There is no return type in the signature; the
-return type is inferred.
+```lime
+let int: x = 10
+
+let str: name = "lime"
+
+let List(int): nums = [1,2,3]
+```
+
+---
+
+型推論も可能です。
+
+---
+
+# 関数
+
+関数はトップレベルに宣言します。
+
+戻り値型は自動推論されます。
 
 ```lime
 fn add(int: a, int: b):
     return a + b
-
-fn main():
-    println(add(1, 2))
-    return
 ```
 
-Parameters may be left untyped; their type is inferred from call sites and the
-body:
+---
+
+引数型も省略可能です。
 
 ```lime
 fn identity(value):
     return value
-
-fn main():
-    println(identity("works"))
-    return
 ```
 
-A function returns with `return expr`. You may annotate the return type
-explicitly, but it must still match the expression:
+---
+
+戻り値：
 
 ```lime
-fn f():
-    return int: 42
+return expr
 ```
 
-A bare `return` (with no expression) ends the function and returns the unit
-value. A function whose last statement is a plain expression implicitly
-returns that expression's value.
-
-### Recursion
-
-Functions can call themselves (and each other); all functions in a file are
-visible to one another regardless of declaration order.
+何も返さない場合：
 
 ```lime
-fn fact(int: n):
+return
+```
+
+---
+
+最後の式は暗黙 return になります。
+
+---
+
+# 再帰
+
+関数は自分自身や他関数を呼び出せます。
+
+宣言順は関係ありません。
+
+例：
+
+```lime
+fn fact(int:n):
     if n <= 1:
         return 1
     else:
-        return n * fact(n - 1)
-
-fn main():
-    println(fact(5))
-    return
+        return n * fact(n-1)
 ```
 
 ---
 
-## Expressions and operators
+# 式と演算子
 
-Arithmetic: `+`, `-`, `*`, `/`, `%`. Integer division truncates (`10 / 3` is
-`3`). The `+` operator also concatenates strings.
+## 算術
 
-```lime
-println(1 + 2 * 3)   // 7
-println(10 / 3)      // 3
-println(10 % 3)      // 1
-println("a" + "b")   // ab
+```
++
+-
+*
+/
+%
 ```
 
-Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. These produce booleans.
+整数除算は切り捨て。
 
 ```lime
-println(1 < 2)    // true
-println(2 <= 1)   // false
+10 / 3
 ```
 
-Boolean logic uses the words `and`, `or`, `not`. The symbol forms `&&`, `||`,
-and `!` are also accepted.
+結果：
 
-```lime
-println(5 > 3 and 2 < 4)   // true
-println(not true)          // false
+```
+3
 ```
 
-Conversions: `int(x)`, `float(x)`, and `str(x)` convert between numeric types,
-to strings, and back.
-
-```lime
-println(int("42"))    // 42
-println(float(7))     // 7
-println(str(3.14))    // 3.14
-```
-
-`len(x)` returns the byte length of a string or the length of a list.
-
-Function calls use `name(args)`. Struct construction is also a call:
-`Point(3, 4)`. Variant construction works the same way: `Some(10)`, `Success(42)`.
-
-Member access uses a dot: `p.x` reads a field, `nums.push(1)` calls a method
-(see the sections on structs and lists).
-
-List indexing and slicing:
-
-```lime
-let nums = [10, 20, 30]
-println(nums[0])    // 10
-println(nums[1])    // 20
-let sliced = nums[0:2]
-println(sliced)     // Slice[10, 20]
-```
-
-(Slicing a list produces a `Slice` value, printed as `Slice[10, 20]`.)
+`+` は文字列結合にも使用可能。
 
 ---
 
-## Control flow
+## 比較
 
-### if / else
-
-There is no `elif`. Nest `else` blocks for multiple conditions.
-
-```lime
-fn classify(int: x):
-    if x > 0:
-        return "positive"
-    else:
-        if x < 0:
-            return "negative"
-        else:
-            return "zero"
-
-fn main():
-    println(classify(5))   // positive
-    return
+```
+==
+!=
+<
+<=
+>
+>=
 ```
 
-The `else` branch is optional. The condition must be a boolean.
+結果は bool。
 
-### while
+---
+
+## 論理演算
+
+単語形式：
+
+```
+and
+or
+not
+```
+
+記号形式も使用可能：
+
+```
+&&
+||
+!
+```
+
+---
+
+## 型変換
 
 ```lime
-let mut i = 0
+int(x)
+
+float(x)
+
+str(x)
+```
+
+---
+
+## len
+
+文字列の byte 長、または list の長さを返します。
+
+---
+
+# 制御フロー
+
+## if / else
+
+`elif` はありません。
+
+```lime
+if x > 0:
+    ...
+else:
+    ...
+```
+
+---
+
+## while
+
+```lime
 while i < 3:
     println(i)
-    i = i + 1
 ```
 
-There is no `break` or `continue`.
+`break` / `continue` はありません。
 
-### for
+---
 
-`for` iterates over a list or over an integer range `a..b` (from `a`
-inclusive to `b` exclusive).
+## for
+
+list または range。
 
 ```lime
-for n in [10, 20, 30]:
+for n in [1,2,3]:
     println(n)
+```
 
+range：
+
+```lime
 for i in 0..3:
     println(i)
 ```
 
-### match
+`0` 以上 `3` 未満。
 
-`match` destructures a value against patterns. The patterns are:
+---
 
-- `try (a, b)` — a tuple pattern (with nested patterns allowed); the bare
-  `(a, b)` form is not accepted
-- `catch:` — catch-all, matches anything (replaces the old `_` wildcard)
-- `Some(v)` / `None` — `Option` variants
-- `Variant(a, b)` — struct-like state/enum variants
-- `try (v):` plus `error:` — matches the `Success`/`Error` variants of a
-  result-like state; `error:` binds the failure payload to `error` and is only
-  valid in a match that already has a `try (...)` arm
+# match
 
-There is no `else` arm: `match` must be exhaustive.
+パターンマッチ。
+
+対応：
+
+* tuple:
+
+  ```
+  try (a,b)
+  ```
+
+* 全一致:
+
+  ```
+  catch:
+  ```
+
+* Option:
+
+  ```
+  Some(v)
+  None
+  ```
+
+* state variant:
+
+  ```
+  Variant(a,b)
+  ```
+
+---
+
+例：
 
 ```lime
 match Some(5):
@@ -450,454 +656,313 @@ match Some(5):
         println(v)
     None:
         println("none")
-
-let t = (1, 2)
-match t:
-    try (x, y):
-        println(x + y)
-    catch:
-        println("wildcard")
-```
-
-### defer
-
-`defer:` schedules a block to run when the current function returns. Multiple
-defers run in the order they were scheduled.
-
-```lime
-fn main():
-    defer:
-        println("cleanup")
-    println("before")
-    return
-```
-
-Output:
-
-```
-before
-cleanup
 ```
 
 ---
 
-## Strings
+# defer
 
-Strings support method calls and a `string.` module. Methods are non-mutating;
-they return new strings (or other values) rather than changing the receiver.
-
-Method form:
+関数終了時に実行する処理。
 
 ```lime
-let str: text = "Hello Lime"
-println(text.length())     // 10 (characters)
-println(text.to_upper())   // HELLO LIME
-println(text.to_lower())   // hello lime
-println(text.repeat(2))    // Hello LimeHello Lime
-println(text.slice(0, 5))  // Hello
-println(text.len())        // 10 (bytes)
+defer:
+    println("cleanup")
 ```
 
-The methods available on strings are `len`, `byte_len`, `length`, `chars`,
-`bytes`, `slice`, `to_upper`, `to_lower`, `repeat`, `read`, `write`, `exists`,
-`remove`, `append`, and `metadata`. Predicate methods such as `contains` do
-**not** exist as methods — use the module form below.
+複数ある場合は登録順。
 
-Module form (equivalent), which lives in the `string` package and therefore
-requires a `citrus.toml` project with `[import] string = "v0.1.0"`:
+---
 
-```lime
-let str: s = "  Hello, Lime  "
-println(string.trim(s))          // Hello, Lime
-println(string.to_upper(s))      //   HELLO, LIME  (leading/trailing spaces preserved)
-println(string.contains(s, "Li"))  // true
-println(string.starts_with(s, "  He"))  // true
-println(string.ends_with(s, "  "))      // true
-println(string.replace("a-b-c", "-", "_"))  // a_b_c
-println(string.repeat("ab", 3))            // ababab
-let List(str): parts = string.split("x,y,z", ",")
-println(parts)                            // [x, y, z]
-println(string.slice("abcdef", 1, 4))     // bcd
-```
+# Strings
 
-`len(s)` gives the byte length; `.length()` gives the character count. For
-ASCII text they agree.
+文字列は immutable。
 
-StringBuilder appends incrementally:
+メソッドは新しい値を返します。
+
+例：
 
 ```lime
-let sb = StringBuilder()
-sb.add("a")
-sb.add("b")
-println(sb.build())   // ab
+text.length()
+
+text.to_upper()
+
+text.slice(0,5)
 ```
 
 ---
 
-## Lists
+利用可能メソッド：
 
-List literals use square brackets. Empty lists need a type annotation so the
-element type can be inferred.
-
-```lime
-let List(int): nums = []
-let xs = [1, 2, 3]
-let ys = ["a", "b"]
 ```
-
-Method form (non-mutating: `push` returns a new list, so reassign the binding):
-
-```lime
-let List(int): nums = []
-nums = nums.push(1)
-nums = nums.push(2)
-nums = nums.push(3)
-println(nums)                 // [1, 2, 3]
-println(nums.length())        // 3
-println(nums.first())         // 1
-println(nums.last())          // 3
-println(nums.contains(2))     // true
-println(nums.index_of(2))     // 1
-println(nums.reverse())       // [3, 2, 1]
-println(nums.pop())           // 3
+len
+byte_len
+length
+chars
+bytes
+slice
+to_upper
+to_lower
+repeat
+read
+write
+exists
+remove
+append
+metadata
 ```
-
-`len(nums)` gives the same value as `nums.length()`.
-
-Module form (`collections.`), which requires a `citrus.toml` project with
-`[import] collections = "v0.1.0"`:
-
-```lime
-let List(i): nums = [1, 2, 3]
-println(collections.first(nums))    // 1
-println(collections.last(nums))     // 3
-println(collections.length(nums))   // 3
-println(collections.contains(nums, 3))   // true
-println(collections.index_of(nums, 2))   // 1
-```
-
-Indexing and slicing use the same syntax as strings:
-
-```lime
-let nums = [10, 20, 30]
-println(nums[0])      // 10
-let sliced = nums[0:2]
-println(sliced)       // Slice[10, 20]
-```
-
-### HashMap and HashSet
-
-These types come from the `collections` package, so this code also requires a
-`citrus.toml` project with `[import] collections = "v0.1.0"`.
-
-```lime
-let HashMap(str, int): scores = collections.make_hash_map()
-scores = scores.insert("math", 95)
-scores = scores.insert("english", 88)
-println(scores.get("math"))       // option.Some(...)
-println(scores.contains("math"))  // true
-println(scores.length())          // 2
-
-let HashSet(str): tags = collections.make_hash_set()
-tags = tags.add("compiler")
-tags = tags.add("language")
-println(tags.contains("compiler"))  // true
-println(tags.length())              // 2
-```
-
-`get` returns an `Option` value from the `option` package (printed as
-`option.Some(...)`). It can only be inspected by printing; the current `match`
-does not destructure this package's `Some`.
-
-The module forms are `collections.hashmap_insert`, `collections.hashmap_get`,
-`collections.hashmap_contains_key`, `collections.hashmap_remove`,
-`collections.hashmap_len`, `collections.hashset_add`,
-`collections.hashset_contains`, `collections.hashset_remove`,
-`collections.hashset_len`.
 
 ---
 
-## Structs and methods
+# Lists
 
-A struct declares fields as `Type: name` lines and can also declare methods.
+リスト：
+
+```lime
+let xs = [1,2,3]
+```
+
+空の場合：
+
+```lime
+let List(int): xs = []
+```
+
+---
+
+主なメソッド：
+
+```
+push
+pop
+first
+last
+contains
+index_of
+reverse
+length
+```
+
+---
+
+# Struct
+
+例：
 
 ```lime
 struct Point:
-    int: x
-    int: y
-    fn magnitude():
-        return x * x + y * y
+    int:x
+    int:y
 
-fn main():
-    let p = Point(3, 4)
-    println(p.x)          // 3
-    println(p.magnitude())  // 25
-    return
+    fn magnitude():
+        return x*x+y*y
 ```
 
-- Construct with `Name(arg1, arg2)`.
-- Read fields with `p.field`.
-- Methods are written like functions inside the struct body and can access the
-  struct's fields directly (as in the `magnitude` example above).
-- Methods can take arguments, including the struct itself.
+生成：
 
-There are also several standard library struct types: `Instant` and
-`Duration` (time), and `FileMetadata` (filesystem). They are returned by the
-`time.*` and `fs.*` functions below.
+```lime
+Point(3,4)
+```
+
+アクセス：
+
+```lime
+p.x
+p.magnitude()
+```
 
 ---
 
-## Interfaces
+# Interface
 
-An interface declares a set of method signatures. A struct conforms to an
-interface by declaring methods with the same names and types — no explicit
-`implements` clause is needed. The signature syntax puts the return type after
-the parameter list, before the colon:
+interface はメソッド集合です。
+
+明示的な `implements` は不要。
+
+一致するメソッドを持つ struct は自動的に適合します。
+
+---
+
+例：
 
 ```lime
 interface Animal:
     fn speak(str): str:
-    fn legs(): int:
-
-struct Dog:
-    str: name
-    int: legs
-    fn speak(str):
-        return "woof"
-    fn legs():
-        return 4
-
-struct Cat:
-    str: name
-    int: legs
-    fn speak(str):
-        return "meow"
-    fn legs():
-        return 4
-
-fn make_sound(Animal: a):
-    print(a.speak(""))
-
-fn main():
-    let d = Dog("Rex", 4)
-    make_sound(d)   // woof
-    let c = Cat("Mimi", 4)
-    make_sound(c)   // meow
-    return
 ```
 
-A parameter typed as an interface accepts any struct that conforms to it, and
-method calls on that parameter dispatch to the concrete type.
+struct 側：
+
+```lime
+struct Dog:
+    fn speak(str):
+        return "woof"
+```
 
 ---
 
-## Generics
+# Generics
 
-Functions, structs, and enums can take type parameters. A generic function
-declares its type parameters between the name and the parameter list:
+関数：
 
 ```lime
-fn swap(T, U)(T: a, U: b):
-    return (b, a)
-
-fn main():
-    let s = swap(1, "hi")
-    println(s)   // (hi, 1)
-    return
+fn swap(T,U)(T:a,U:b):
+    return (b,a)
 ```
 
-Generic structs and enums:
+struct：
 
 ```lime
 struct Box(T):
-    T: value
-    fn get():
-        return value
-
-enum Maybe(T):
-    Just(T)
-    Nothing
-
-fn main():
-    let b = Box(7)
-    println(b.get())   // 7
-    let Maybe(int): m = Just(42)
-    match m:
-        Just(v):
-            println(v)
-        Nothing:
-            println("nothing")
-    return
+    T:value
 ```
-
-Type parameters with constraints use the `Where` clause (see the tests in
-`tests/integration.rs` for examples).
 
 ---
 
-## Async and await
+# Async / await
 
-Functions declared with the keyword `lime` instead of `fn` are async
-functions. Calling one produces a future; `await` forces it and returns the
-result.
-
-In the current interpreter, `await` runs the async function to completion
-immediately (synchronously). There is no parallelism and no suspension.
+`fn` の代わりに `lime` を使います。
 
 ```lime
-lime double(int: n):
-    return n * 2
-
-fn main():
-    let result = await double(21)
-    println(result)   // 42
-    return
+lime double(int:n):
+    return n*2
 ```
 
-The LLVM backend lowers `await` to a direct synchronous call, matching the
-interpreter's synchronous execution. There is no async runtime, scheduler, or
-coroutine lowering; async (`lime`) functions are emitted as ordinary LLVM
-functions.
+呼び出し：
+
+```lime
+let result = await double(21)
+```
+
+現在の実装では同期実行です。
+
+* 並列処理なし
+* coroutine なし
+* scheduler なし
+
+LLVM backend でも通常関数として生成されます。
 
 ---
 
-## Compilation targets
+# コンパイルターゲット
 
-Besides the interpreter (`lime run`), the compiler can emit native code.
-
-### Emitting LLVM IR
+## LLVM IR 出力
 
 ```sh
 lime build hello.lime --emit-ll
 ```
 
-This writes `hello.ll` (textual LLVM IR) next to the source. This stage does
-not require an LLVM toolchain.
+生成：
 
-### Emitting an object file and executable
+```
+hello.ll
+```
+
+LLVM 環境不要。
+
+---
+
+## Object / executable
 
 ```sh
 lime build hello.lime --emit-object
 ```
 
-This writes `hello.ll`, compiles it with `clang`, and links it into an
-executable. It requires `clang`, `llvm-as`, and `lld-link` (LLVM 22) on your
-`PATH` (or `LIME_LLVM_PREFIX` / `LLVM_SYS_221_PREFIX` set to the LLVM install
-directory).
+必要：
 
-Currently the backend only lowers a subset of the language. A function whose
-body uses a construct the backend cannot lower is emitted as a stub, the
-compiler prints codegen warnings, and object emission is refused for safety.
-
-Known backend limitations at the time of writing:
-
-- `await` is lowered to a direct synchronous call; there is no real
-  parallelism or async runtime.
-- `long` literals (`42L`) are not lowered.
-- State/enum and `Some`/`None` construction is not lowered.
-- A `let` that binds a plain scalar (`let x = 1`) currently produces invalid
-  IR for the store (`store i64 i64 1`), so programs that bind integer or float
-  variables fail to compile with `--emit-object`. Programs that only print
-  literals (strings) compile and run correctly.
-- Top-level statements other than declarations are ignored when emitting
-  native code; only definitions are emitted.
-
-`--release` enables `-O2`-equivalent optimization during object emission.
-`build` always runs a dead-code-elimination pass and reports how many unused
-functions were removed.
+```
+clang
+llvm-as
+lld-link
+LLVM 22
+```
 
 ---
 
-## Compiler errors
+現在の backend 制限：
 
-Errors are printed with the failing line and column. There are four kinds:
+* await は同期呼び出し
+* long literal 未対応
+* state / enum 未対応
+* Some / None 未対応
+* scalar let の LLVM store に問題あり
+* top-level statement は native code では無視
 
-**Lexer errors** — the source cannot be tokenized:
+---
+
+# コンパイラエラー
+
+4種類あります。
+
+## Lexer error
+
+文字解析失敗。
+
+例：
 
 ```
-Lexer error: Unexpected character '#' at 1:1
+Lexer error: Unexpected character '#'
 ```
 
-**Parser errors** — the tokens do not form valid syntax:
+---
 
-```
-Parser error: Expected Colon, got Ident("println") (at line 11, col 7)
-```
+## Parser error
 
-**Type errors** — the program is well-formed but does not type-check. These
-include "did you mean" suggestions for misspelled variables:
+構文エラー。
+
+---
+
+## Type error
+
+型エラー。
+
+例：
 
 ```
 Type error: undefined variable 'e'
-  did you mean 'b'?
-```
-
-and type mismatches, which print the expected and received types:
-
-```
-Type error: binary '+' type mismatch
-
-expected:
-    int
-
-received:
-    float
-```
-
-**Runtime errors** — the interpreter hits a problem while executing (for
-example, `Undefined variable: Nothing`).
-
-`lime check` reports whether a file type-checks cleanly:
-
-```
-ok: hello.lime type-checks cleanly
+did you mean 'b'?
 ```
 
 ---
 
-## Feature compatibility table
+## Runtime error
 
-Legend: **Yes** = fully supported, **No** = rejected or not implemented,
-**Partial** = works in common cases but with documented gaps.
+実行時エラー。
 
-| Feature | Interpreter | LLVM Backend | Notes |
-|---------|-------------|--------------|-------|
-| `let` bindings | Yes | Partial | Scalar `let x = 1` produces invalid IR today |
-| `let mut` + reassignment | Yes | Partial | Same scalar-store limitation |
-| Type annotations / aliases | Yes | Yes | `int`, `i32`, `i`, `long`… |
-| `Option(T)` / `T?`, `Some`/`None` | Yes | No | Not lowered by the backend |
-| Tuples and destructuring | Partial | No | `let (a, b) = ...` is parsed but not type-checked; use `match` patterns |
-| Functions, recursion | Yes | Yes | Calls are lowered |
-| Generic functions/structs | Yes | Partial | — |
-| `fn` params `Type: name` / untyped | Yes | Yes | — |
-| `return Type: expr` | Yes | Yes | — |
-| Arithmetic `+ - * / %` | Yes | Yes | — |
-| Comparison `< <= > >= == !=` | Yes | Yes | — |
-| `and` / `or` / `not` | Yes | Yes | — |
-| String concatenation `+` | Yes | Yes | — |
-| String indexing/slicing | Yes | No | — |
-| List indexing `list[i]` | Yes | Partial | — |
-| List slicing `list[a:b]` | Yes | No | — |
-| if / else | Yes | Yes | No `elif` |
-| while | Yes | Yes | No `break`/`continue` |
-| for over list / range | Yes | Partial | — |
-| match + patterns | Yes | Partial | — |
-| defer | Yes | No | — |
-| struct + fields | Yes | Yes | — |
-| struct methods | Yes | Yes | — |
-| interfaces | Yes | Partial | — |
-| state / enum variants | Yes | No | Construction not lowered |
-| String methods | Yes | Partial | — |
-| `string.*` module | Yes | No | — |
-| List methods (`push`, `pop`, …) | Yes | Partial | — |
-| `collections.*` module | Yes | No | — |
-| HashMap / HashSet | Yes | No | — |
-| StringBuilder | Yes | No | — |
-| `int()` / `float()` / `str()` | Yes | No | — |
-| `len()` | Yes | Partial | — |
-| `print` / `println` | Yes | Yes | Both print each arg on its own line |
-| `time.*` module | Yes | No | `now()`, `elapsed()`, `sleep()` |
-| `fs.*` module | Yes | No | `write`, `exists`, `metadata`, … |
-| `math.*` module | Yes | No | `abs`, `max`, `min`, `sqrt`, `pow` |
-| `lime` async fn + `await` | Yes | Yes | `await` lowers to a direct synchronous call; no parallelism |
-| Type-check (`lime check`) | Yes | — | Same checker feeds both paths |
+例：
+
+```
+Undefined variable: Nothing
+```
+
+---
+
+# 機能互換表（概要）
+
+| 機能            | Interpreter | LLVM Backend |
+| ------------- | ----------- | ------------ |
+| let           | Yes         | Partial      |
+| let mut       | Yes         | Partial      |
+| 型注釈           | Yes         | Yes          |
+| Option        | Yes         | No           |
+| Tuple         | Partial     | No           |
+| Function      | Yes         | Yes          |
+| Generic       | Yes         | Partial      |
+| Arithmetic    | Yes         | Yes          |
+| String        | Yes         | Partial      |
+| List          | Yes         | Partial      |
+| if            | Yes         | Yes          |
+| while         | Yes         | Yes          |
+| for           | Yes         | Partial      |
+| match         | Yes         | Partial      |
+| defer         | Yes         | No           |
+| struct        | Yes         | Yes          |
+| interface     | Yes         | Partial      |
+| enum/state    | Yes         | No           |
+| collections   | Yes         | No           |
+| HashMap       | Yes         | No           |
+| StringBuilder | Yes         | No           |
+| print/println | Yes         | Yes          |
+| async/await   | Yes         | Yes          |
+
+---
+
+Lime の現在の設計では、**インタプリタが完全な意味論の基準（reference implementation）であり、LLVM backend は段階的に対応範囲を広げる構成**になっています。
