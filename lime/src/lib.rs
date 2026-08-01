@@ -1,30 +1,18 @@
 use std::fs;
 use std::collections::HashMap;
-
-
 const RUNTIME_C_SOURCE: &str = include_str!("codegen/runtime/runtime.c");
 const RUNTIME_H_SOURCE: &str = include_str!("codegen/runtime/runtime.h");
 use std::sync::{Mutex, OnceLock};
 use std::hash::{Hash, Hasher};
-
-
-
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Symbol(u32);
-
 impl Symbol {
     const AMBIGUOUS: Symbol = Symbol(u32::MAX);
 }
-
 struct Interner {
     map: HashMap<String, Symbol>,
     values: Vec<String>,
 }
-
 impl Interner {
     fn new() -> Self {
         Interner {
@@ -32,7 +20,6 @@ impl Interner {
             values: Vec::new(),
         }
     }
-
     fn intern(&mut self, name: &str) -> Symbol {
         if let Some(s) = self.map.get(name) {
             return *s;
@@ -43,26 +30,18 @@ impl Interner {
         self.map.insert(name.to_string(), sym);
         sym
     }
-
     fn resolve(&self, symbol: Symbol) -> &str {
         &self.values[symbol.0 as usize]
     }
 }
-
 fn global_interner() -> &'static Mutex<Interner> {
     static INTERNER: OnceLock<Mutex<Interner>> = OnceLock::new();
     INTERNER.get_or_init(|| Mutex::new(Interner::new()))
 }
-
-
 fn intern(name: &str) -> Symbol {
     let mut i = global_interner().lock().unwrap();
     i.intern(name)
 }
-
-
-
-
 struct StageTimer {
     name: &'static str,
     start: std::time::Instant,
@@ -85,122 +64,69 @@ impl Drop for StageTimer {
         }
     }
 }
-
-
 fn resolve_sym(symbol: Symbol) -> String {
     let i = global_interner().lock().unwrap();
     i.resolve(symbol).to_string()
 }
-
-
-
-
-
-
-
-
 fn global_type_cache() -> &'static Mutex<HashMap<String, Type>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Type>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
-
-
-
-
-
-
 fn global_pkg_cache() -> &'static Mutex<HashMap<String, Defs>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Defs>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
-
-
-
-
-
-
 #[derive(Clone)]
 struct MonoKey {
     function: Symbol,
     types: Vec<String>,
     mangled: String,
 }
-
 impl PartialEq for MonoKey {
     fn eq(&self, other: &Self) -> bool {
         self.function == other.function && self.types == other.types
     }
 }
-
 impl Eq for MonoKey {}
-
 impl Hash for MonoKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.function.hash(state);
         self.types.hash(state);
     }
 }
-
-
-
-
 #[path = "codegen/mod.rs"]
 mod codegen;
-
-
-
-
-
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
-    
     Fn, Lime, Struct, Interface, State, Enum, Let, Mut, If, Else, Match, Return,
     Async, Await, Unsafe, True, False, Where, For, While, Defer,
     Int, Float, Str, Bool, Option,
-
-    
     Plus, Minus, Star, Slash, Percent,
     Assign, PlusAssign, MinusAssign, StarAssign, SlashAssign,
     Eq, NotEq, Lt, Gt, LtEq, GtEq,
     And, Or, Not,
     Dot, DoubleDot,
-
-    
     LParen, RParen, LBrace, RBrace, LBracket, RBracket,
     Colon, DoubleColon, Semicolon, Comma, Arrow, FatArrow, Question,
-
-    
     Indent, Dedent, Newline,
-
-    
     IntLit(i64), LongLit(i64), FloatLit(f64), StringLit(String), Ident(String),
-
     Eof,
 }
-
 fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
     let chars: Vec<char> = source.chars().collect();
     let n = chars.len();
-
     let mut tokens: Vec<Token> = Vec::new();
     let mut locs: Vec<(usize, usize)> = Vec::new();
     let mut indent_stack: Vec<usize> = vec![0];
-
     let mut i = 0usize;
     let mut line = 1usize;
     let mut col = 1usize;
-
-    
-    
     let mut emit = |t: Token, l: usize, c: usize| {
         tokens.push(t);
         locs.push((l, c));
     };
-
     while i < n {
         let ch = chars[i];
-
-        
         if ch == '/' && i + 1 < n && chars[i + 1] == '/' {
             i += 2;
             while i < n && chars[i] != '\n' {
@@ -232,31 +158,25 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
             }
             continue;
         }
-
-        
         if ch == '\n' {
             emit(Token::Newline, line, col);
             line += 1;
             col = 1;
             i += 1;
-            
             let mut indent = 0usize;
             loop {
-                
                 indent = 0;
                 while i < n && (chars[i] == ' ' || chars[i] == '\t') {
                     indent += 1;
                     i += 1;
                 }
                 if i < n && chars[i] == '#' {
-                    
                     while i < n && chars[i] != '\n' {
                         i += 1;
                     }
                     continue;
                 }
                 if i < n && chars[i] == '\n' {
-                    
                     emit(Token::Newline, line, col);
                     line += 1;
                     i += 1;
@@ -278,23 +198,17 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
             }
             continue;
         }
-
-        
         if ch == '#' {
             while i < n && chars[i] != '\n' {
                 i += 1;
             }
             continue;
         }
-
-        
         if ch == ' ' || ch == '\t' {
             i += 1;
             col += 1;
             continue;
         }
-
-        
         if ch == '"' {
             i += 1;
             let mut s = String::new();
@@ -324,16 +238,12 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
             col += 1;
             continue;
         }
-
-        
         if ch.is_ascii_digit() {
             let start = i;
             let mut is_float = false;
             while i < n && chars[i].is_ascii_digit() {
                 i += 1;
             }
-            
-            
             if i < n && chars[i] == '.' && i + 1 < n && chars[i + 1].is_ascii_digit() {
                 is_float = true;
                 i += 1; 
@@ -348,7 +258,6 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
                     Err(_) => return Err(format!("Invalid float literal: {}", num)),
                 }
             } else {
-                
                 if i < n && chars[i] == 'L' {
                     i += 1;
                     match num.parse::<i64>() {
@@ -364,16 +273,12 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
             }
             continue;
         }
-
-        
         if ch.is_alphabetic() || ch == '_' {
             let start = i;
             while i < n && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 i += 1;
             }
-
             let ident: String = chars[start..i].iter().collect();
-
             let token = match ident.as_str() {
                 "fn" => Token::Fn,
                 "lime" => Token::Lime,
@@ -393,30 +298,23 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
                 "true" => Token::True,
                 "false" => Token::False,
                 "where" => Token::Where,
-
                 "int" => Token::Int,
                 "float" => Token::Float,
                 "str" => Token::Str,
                 "bool" => Token::Bool,
                 "Option" => Token::Option,
-
                 "for" => Token::For,
                 "while" => Token::While,
                 "defer" => Token::Defer,
-
                 "and" => Token::And,
                 "or" => Token::Or,
                 "not" => Token::Not,
-
                 _ => Token::Ident(ident),
             };
-
             emit(token, line, col);
             col += i - start;
             continue;
         }
-
-        
         let op = match ch {
             '+' => {
                 i += 1;
@@ -576,36 +474,21 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
                 ));
             }
         };
-
         emit(op, line, col);
         col += 1;
     }
-
-    
     while indent_stack.len() > 1 {
         indent_stack.pop();
         emit(Token::Dedent, line, col);
     }
-
     emit(Token::Eof, line, col);
-
     Ok((tokens, locs))
 }
-
-
-
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolvedOperator {
-    
     Builtin,
-    
-    
-    
-    
     MethodCall { method: String, op: String },
 }
-
 #[derive(Debug, Clone)]
 enum Expr {
     IntLit(i64),
@@ -618,7 +501,6 @@ enum Expr {
         left: Box<Expr>,
         op: String,
         right: Box<Expr>,
-        
         resolved_operator: Option<ResolvedOperator>,
     },
     UnOp {
@@ -652,8 +534,6 @@ enum Expr {
         start: Box<Expr>,
         end: Box<Expr>,
     },
-    
-    
     Tuple(Vec<Expr>),
     TupleAccess {
         tuple: Box<Expr>,
@@ -661,7 +541,6 @@ enum Expr {
     },
     Await(Box<Expr>),
 }
-
 #[derive(Debug, Clone)]
 enum Pattern {
     Variant {
@@ -675,23 +554,18 @@ enum Pattern {
     Catch,
     Tuple(Vec<Pattern>),
 }
-
-
 #[derive(Debug, Clone)]
 struct InterfaceMethod {
     name: String,
     params: Vec<(String, String)>,
     return_type: Option<String>,
 }
-
-
 #[derive(Debug, Clone)]
 struct InterfaceDefAst {
     name: String,
     type_params: Vec<String>,
     methods: Vec<InterfaceMethod>,
 }
-
 #[derive(Debug, Clone)]
 enum Stmt {
     Let {
@@ -699,8 +573,6 @@ enum Stmt {
         name: String,
         type_hint: Option<String>,
         value: Expr,
-        
-        
         place: Option<MemoryPlace>,
     },
     Fn {
@@ -741,8 +613,6 @@ enum Stmt {
         type_params: Vec<String>,
         variants: Vec<String>,
     },
-    
-    
     Enum {
         name: String,
         type_params: Vec<String>,
@@ -772,34 +642,18 @@ enum Stmt {
         body: Vec<Stmt>,
     },
 }
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum MemoryPlace {
     Stack,
     Heap,
 }
-
-
-
-
 struct Parser {
     tokens: Vec<Token>,
     locs: Vec<(usize, usize)>,
     pos: usize,
-    
-    
-    
-    
     stmt_locs: Vec<(usize, usize)>,
-    
-    
-    
     package_names: std::collections::HashSet<String>,
 }
-
 impl Parser {
     fn new(tokens: Vec<Token>, locs: Vec<(usize, usize)>) -> Self {
         Parser {
@@ -810,42 +664,30 @@ impl Parser {
             package_names: std::collections::HashSet::new(),
         }
     }
-
-    
-    
     fn set_package_names(&mut self, names: impl IntoIterator<Item = String>) {
         self.package_names = names.into_iter().collect();
     }
-
-    
     fn loc(&self) -> (usize, usize) {
         self.locs.get(self.pos).copied().unwrap_or((0, 0))
     }
-
-    
     fn error(&self, msg: &str) -> String {
         let (line, col) = self.loc();
         format!("{} (at line {}, col {})", msg, line, col)
     }
-
     fn current(&self) -> &Token {
         self.tokens.get(self.pos).unwrap_or(&Token::Eof)
     }
-
     fn peek(&self) -> &Token {
         self.tokens.get(self.pos + 1).unwrap_or(&Token::Eof)
     }
-
     fn peek_at(&self, n: usize) -> &Token {
         self.tokens.get(self.pos + n).unwrap_or(&Token::Eof)
     }
-
     fn advance(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
         }
     }
-
     fn expect(&mut self, expected: Token) -> Result<(), String> {
         if std::mem::discriminant(self.current()) == std::mem::discriminant(&expected) {
             self.advance();
@@ -858,10 +700,8 @@ impl Parser {
             )))
         }
     }
-
     fn parse_program(&mut self) -> Result<Vec<Stmt>, String> {
         let mut stmts = Vec::new();
-
         while self.current() != &Token::Eof {
             if matches!(
                 self.current(),
@@ -870,17 +710,11 @@ impl Parser {
                 self.advance();
                 continue;
             }
-
             stmts.push(self.parse_stmt().map_err(|e| self.error(&e))?);
         }
-
         Ok(stmts)
     }
-
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        
-        
-        
         let start_loc = self.loc();
         let loc_idx = self.stmt_locs.len();
         self.stmt_locs.push(start_loc);
@@ -899,7 +733,6 @@ impl Parser {
             Token::While => self.parse_while(),
             Token::Defer => self.parse_defer(),
             _ => {
-                
                 if let Token::Ident(name) = self.current().clone() {
                     if self.peek() == &Token::Assign {
                         self.advance(); 
@@ -919,18 +752,14 @@ impl Parser {
             }
         }
     }
-
     fn parse_let(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Let)?;
-
         let mutable = if self.current() == &Token::Mut {
             self.advance();
             true
         } else {
             false
         };
-
-        
         if self.current() == &Token::LParen {
             if mutable {
                 return Err("Cannot use 'mut' with destructure".to_string());
@@ -956,20 +785,12 @@ impl Parser {
             }
             return Ok(Stmt::Destructure { vars, value });
         }
-
-        
-        
-        
-        
         let has_type = match self.current() {
             Token::Int | Token::Float | Token::Str | Token::Bool | Token::Option => true,
             Token::Ident(_) => {
-                
                 if self.peek() == &Token::Colon {
                     true
                 } else if self.peek() == &Token::LParen {
-                    
-                    
                     let mut depth = 0i32;
                     let mut i = 1usize;
                     let mut found = false;
@@ -995,13 +816,8 @@ impl Parser {
             }
             _ => false,
         };
-
         let mut place: Option<MemoryPlace> = None;
-
         let type_hint = if has_type {
-            
-            
-            
             let mut th: Option<String> = None;
             if let (Token::Ident(base), Token::LParen, Token::Ident(kw), Token::RParen) = (
                 self.current().clone(),
@@ -1015,7 +831,6 @@ impl Parser {
                     place = Some(MemoryPlace::Stack);
                 }
                 if place.is_some() {
-                    
                     self.advance(); 
                     self.advance(); 
                     self.advance(); 
@@ -1023,7 +838,6 @@ impl Parser {
                     th = Some(base);
                 }
             }
-
             if th.is_none() {
                 let mut ch = Vec::new();
                 th = Some(self.parse_type(&mut ch)?);
@@ -1033,20 +847,16 @@ impl Parser {
         } else {
             None
         };
-
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
             _ => return Err(format!("Expected variable name, got {:?}", self.current())),
         };
         self.advance();
-
         self.expect(Token::Assign)?;
         let value = self.parse_expr()?;
-
         if self.current() == &Token::Semicolon {
             self.advance();
         }
-
         Ok(Stmt::Let {
             mutable,
             name,
@@ -1055,22 +865,16 @@ impl Parser {
             place,
         })
     }
-
     fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
         let mut stmts = Vec::new();
-
-        
         if self.current() == &Token::Newline {
             self.advance();
         }
-
-        
         if self.current() == &Token::Indent {
             self.advance();
         } else {
             return Err("Expected indented block".to_string());
         }
-
         while self.current() != &Token::Dedent
             && self.current() != &Token::Eof
         {
@@ -1081,51 +885,36 @@ impl Parser {
                 self.advance();
                 continue;
             }
-
             stmts.push(self.parse_stmt()?);
         }
-
-        
         if self.current() == &Token::Dedent {
             self.advance();
         }
-
         Ok(stmts)
     }
-
     fn parse_defer(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Defer)?;
         self.expect(Token::Colon)?;
         let body = self.parse_block()?;
         Ok(Stmt::Defer { body })
     }
-
     fn parse_fn(&mut self) -> Result<Stmt, String> {
-        
         let is_async = match self.current() {
             Token::Fn => false,
             Token::Lime => true,
             other => return Err(format!("Expected 'fn' or 'lime', got {:?}", other)),
         };
         self.advance();
-
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
             _ => return Err("Expected function name".to_string()),
         };
         self.advance();
-
-        
         let mut constraints = Vec::new();
         let mut type_params = self.parse_type_params(true, &mut constraints)?;
-
         self.expect(Token::LParen)?;
-
         let mut params = Vec::new();
-
         while self.current() != &Token::RParen {
-            
-            
             let mut is_untyped = false;
             let tok = self.current().clone();
             if let Token::Ident(name) = &tok {
@@ -1147,36 +936,25 @@ impl Parser {
                 }
                 continue;
             }
-
             let param_type = self.parse_type(&mut constraints)?;
-
             if self.current() == &Token::Colon {
                 self.advance();
-
                 let param_name = match self.current() {
                     Token::Ident(n) => n.clone(),
                     _ => return Err("Expected parameter name".to_string()),
                 };
-
                 self.advance();
-
                 params.push((param_name, param_type));
             } else {
                 params.push(("_".to_string(), param_type));
             }
-
             if self.current() == &Token::Comma {
                 self.advance();
             }
         }
-
         self.expect(Token::RParen)?;
-
         self.expect(Token::Colon)?;
-
         let body = self.parse_block()?;
-
-        
         for (tv, _) in &constraints {
             if !type_params.contains(tv) {
                 type_params.push(tv.clone());
@@ -1191,9 +969,7 @@ impl Parser {
             is_async,
         })
     }
-
     fn parse_type(&mut self, constraints: &mut Vec<(String, String)>) -> Result<String, String> {
-        
         if let Token::Option = self.current() {
             self.advance();
             self.expect(Token::LParen)?;
@@ -1231,12 +1007,10 @@ impl Parser {
                 base
             ));
         }
-        
         if self.current() == &Token::Question {
             self.advance();
             return Ok(format!("Option({})", base));
         }
-        
         if self.current() == &Token::LParen {
             self.advance();
             let mut inner = Vec::new();
@@ -1254,7 +1028,6 @@ impl Parser {
             self.expect(Token::RParen)?;
             return Ok(format!("{}({})", base, inner.join(", ")));
         }
-        
         if self.current() == &Token::Where {
             let tv = base.clone();
             self.advance();
@@ -1286,10 +1059,6 @@ impl Parser {
         }
         Ok(base)
     }
-
-    
-    
-    
     fn try_parse_type_args(&mut self, constraints: &mut Vec<(String, String)>) -> Option<Vec<String>> {
         let save = self.pos;
         if self.current() != &Token::LParen {
@@ -1323,17 +1092,11 @@ impl Parser {
             None
         }
     }
-
-    
-    
-    
-    
     fn parse_type_params(
         &mut self,
         require_paren_after: bool,
         constraints: &mut Vec<(String, String)>,
     ) -> Result<Vec<String>, String> {
-        
         if self.current() == &Token::LParen {
             let mut depth = 0usize;
             let mut i = self.pos;
@@ -1347,19 +1110,15 @@ impl Parser {
                     Token::RParen => {
                         depth -= 1;
                         if depth == 0 {
-                            
                             let next_is_paren =
                                 i + 1 < tokens.len() && tokens[i + 1] == Token::LParen;
                             if require_paren_after {
                                 if next_is_paren {
-                                    
                                     break;
                                 } else {
-                                    
                                     return Ok(Vec::new());
                                 }
                             } else {
-                                
                                 break;
                             }
                         }
@@ -1371,8 +1130,6 @@ impl Parser {
         } else {
             return Ok(Vec::new());
         }
-
-        
         self.advance(); 
         let mut params = Vec::new();
         while self.current() != &Token::RParen && self.current() != &Token::Eof {
@@ -1419,22 +1176,16 @@ impl Parser {
         self.expect(Token::RParen)?;
         Ok(params)
     }
-
     fn parse_struct(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Struct)?;
-
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
             _ => return Err("Expected struct name".to_string()),
         };
         self.advance();
-
         let mut constraints = Vec::new();
         let type_params = self.parse_type_params(false, &mut constraints)?;
-
         self.expect(Token::Colon)?;
-
-        
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1443,7 +1194,6 @@ impl Parser {
         } else {
             return Err("Expected indented struct body".to_string());
         }
-
         let mut fields = Vec::new();
         let mut methods = Vec::new();
         while self.current() != &Token::Dedent && self.current() != &Token::Eof {
@@ -1451,31 +1201,22 @@ impl Parser {
                 self.advance();
                 continue;
             }
-
-            
             if self.current() == &Token::Fn {
                 methods.push(self.parse_fn()?);
                 continue;
             }
-
-            
             let field_type = self.parse_type(&mut constraints)?;
-
             self.expect(Token::Colon)?;
-
             let field_name = match self.current() {
                 Token::Ident(n) => n.clone(),
                 _ => return Err("Expected field name".to_string()),
             };
             self.advance();
-
             fields.push((field_name, field_type));
         }
-
         if self.current() == &Token::Dedent {
             self.advance();
         }
-
         Ok(Stmt::Struct {
             name,
             type_params,
@@ -1484,23 +1225,16 @@ impl Parser {
             methods,
         })
     }
-
     fn parse_interface(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Interface)?;
-
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
             _ => return Err("Expected interface name".to_string()),
         };
         self.advance();
-
-        
         let mut constraints = Vec::new();
         let type_params = self.parse_type_params(false, &mut constraints)?;
-
         self.expect(Token::Colon)?;
-
-        
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1509,15 +1243,12 @@ impl Parser {
         } else {
             return Err("Expected indented interface body".to_string());
         }
-
         let mut methods = Vec::new();
         while self.current() != &Token::Dedent && self.current() != &Token::Eof {
             if matches!(self.current(), Token::Newline | Token::Indent) {
                 self.advance();
                 continue;
             }
-
-            
             if self.current() == &Token::Fn {
                 self.advance();
                 let mname = match self.current() {
@@ -1529,7 +1260,6 @@ impl Parser {
                 let mut params = Vec::new();
                 while self.current() != &Token::RParen && self.current() != &Token::Eof {
                     let param_type = self.parse_type(&mut constraints)?;
-                    
                     if self.current() == &Token::Colon {
                         self.advance();
                         let pname = match self.current() {
@@ -1546,7 +1276,6 @@ impl Parser {
                     }
                 }
                 self.expect(Token::RParen)?;
-                
                 self.expect(Token::Colon)?;
                 let return_type = match self.current() {
                     Token::Int | Token::Float | Token::Str | Token::Bool => {
@@ -1559,7 +1288,6 @@ impl Parser {
                     }
                     _ => None,
                 };
-                
                 if return_type.is_some() {
                     self.expect(Token::Colon)?;
                 }
@@ -1575,11 +1303,9 @@ impl Parser {
                 ));
             }
         }
-
         if self.current() == &Token::Dedent {
             self.advance();
         }
-
         Ok(Stmt::Interface {
             name,
             type_params,
@@ -1587,22 +1313,15 @@ impl Parser {
             methods,
         })
     }
-
     fn parse_state(&mut self) -> Result<Stmt, String> {
         self.expect(Token::State)?;
-
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
             other => return Err(format!("Expected state name, got {:?}", other)),
         };
         self.advance();
-
-        
         let type_params = self.parse_type_params(false, &mut Vec::new())?;
-
         self.expect(Token::Colon)?;
-
-        
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1611,21 +1330,17 @@ impl Parser {
         } else {
             return Err("Expected indented state body".to_string());
         }
-
         let mut variants = Vec::new();
         while self.current() != &Token::Dedent && self.current() != &Token::Eof {
             if matches!(self.current(), Token::Newline | Token::Indent) {
                 self.advance();
                 continue;
             }
-
             let variant = match self.current() {
                 Token::Ident(n) => n.clone(),
                 other => return Err(format!("Expected variant name, got {:?}", other)),
             };
             self.advance();
-
-            
             if self.current() == &Token::LParen {
                 self.advance();
                 let mut depth = 1;
@@ -1638,34 +1353,26 @@ impl Parser {
                     self.advance();
                 }
             }
-
             variants.push(variant);
         }
-
         if self.current() == &Token::Dedent {
             self.advance();
         }
-
         Ok(Stmt::State {
             name,
             type_params,
             variants,
         })
     }
-
     fn parse_enum(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Enum)?;
-
         let name = match self.current() {
             Token::Ident(n) => n.clone(),
             other => return Err(format!("Expected enum name, got {:?}", other)),
         };
         self.advance();
-
         let type_params = self.parse_type_params(false, &mut Vec::new())?;
-
         self.expect(Token::Colon)?;
-
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1674,20 +1381,17 @@ impl Parser {
         } else {
             return Err("Expected indented enum body".to_string());
         }
-
         let mut variants = Vec::new();
         while self.current() != &Token::Dedent && self.current() != &Token::Eof {
             if matches!(self.current(), Token::Newline | Token::Indent) {
                 self.advance();
                 continue;
             }
-
             let variant_name = match self.current() {
                 Token::Ident(n) => n.clone(),
                 other => return Err(format!("Expected variant name, got {:?}", other)),
             };
             self.advance();
-
             let fields = if self.current() == &Token::LParen {
                 self.advance();
                 let mut flds = Vec::new();
@@ -1711,14 +1415,11 @@ impl Parser {
             } else {
                 Vec::new()
             };
-
             variants.push((variant_name, fields));
         }
-
         if self.current() == &Token::Dedent {
             self.advance();
         }
-
         Ok(Stmt::Enum {
             name,
             type_params,
@@ -1726,15 +1427,11 @@ impl Parser {
             methods: Vec::new(),
         })
     }
-
     fn parse_if(&mut self) -> Result<Stmt, String> {
         self.expect(Token::If)?;
-
         let cond = self.parse_expr()?;
         self.expect(Token::Colon)?;
-
         let then_branch = self.parse_block()?;
-
         let else_branch = if self.current() == &Token::Else {
             self.advance();
             self.expect(Token::Colon)?;
@@ -1742,15 +1439,11 @@ impl Parser {
         } else {
             None
         };
-
         Ok(Stmt::If { cond, then_branch, else_branch })
     }
-
     fn parse_return(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Return)?;
-
         let explicit_type = self.parse_return_type();
-
         let expr = if matches!(
             self.current(),
             Token::Newline | Token::Indent | Token::Dedent | Token::Eof
@@ -1759,14 +1452,11 @@ impl Parser {
         } else {
             Some(self.parse_expr()?)
         };
-
         if self.current() == &Token::Semicolon {
             self.advance();
         }
-
         Ok(Stmt::Return { explicit_type, value: expr })
     }
-
     fn parse_return_type(&mut self) -> Option<Type> {
         let saved = self.pos;
         let ty = match self.current() {
@@ -1789,48 +1479,32 @@ impl Parser {
             None
         }
     }
-
     fn parse_for(&mut self) -> Result<Stmt, String> {
         self.expect(Token::For)?;
-
         let var = match self.current() {
             Token::Ident(n) => n.clone(),
             _ => return Err(format!("Expected loop variable, got {:?}", self.current())),
         };
         self.advance();
-
         self.expect(Token::Ident("in".to_string())).map_err(|_| {
             "Expected 'in' in for loop".to_string()
         })?;
-
         let iterable = self.parse_expr()?;
         self.expect(Token::Colon)?;
-
         let body = self.parse_block()?;
-
         Ok(Stmt::For { var, iterable, body })
     }
-
     fn parse_while(&mut self) -> Result<Stmt, String> {
         self.expect(Token::While)?;
-
-        
         let cond = self.parse_expr()?;
-
         self.expect(Token::Colon)?;
-
         let body = self.parse_block()?;
-
         Ok(Stmt::While { cond, body })
     }
-
     fn parse_match(&mut self) -> Result<Stmt, String> {
         self.expect(Token::Match)?;
-
         let expr = self.parse_expr()?;
         self.expect(Token::Colon)?;
-
-        
         if self.current() == &Token::Newline {
             self.advance();
         }
@@ -1839,7 +1513,6 @@ impl Parser {
         } else {
             return Err("Expected indented match body".to_string());
         }
-
         let mut arms = Vec::new();
         let mut seen_try = false;
         while self.current() != &Token::Dedent && self.current() != &Token::Eof {
@@ -1847,12 +1520,9 @@ impl Parser {
                 self.advance();
                 continue;
             }
-
-            
             if self.current() == &Token::Else {
                 return Err("Match else is not allowed (exhaustive match required)".to_string());
             }
-
             let pattern = if self.current() == &Token::LParen {
                 return Err(
                     "Expected a variant or `try (...)` in match arm, got a bare tuple pattern (write `try (...)` to match a tuple)"
@@ -1864,7 +1534,6 @@ impl Parser {
                     other => return Err(format!("Expected variant name in match, got {:?}", other)),
                 };
                 self.advance();
-
                 if name == "_" {
                     return Err(
                         "`_` is no longer a wildcard pattern; use `catch:` instead".to_string(),
@@ -1915,7 +1584,6 @@ impl Parser {
                             };
                             self.advance();
                             bindings.push(b);
-
                             if self.current() == &Token::Comma {
                                 self.advance();
                             }
@@ -1925,28 +1593,21 @@ impl Parser {
                     Pattern::Variant { name, bindings }
                 }
             };
-
         self.expect(Token::Colon)?;
-
         let body = self.parse_block()?;
-
             arms.push((pattern, body));
         }
-
         if self.current() == &Token::Dedent {
             self.advance();
         }
-
         Ok(Stmt::Match { expr, arms })
     }
-
     fn parse_tuple_pattern(&mut self) -> Result<Pattern, String> {
         self.expect(Token::LParen)?;
         let elems = self.parse_tuple_elems()?;
         self.expect(Token::RParen)?;
         Ok(Pattern::Tuple(elems))
     }
-
     fn parse_tuple_elems(&mut self) -> Result<Vec<Pattern>, String> {
         let mut elems = Vec::new();
         while self.current() != &Token::RParen {
@@ -1970,19 +1631,15 @@ impl Parser {
                 }
             };
             elems.push(elem);
-
             if self.current() == &Token::Comma {
                 self.advance();
             }
         }
         Ok(elems)
     }
-
     fn parse_expr(&mut self) -> Result<Expr, String> {
         self.parse_binary(0)
     }
-
-    
     fn bin_prec(op: &str) -> Option<u8> {
         match op {
             "or" => Some(1),
@@ -1994,10 +1651,8 @@ impl Parser {
             _ => None,
         }
     }
-
     fn parse_binary(&mut self, min_prec: u8) -> Result<Expr, String> {
         let mut left = self.parse_unary()?;
-
         loop {
             let op = match self.current() {
                 Token::Plus => "+".to_string(),
@@ -2015,16 +1670,13 @@ impl Parser {
                 Token::Or => "or".to_string(),
                 _ => break,
             };
-
             let prec = match Self::bin_prec(&op) {
                 Some(p) => p,
                 None => break,
             };
-
             if prec < min_prec {
                 break;
             }
-
             self.advance();
             let right = self.parse_binary(prec + 1)?;
             left = Expr::BinOp {
@@ -2034,10 +1686,8 @@ impl Parser {
                 resolved_operator: None,
             };
         }
-
         Ok(left)
     }
-
     fn parse_unary(&mut self) -> Result<Expr, String> {
         match self.current() {
             Token::Minus => {
@@ -2058,22 +1708,15 @@ impl Parser {
             _ => self.parse_postfix(),
         }
     }
-
-    
     fn parse_postfix(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_atom()?;
-        
-        
-        
         let mut dotted_path: Vec<String> = Vec::new();
-
         loop {
             match self.current() {
                 Token::Dot => {
                     self.advance();
                     let name = match self.current().clone() {
                         Token::Ident(n) => n,
-                        
                         Token::Int => "int".to_string(),
                         Token::Float => "float".to_string(),
                         Token::Str => "str".to_string(),
@@ -2081,13 +1724,7 @@ impl Parser {
                         other => return Err(format!("Expected method/field name, got {:?}", other)),
                     };
                     self.advance();
-                    
-                    
-                    
-                    
                     let is_call = self.current() == &Token::LParen;
-                    
-                    
                     if let Expr::Ident(base) = &expr {
                         dotted_path = vec![base.clone()];
                     }
@@ -2096,8 +1733,6 @@ impl Parser {
                         || (dotted_path.len() == 2
                             && self.package_names.contains(&dotted_path[0])))
                     {
-                        
-                        
                         let func = dotted_path.join(".");
                         self.advance();
                         let mut args = Vec::new();
@@ -2110,7 +1745,6 @@ impl Parser {
                         self.expect(Token::RParen)?;
                         expr = Expr::Call { func, args };
                     } else if is_call {
-                        
                         let obj = expr.clone();
                         self.advance();
                         let mut args = Vec::new();
@@ -2140,15 +1774,12 @@ impl Parser {
                     }
                 }
                 Token::LParen => {
-                    
                     if let Expr::Ident(func) = &expr {
-                        
                         let save = self.pos;
                         if let Some(type_args) =
                             self.try_parse_type_args(&mut Vec::new())
                         {
                             let typed_name = format!("{}({})", func, type_args.join(", "));
-                            
                             if self.current() == &Token::LParen {
                                 self.advance();
                                 let mut args = Vec::new();
@@ -2166,7 +1797,6 @@ impl Parser {
                                     args,
                                 };
                             } else {
-                                
                                 self.pos = save;
                                 self.advance();
                                 let mut args = Vec::new();
@@ -2185,7 +1815,6 @@ impl Parser {
                                 };
                             }
                         } else {
-                            
                             self.pos = save;
                             self.advance();
                             let mut args = Vec::new();
@@ -2257,10 +1886,8 @@ impl Parser {
                 _ => break,
             }
         }
-
         Ok(expr)
     }
-
     fn parse_atom(&mut self) -> Result<Expr, String> {
         match self.current().clone() {
             Token::IntLit(n) => {
@@ -2289,7 +1916,6 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                
                 if name == "None" {
                     Ok(Expr::Call {
                         func: "None".to_string(),
@@ -2299,9 +1925,6 @@ impl Parser {
                     Ok(Expr::Ident(name))
                 }
             }
-            
-            
-            
             Token::Int | Token::Float | Token::Str => {
                 if self.peek() == &Token::LParen {
                     let name = match self.current() {
@@ -2363,7 +1986,6 @@ impl Parser {
         }
     }
 }
-
 fn parse(
     tokens: Vec<Token>,
     locs: Vec<(usize, usize)>,
@@ -2371,9 +1993,6 @@ fn parse(
     let mut parser = Parser::new(tokens, locs);
     parser.parse_program()
 }
-
-
-
 fn parse_with_locs(
     tokens: Vec<Token>,
     locs: Vec<(usize, usize)>,
@@ -2384,35 +2003,18 @@ fn parse_with_locs(
     let stmts = parser.parse_program()?;
     Ok((stmts, parser.stmt_locs))
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 const REGISTRY_ROOT: &str = "packages";
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct Version {
     major: u32,
     minor: u32,
     patch: u32,
 }
-
 impl Version {
     fn as_string(&self) -> String {
         format!("v{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
-
 fn parse_version(s: &str) -> Result<Version, String> {
     let s = s.trim();
     let s = s.strip_prefix('v').unwrap_or(s);
@@ -2431,7 +2033,6 @@ fn parse_version(s: &str) -> Result<Version, String> {
         .map_err(|_| format!("Invalid version patch in '{}'", s))?;
     Ok(Version { major, minor, patch })
 }
-
 #[derive(Debug, Clone)]
 pub struct CitrusToml {
     pub name: String,
@@ -2439,7 +2040,6 @@ pub struct CitrusToml {
     pub files: HashMap<String, String>,
     pub imports: HashMap<String, String>,
 }
-
 pub fn parse_citrus_toml(path: &str) -> Result<CitrusToml, String> {
     let text = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read citrus.toml '{}': {}", path, e))?;
@@ -2486,20 +2086,16 @@ pub fn parse_citrus_toml(path: &str) -> Result<CitrusToml, String> {
         imports,
     })
 }
-
 #[derive(Debug, Clone)]
 struct SourceFile {
     path: String,
     statements: Vec<Stmt>,
-    
     locs: Vec<(usize, usize)>,
 }
-
 #[derive(Debug, Clone)]
 struct Project {
     files: Vec<SourceFile>,
 }
-
 fn load_project_stmts(citrus_path: &str) -> Result<Project, String> {
     let cfg = parse_citrus_toml(citrus_path)?;
     let base_dir = std::path::Path::new(citrus_path)
@@ -2538,8 +2134,6 @@ fn load_project_stmts(citrus_path: &str) -> Result<Project, String> {
     }
     Ok(Project { files })
 }
-
-
 fn resolve_local_package(pkg_name: &str, version: &str, registry_root: &str) -> Option<String> {
     let dir = format!("{}/{}/{}", registry_root, pkg_name, version);
     let toml_path = format!("{}/citrus.toml", dir);
@@ -2549,10 +2143,6 @@ fn resolve_local_package(pkg_name: &str, version: &str, registry_root: &str) -> 
         None
     }
 }
-
-
-
-
 fn list_registry_packages(registry_root: &str) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(registry_root) {
@@ -2566,14 +2156,11 @@ fn list_registry_packages(registry_root: &str) -> Vec<String> {
     }
     out
 }
-
-
 struct ImportResolver<'a> {
     cfg: &'a CitrusToml,
     import_from: Vec<(String, String)>, 
     alias_table: HashMap<String, String>,
 }
-
 impl<'a> ImportResolver<'a> {
     fn new(cfg: &'a CitrusToml) -> Self {
         let mut import_from: Vec<(String, String)> = Vec::new();
@@ -2588,12 +2175,9 @@ impl<'a> ImportResolver<'a> {
             alias_table,
         }
     }
-
-    
     fn validate_imports(&self, registry_root: &str) -> Result<(), String> {
         for (pkg, ver) in &self.import_from {
             if resolve_local_package(pkg, ver, registry_root).is_none() {
-                
                 let hint = nearest(pkg.as_str(), list_registry_packages(registry_root));
                 let mut msg = format!(
                     "Unresolved import: '{}' version '{}' not found in registry '{}'",
@@ -2607,10 +2191,6 @@ impl<'a> ImportResolver<'a> {
     }
     Ok(())
 }
-
-
-    
-    
     fn build_dependency_graph(
         &self,
         registry_root: &str,
@@ -2618,7 +2198,6 @@ impl<'a> ImportResolver<'a> {
         let mut edges: Vec<(String, String)> = Vec::new();
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut in_stack: std::collections::HashSet<String> = std::collections::HashSet::new();
-
         fn visit(
             node: &str,
             edges: &mut Vec<(String, String)>,
@@ -2635,7 +2214,6 @@ impl<'a> ImportResolver<'a> {
             in_stack.insert(node.to_string());
             if let Some(toml) = resolve_local_package(
                 node,
-                
                 &read_pkg_version(node, registry_root),
                 registry_root,
             ) {
@@ -2650,19 +2228,14 @@ impl<'a> ImportResolver<'a> {
             visited.insert(node.to_string());
             Ok(())
         }
-
         for (pkg, _ver) in &self.import_from {
             visit(pkg, &mut edges, &mut visited, &mut in_stack, registry_root)?;
         }
         Ok(edges)
     }
-
     fn alias_table(&self) -> HashMap<String, String> {
         self.alias_table.clone()
     }
-
-    
-    
     fn apply_to_defs(&self, defs: &mut Defs, registry_root: &str) {
         let mut queue: std::collections::VecDeque<(String, String)> =
             self.import_from.iter().cloned().collect();
@@ -2672,14 +2245,7 @@ impl<'a> ImportResolver<'a> {
                 continue;
             }
             if let Some(toml) = resolve_local_package(&pkg, &ver, registry_root) {
-                
-                
                 let pkg_defs = pkg_defs_for(&pkg, &toml);
-                
-                
-                
-                
-                
                 for (old, fdef) in pkg_defs.functions.iter() {
                     let name = format!("{}.{}", pkg, old);
                     defs.functions.insert(name.clone(), fdef.clone());
@@ -2704,14 +2270,6 @@ impl<'a> ImportResolver<'a> {
         }
     }
 }
-
-
-
-
-
-
-
-
 fn pkg_defs_for(_pkg_name: &str, toml_path: &str) -> Defs {
     if let Some(cached) = global_pkg_cache().lock().unwrap().get(toml_path) {
         return cached.clone();
@@ -2724,19 +2282,13 @@ fn pkg_defs_for(_pkg_name: &str, toml_path: &str) -> Defs {
         }
     }
     drop(_t);
-    
-    
-    
     global_pkg_cache()
         .lock()
         .unwrap()
         .insert(toml_path.to_string(), pkg_defs.clone());
     pkg_defs
 }
-
-
 fn read_pkg_version(pkg: &str, registry_root: &str) -> String {
-    
     let dir = format!("{}/{}", registry_root, pkg);
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -2750,43 +2302,25 @@ fn read_pkg_version(pkg: &str, registry_root: &str) -> String {
     }
     "v0.1.0".to_string()
 }
-
-
 fn collect_defs_from_project(project: &Project, defs: &mut Defs) {
     for file in &project.files {
         collect_defs(&file.statements, defs);
     }
 }
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CompileMode {
-    
     Build,
-    
     Run,
-    
     Check,
 }
-
-
-
 #[derive(Debug, Clone)]
 pub struct CompileOptions {
-    
     pub emit_ll: bool,
-    
     pub emit_object: bool,
-    
     pub optimize: bool,
-    
     pub release: bool,
-    
-    
     pub verbose: bool,
 }
-
 impl Default for CompileOptions {
     fn default() -> Self {
         CompileOptions {
@@ -2798,52 +2332,27 @@ impl Default for CompileOptions {
         }
     }
 }
-
-
-
 #[derive(Debug, Default, Clone)]
 pub struct CompileReport {
-    
     pub removed_functions: usize,
-    
     pub lock_written: bool,
-    
     pub cache_populated: bool,
-    
     pub emitted_ll: Option<String>,
-    
     pub emitted_obj: Option<String>,
-    
     pub emitted_exe: Option<String>,
-    
-    
     pub codegen_warnings: Vec<String>,
-    
-    
     pub warnings: Vec<String>,
-    
     pub executed: bool,
 }
-
-
 struct LoadedProject {
     stmts: Vec<Stmt>,
     defs: Defs,
     cfg: Option<CitrusToml>,
-    
     edges: Vec<(String, String)>,
-    
     base_dir: Option<String>,
-    
     stmt_locs: Option<Vec<(usize, usize)>>,
-    
     file: Option<String>,
 }
-
-
-
-
-
 fn load_target(path: &str) -> Result<LoadedProject, String> {
     if path.ends_with("citrus.toml") {
         let cfg = parse_citrus_toml(path)?;
@@ -2863,7 +2372,6 @@ fn load_target(path: &str) -> Result<LoadedProject, String> {
         }
         let mut defs = Defs::new();
         collect_defs_from_project(&project, &mut defs);
-
         let resolver = ImportResolver::new(&cfg);
         {
             let _t = StageTimer::new("import_resolve");
@@ -2921,19 +2429,6 @@ fn load_target(path: &str) -> Result<LoadedProject, String> {
         })
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
     let fnames: Vec<String> = defs.functions.keys().cloned().collect();
     for fname in &fnames {
@@ -2944,7 +2439,6 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
             };
             (fdef.body.clone(), fdef.params.clone(), fdef.constraints.clone(), fdef.type_params.clone())
         };
-        
         let mut env_vars: HashMap<String, Type> = HashMap::new();
         let mut env_cons: HashMap<String, Vec<String>> = HashMap::new();
         for (tv, iface) in &constraints {
@@ -2953,7 +2447,6 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
         for (pname, ptype) in &params {
             env_vars.insert(pname.clone(), type_from_str(ptype, defs));
         }
-        
         let mut ret_type: Option<Type> = None;
         let mut env = env_vars.clone();
         scan_return_types_env(&body, defs, &mut env, &env_cons, &mut ret_type);
@@ -2990,7 +2483,6 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
             }
         }
     }
-    
     let sname_list: Vec<String> = defs.structs.keys().cloned().collect();
     for sname in &sname_list {
         let methods: Vec<(String, Vec<Stmt>, Vec<(String, String)>, Vec<(String, String)>)> = {
@@ -3061,23 +2553,8 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
     }
     Ok(())
 }
-
-
-
-
-
-
-
-
-
 fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
-    
-    
     let mut call_info: HashMap<String, Vec<(usize, String)>> = HashMap::new();
-
-    
-    
-    
     {
         let fnames: Vec<String> = defs.functions.keys().cloned().collect();
         for fname in &fnames {
@@ -3096,7 +2573,6 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             for (tv, iface) in &constraints {
                 env_cons.entry(tv.clone()).or_default().push(iface.clone());
             }
-            
             let mut untyped_indices: Vec<(usize, String)> = Vec::new();
             for (i, (pname, ptype)) in params.iter().enumerate() {
                 if ptype == "_" {
@@ -3107,14 +2583,9 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                     env.insert(pname.clone(), type_from_str(ptype, defs));
                 }
             }
-            
-            
-            
             infer_params_from_body(&body, &mut env, defs, &env_cons, &mut call_info, fname, &untyped_indices);
         }
     }
-
-    
     fn infer_params_from_body(
         stmts: &[Stmt],
         env: &mut HashMap<String, Type>,
@@ -3166,7 +2637,6 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             }
         }
     }
-
     fn infer_expr_params(
         e: &Expr,
         env: &mut HashMap<String, Type>,
@@ -3181,11 +2651,8 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 let lt = infer_type(left, env, defs, env_cons).unwrap_or(Type::Unknown);
                 let rt = infer_type(right, env, defs, env_cons).unwrap_or(Type::Unknown);
                 if let Some((_, result_ty)) = resolve_operator_interface(defs, &lt, &rt, op, env_cons) {
-                    
-                    
                     let resolved_lt = if matches!(&lt, Type::Var(_)) { &result_ty } else { &lt };
                     let resolved_rt = if matches!(&rt, Type::Var(_)) { &result_ty } else { &rt };
-                    
                     if let Type::Var(tv) = &lt {
                         if !matches!(resolved_lt, Type::Var(_)) && *resolved_lt != Type::Unknown {
                             if let Some((idx, _)) = untyped_indices.iter().find(|(_, tv2)| tv2 == tv) {
@@ -3240,7 +2707,6 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             _ => {}
         }
     }
-
     fn scan_stmts_for_calls(
         stmts: &[Stmt],
         env: &mut HashMap<String, Type>,
@@ -3254,7 +2720,6 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 }
                 Stmt::Let { name, value, type_hint, .. } => {
                     scan_expr_for_calls(value, env, defs, call_info);
-                    
                     if let Some(th) = type_hint {
                         env.insert(name.clone(), type_from_str(th, defs));
                     } else if let Ok(t) = infer_type(value, env, defs, &HashMap::new()) {
@@ -3301,7 +2766,6 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             }
         }
     }
-
     fn scan_expr_for_calls(
         e: &Expr,
         env: &HashMap<String, Type>,
@@ -3362,8 +2826,6 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             _ => {}
         }
     }
-
-    
     for (fname, fdef) in defs.functions.iter() {
         let mut env: HashMap<String, Type> = HashMap::new();
         for (pname, ptype) in &fdef.params {
@@ -3371,12 +2833,8 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
         }
         scan_stmts_for_calls(&fdef.body, &mut env, defs, &mut call_info);
     }
-
-    
     let mut empty_env: HashMap<String, Type> = HashMap::new();
     scan_stmts_for_calls(stmts, &mut empty_env, defs, &mut call_info);
-
-    
     let mut updates: HashMap<String, Vec<(usize, String)>> = HashMap::new();
     for (fname, entries) in &call_info {
         let mut per_param: HashMap<usize, Vec<&str>> = HashMap::new();
@@ -3391,14 +2849,8 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                     .or_default()
                     .push((*idx, first.to_string()));
             }
-            
-            
-            
-            
         }
     }
-
-    
     for (fname, param_updates) in &updates {
         if let Some(fdef) = defs.functions.get_mut(fname) {
             for (idx, ts) in param_updates {
@@ -3408,10 +2860,8 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             }
         }
     }
-
     Ok(())
 }
-
 fn scan_return_types_env(
     stmts: &[Stmt],
     defs: &Defs,
@@ -3438,7 +2888,6 @@ fn scan_return_types_env(
                 if t == Type::Unknown { continue; }
                 match ret_type {
                     Some(prev) if !type_eq(prev, &t) => {
-                        
                     }
                     None => *ret_type = Some(t),
                     _ => {}
@@ -3451,7 +2900,6 @@ fn scan_return_types_env(
                 }
             }
             Stmt::Expr(e) => {
-                
                 match infer_type(e, env_vars, defs, env_cons) {
                     Ok(t) if t != Type::Unknown => {
                         match ret_type {
@@ -3475,10 +2923,6 @@ fn scan_return_types_env(
                 scan_return_types_env(body, defs, env_vars, env_cons, ret_type);
             }
             Stmt::Let { name, value, type_hint, .. } => {
-                
-                
-                
-                
                 if let Some(th) = type_hint {
                     env_vars.insert(name.clone(), type_from_str(th, defs));
                 } else if let Ok(t) = infer_type(value, env_vars, defs, env_cons) {
@@ -3491,15 +2935,6 @@ fn scan_return_types_env(
         }
     }
 }
-
-
-
-
-
-
-
-
-
 pub fn compile_pipeline(
     path: &str,
     mode: CompileMode,
@@ -3507,8 +2942,6 @@ pub fn compile_pipeline(
 ) -> Result<CompileReport, String> {
     let mut report = CompileReport::default();
     let _t_load = StageTimer::new("load+parse+import");
-
-    
     let LoadedProject {
         mut stmts,
         mut defs,
@@ -3519,8 +2952,6 @@ pub fn compile_pipeline(
         file: file_name,
     } = load_target(path)?;
     drop(_t_load);
-
-    
     if let (Some(cfg), Some(base_dir)) = (cfg.as_ref(), base_dir.as_ref()) {
         if write_lock_file(base_dir, cfg, &edges).is_ok() {
             report.lock_written = true;
@@ -3528,90 +2959,52 @@ pub fn compile_pipeline(
         populate_package_cache(cfg, REGISTRY_ROOT);
         report.cache_populated = true;
     }
-
-    
     {
         let _t = StageTimer::new("resolve_operators_defs");
         resolve_operators_defs(&mut defs);
     }
-
-    
-    
-    
     {
         let _t = StageTimer::new("infer_return_types");
         infer_function_return_types(&mut defs).map_err(|e| format!("error[type]: {}", e))?;
     }
-
-    
     {
         let _t = StageTimer::new("check_interface_conformance");
         check_interface_conformance(&defs).map_err(|e| format!("error[type]: {}", e))?;
     }
-
-    
     {
         let _t = StageTimer::new("resolve_operators_stmts");
         let empty_cons: HashMap<String, Vec<String>> = HashMap::new();
         let empty_env: HashMap<String, Type> = HashMap::new();
         resolve_operators_stmts(&mut stmts, &defs, &empty_cons, &empty_env);
     }
-
-    
-    
-    
-    
     {
         let _t = StageTimer::new("infer_untyped_params");
         infer_untyped_params(&stmts, &mut defs)?;
-        
         infer_function_return_types(&mut defs)?;
     }
-
-    
-    
     let loc = match (&stmt_locs, &file_name) {
         (Some(locs), Some(f)) => make_loc_map(&stmts, locs, f),
         _ => LocMap::default(),
     };
-
-    
-    
-    
-    
     {
         let _t = StageTimer::new("type_check_located");
         type_check_located(&stmts, &mut defs, &loc)?;
     }
-
-    
-    
-    
     {
         let mut warn_diags: Vec<Diagnostic> = Vec::new();
         collect_warnings(&stmts, &cfg, &loc, &mut warn_diags);
         report.warnings = warn_diags.iter().map(render_diagnostic).collect();
     }
-
-    
     if mode == CompileMode::Check {
         return Ok(report);
     }
-
-    
     {
         let _t = StageTimer::new("monomorphize_all");
         monomorphize_all(&mut defs, &mut stmts).map_err(|e| format!("error[type]: {}", e))?;
     }
-
-    
     if options.optimize {
         report.removed_functions = eliminate_dead_functions(&mut defs, &stmts);
     }
-
-    
-    
-    
     let memory = {
         let _t = StageTimer::new("memory_analyze");
         memory_analyze(&stmts, &defs).map_err(|e| format!("error[memory]: {}", e))?
@@ -3619,16 +3012,12 @@ pub fn compile_pipeline(
     if options.verbose {
         report_memory(&memory);
     }
-
-    
     let base = path
         .trim_end_matches(".lime")
         .trim_end_matches("citrus.toml")
         .trim_end_matches('/')
         .trim_end_matches('\\');
     let base = if base.is_empty() { "output" } else { base };
-
-    
     let mut ll_path: Option<String> = None;
     if options.emit_ll || options.emit_object {
         let _t_codegen = StageTimer::new("codegen_ll");
@@ -3639,7 +3028,6 @@ pub fn compile_pipeline(
             .map_err(|e| format!("error[codegen]: failed to write {}: {}", ll_path_str, e))?;
         report.emitted_ll = Some(ll_path_str.clone());
         ll_path = Some(ll_path_str);
-
         let n = report.codegen_warnings.len();
         if n > 0 {
             eprintln!(
@@ -3653,11 +3041,6 @@ pub fn compile_pipeline(
             } else {
                 eprintln!("  (re-run with --verbose for details)");
             }
-
-            
-            
-            
-            
             if options.emit_object {
                 return Err(format!(
                     "error[codegen]: {} function(s) could not be fully lowered; refusing to emit object file:\n  - {}",
@@ -3667,13 +3050,9 @@ pub fn compile_pipeline(
             }
         }
     }
-
-    
     if let Some(ref ll) = ll_path {
         if options.emit_object {
             let opt_level = if options.release { "2" } else { "0" };
-            
-            
             {
                 let _t = StageTimer::new("compile_ir");
                 let obj_ext = if cfg!(target_os = "windows") { "obj" } else { "o" };
@@ -3688,17 +3067,12 @@ pub fn compile_pipeline(
                 match status {
                     Ok(s) if s.success() => {
                         report.emitted_obj = Some(obj_path.clone());
-                        
                         {
                             let _t_link = StageTimer::new("link");
                             let exe_suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
                             let exe_path = format!("{}{}", base, exe_suffix);
                             if cfg!(target_os = "windows") {
-                                
-                                
-                                
                                 let runtime_obj = compile_runtime_c()?;
-
                                 let link_result = std::process::Command::new(llvm_tool("lld-link"))
                                     .arg(&obj_path)
                                     .arg(&runtime_obj)
@@ -3740,8 +3114,6 @@ pub fn compile_pipeline(
             }
         }
     }
-
-    
     if mode == CompileMode::Run {
         if defs.functions.contains_key("main") {
             call_function("main", Vec::new(), &defs)
@@ -3753,20 +3125,14 @@ pub fn compile_pipeline(
         }
         report.executed = true;
     }
-
     Ok(report)
 }
-
-
 fn compile_runtime_c() -> Result<String, String> {
     let tmp_dir = std::env::temp_dir().join("lime_runtime");
     let _ = std::fs::create_dir_all(&tmp_dir);
-
     let c_path = tmp_dir.join("runtime.c");
     let h_path = tmp_dir.join("runtime.h");
     let obj_path = tmp_dir.join("runtime.obj");
-
-    
     let need_compile = || -> bool {
         if !obj_path.exists() { return true; }
         let src_modified = std::fs::metadata(&c_path).and_then(|m| m.modified()).ok();
@@ -3776,13 +3142,11 @@ fn compile_runtime_c() -> Result<String, String> {
             _ => true,
         }
     };
-
     if need_compile() {
         std::fs::write(&c_path, RUNTIME_C_SOURCE)
             .map_err(|e| format!("failed to write runtime.c: {}", e))?;
         std::fs::write(&h_path, RUNTIME_H_SOURCE)
             .map_err(|e| format!("failed to write runtime.h: {}", e))?;
-
         let clang = llvm_tool("clang");
         let status = std::process::Command::new(&clang)
             .arg("-O2")
@@ -3792,16 +3156,12 @@ fn compile_runtime_c() -> Result<String, String> {
             .arg(obj_path.to_str().unwrap())
             .status()
             .map_err(|e| format!("failed to launch clang: {}", e))?;
-
         if !status.success() {
             return Err("clang compilation of runtime.c failed".to_string());
         }
     }
-
     Ok(obj_path.to_str().unwrap().to_string())
 }
-
-
 fn llvm_bindir() -> Option<String> {
     for var in &["LLVM_SYS_221_PREFIX", "LIME_LLVM_PREFIX"] {
         if let Ok(prefix) = std::env::var(var) {
@@ -3811,14 +3171,12 @@ fn llvm_bindir() -> Option<String> {
             }
         }
     }
-    
     if let Ok(paths) = std::env::var("PATH") {
         for dir in std::env::split_paths(&paths) {
             if dir.join("opt.exe").exists() || dir.join("opt").exists() {
                 return Some(dir.to_str().unwrap().to_string());
             }
         }
-        
         for dir in std::env::split_paths(&paths) {
             let llvm_config = dir.join("llvm-config.exe");
             if llvm_config.exists() {
@@ -3835,12 +3193,9 @@ fn llvm_bindir() -> Option<String> {
     }
     None
 }
-
-
 fn llvm_tool(name: &str) -> String {
     if let Some(bindir) = llvm_bindir() {
         let bindir_path = std::path::Path::new(&bindir);
-        
         for candidate in &[name, &format!("{}.exe", name)] {
             let path = bindir_path.join(candidate);
             if path.exists() {
@@ -3850,18 +3205,9 @@ fn llvm_tool(name: &str) -> String {
     }
     name.to_string()
 }
-
-
-
-
-
-
-
 fn eliminate_dead_functions(defs: &mut Defs, top_stmts: &[Stmt]) -> usize {
     let mut reachable: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut worklist: Vec<String> = Vec::new();
-
-    
     if defs.functions.contains_key("main") {
         worklist.push("main".to_string());
     }
@@ -3874,7 +3220,6 @@ fn eliminate_dead_functions(defs: &mut Defs, top_stmts: &[Stmt]) -> usize {
             worklist.push(c);
         }
     }
-
     while let Some(name) = worklist.pop() {
         if !reachable.insert(name.clone()) {
             continue;
@@ -3891,17 +3236,13 @@ fn eliminate_dead_functions(defs: &mut Defs, top_stmts: &[Stmt]) -> usize {
             }
         }
     }
-
-    
     if reachable.is_empty() {
         return 0;
     }
-
     let before = defs.functions.len();
     defs.functions.retain(|name, _| reachable.contains(name));
     before - defs.functions.len()
 }
-
 fn collect_called_names_stmt(s: &Stmt, out: &mut std::collections::HashSet<String>) {
     match s {
         Stmt::Let { value, .. } => collect_called_names_expr(value, out),
@@ -3936,7 +3277,6 @@ fn collect_called_names_stmt(s: &Stmt, out: &mut std::collections::HashSet<Strin
         _ => {}
     }
 }
-
 fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<String>) {
     match e {
         Expr::Call { func, args } => {
@@ -3973,18 +3313,6 @@ fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<Strin
         _ => {}
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
 fn stmt_idents(out: &mut Vec<String>, s: &Stmt) {
     match s {
         Stmt::Let { value, .. } => expr_vars(value, out),
@@ -4030,21 +3358,14 @@ fn stmt_idents(out: &mut Vec<String>, s: &Stmt) {
         _ => {}
     }
 }
-
-
 fn ident_used_in_stmt(name: &str, s: &Stmt) -> bool {
     let mut idents = Vec::new();
     stmt_idents(&mut idents, s);
     idents.iter().any(|i| i == name)
 }
-
-
-
 fn is_terminal(s: &Stmt) -> bool {
     matches!(s, Stmt::Return { .. })
 }
-
-
 fn warn_unused_locals(stmts: &[Stmt], loc: &LocMap, diags: &mut Vec<Diagnostic>) {
     let n = stmts.len();
     for i in 0..n {
@@ -4074,10 +3395,6 @@ fn warn_unused_locals(stmts: &[Stmt], loc: &LocMap, diags: &mut Vec<Diagnostic>)
         }
     }
 }
-
-
-
-
 fn warn_unreachable(stmts: &[Stmt], loc: &LocMap, diags: &mut Vec<Diagnostic>) {
     let mut terminal = false;
     for s in stmts {
@@ -4117,22 +3434,14 @@ fn warn_unreachable(stmts: &[Stmt], loc: &LocMap, diags: &mut Vec<Diagnostic>) {
         }
     }
 }
-
-
-
-
 fn collect_warnings(
     stmts: &[Stmt],
     cfg: &Option<CitrusToml>,
     loc: &LocMap,
     diags: &mut Vec<Diagnostic>,
 ) {
-    
     let mut called: std::collections::HashSet<String> = std::collections::HashSet::new();
     walk_warnings(stmts, cfg, loc, diags, &mut called);
-
-    
-    
     if let Some(cfg) = cfg {
         for alias in cfg.imports.keys() {
             let used = called
@@ -4147,10 +3456,6 @@ fn collect_warnings(
         }
     }
 }
-
-
-
-
 fn walk_warnings(
     stmts: &[Stmt],
     cfg: &Option<CitrusToml>,
@@ -4193,9 +3498,6 @@ fn walk_warnings(
         }
     }
 }
-
-
-
 fn write_lock_file(
     base_dir: &str,
     cfg: &CitrusToml,
@@ -4207,8 +3509,6 @@ fn write_lock_file(
     out.push_str("[root]\n");
     out.push_str(&format!("name = \"{}\"\n", cfg.name));
     out.push_str(&format!("version = \"{}\"\n\n", cfg.version));
-
-    
     let mut pkgs: Vec<(String, String)> = cfg.imports.iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
@@ -4221,8 +3521,6 @@ fn write_lock_file(
         out.push_str(&format!("resolved = \"{}\"\n", resolved));
         out.push_str(&format!("source = \"{}/{}/{}\"\n\n", REGISTRY_ROOT, name, resolved));
     }
-
-    
     let mut sorted_edges: Vec<(String, String)> = edges.to_vec();
     sorted_edges.sort();
     sorted_edges.dedup();
@@ -4232,14 +3530,9 @@ fn write_lock_file(
             out.push_str(&format!("edge = [\"{}\", \"{}\"]\n", from, to));
         }
     }
-
     let lock_path = format!("{}/citrus.lock", base_dir);
     fs::write(&lock_path, out).map_err(|e| format!("{}: {}", lock_path, e))
 }
-
-
-
-
 fn populate_package_cache(cfg: &CitrusToml, registry_root: &str) {
     let cache_root = ".citrus/cache";
     for (pkg, _requested) in &cfg.imports {
@@ -4255,11 +3548,6 @@ fn populate_package_cache(cfg: &CitrusToml, registry_root: &str) {
         }
     }
 }
-
-
-
-
-
 pub fn format_lime_source(source: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut prev_blank = false;
@@ -4274,9 +3562,6 @@ pub fn format_lime_source(source: &str) -> String {
             continue;
         }
         prev_blank = false;
-
-        
-        
         let mut indent_cols = 0usize;
         for ch in trimmed_end.chars() {
             match ch {
@@ -4289,7 +3574,6 @@ pub fn format_lime_source(source: &str) -> String {
         let content = trimmed_end.trim_start();
         out.push(format!("{}{}", "    ".repeat(level), content));
     }
-    
     while matches!(out.last(), Some(l) if l.is_empty()) {
         out.pop();
     }
@@ -4297,8 +3581,6 @@ pub fn format_lime_source(source: &str) -> String {
     result.push('\n');
     result
 }
-
-
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Int(i64),
@@ -4317,74 +3599,48 @@ enum Value {
         name: String,
         fields: Vec<(String, Value)>,
     },
-    
-    
-    
     Future {
         func: String,
         args: Vec<Value>,
     },
     Tuple(Vec<Value>),
 }
-
-
 #[derive(Clone)]
 struct FunctionDef {
     type_params: Vec<String>,
-    
     constraints: Vec<(String, String)>,
     params: Vec<(String, String)>,
     return_type: Option<String>,
     body: Vec<Stmt>,
-    
     is_async: bool,
 }
-
-
 #[derive(Clone)]
 struct StructDef {
-    
     type_params: Vec<String>,
-    
     constraints: Vec<(String, String)>,
-    
     fields: Vec<(String, String)>,
-    
     methods: HashMap<String, FunctionDef>,
 }
-
-
 #[derive(Clone)]
 struct InterfaceDef {
     type_params: Vec<String>,
     constraints: Vec<(String, String)>,
     methods: Vec<InterfaceMethod>,
 }
-
-
 #[derive(Clone)]
 struct Defs {
-    
     structs: HashMap<String, StructDef>,
-    
     state_variants: HashMap<String, String>,
-    
     variant_fields: HashMap<String, Vec<(String, String)>>,
-    
     states: HashMap<String, Vec<String>>,
-    
     enum_type_params: HashMap<String, Vec<String>>,
     functions: HashMap<String, FunctionDef>,
-    
     interfaces: HashMap<String, InterfaceDef>,
-    
-    
     fn_index: HashMap<Symbol, String>,   
     fn_bare: HashMap<String, Symbol>,    
     type_index: HashMap<Symbol, String>, 
     type_bare: HashMap<String, Symbol>,  
 }
-
 impl Defs {
     fn new() -> Self {
         let mut defs = Defs {
@@ -4400,8 +3656,6 @@ impl Defs {
             type_index: HashMap::new(),
             type_bare: HashMap::new(),
         };
-        
-        
         defs.state_variants.insert("Success".to_string(), "Result".to_string());
         defs.state_variants.insert("Error".to_string(), "Result".to_string());
         defs.states.insert(
@@ -4411,7 +3665,6 @@ impl Defs {
         defs.variant_fields.insert("Success".to_string(), vec![("_0".to_string(), "T".to_string())]);
         defs.variant_fields.insert("Error".to_string(), vec![("_0".to_string(), "E".to_string())]);
         defs.enum_type_params.insert("Result".to_string(), vec!["T".to_string(), "E".to_string()]);
-
         defs.state_variants.insert("Some".to_string(), "Option".to_string());
         defs.state_variants.insert("None".to_string(), "Option".to_string());
         defs.states.insert(
@@ -4423,21 +3676,13 @@ impl Defs {
         defs.enum_type_params.insert("Option".to_string(), vec!["T".to_string()]);
         defs
     }
-
-    
     fn add_function(&mut self, name: String, fdef: FunctionDef) {
         self.add_function_index_only(name.clone());
         self.functions.insert(name, fdef);
     }
-
-    
     fn add_type(&mut self, name: String) {
         self.add_type_index_only(name.clone());
     }
-
-    
-    
-    
     fn resolve_function(&self, name: &str) -> Option<String> {
         if is_runtime_builtin(name) {
             return None;
@@ -4452,9 +3697,6 @@ impl Defs {
             None => None,
         }
     }
-
-    
-    
     fn resolve_type(&self, name: &str) -> Option<String> {
         if self.structs.contains_key(name) || self.states.contains_key(name) || self.interfaces.contains_key(name) {
             return Some(name.to_string());
@@ -4466,10 +3708,6 @@ impl Defs {
             None => None,
         }
     }
-
-    
-    
-    
     fn reindex(&mut self) {
         let func_names: Vec<String> = self.functions.keys().cloned().collect();
         let type_names: Vec<String> = self
@@ -4490,7 +3728,6 @@ impl Defs {
             self.add_type_index_only(name);
         }
     }
-
     fn add_function_index_only(&mut self, name: String) {
         let sym = intern(&name);
         self.fn_index.insert(sym, name.clone());
@@ -4500,7 +3737,6 @@ impl Defs {
             .and_modify(|e| *e = Symbol::AMBIGUOUS)
             .or_insert(sym);
     }
-
     fn add_type_index_only(&mut self, name: String) {
         let sym = intern(&name);
         self.type_index.insert(sym, name.clone());
@@ -4511,16 +3747,12 @@ impl Defs {
             .or_insert(sym);
     }
 }
-
-
-
 fn bare_name(name: &str) -> String {
     match name.rfind('.') {
         Some(i) => name[i + 1..].to_string(),
         None => name.to_string(),
     }
 }
-
 fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
     for stmt in stmts {
         match stmt {
@@ -4647,7 +3879,6 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
         }
     }
 }
-
 impl Value {
     fn to_string(&self) -> String {
         match self {
@@ -4685,11 +3916,6 @@ impl Value {
         }
     }
 }
-
-
-
-
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Type {
     Int,
@@ -4709,15 +3935,11 @@ enum Type {
     Unknown,
     Var(String),
 }
-
-
 #[derive(Debug, Clone)]
 struct TypeEnv {
     vars: HashMap<String, Type>,
-    
     constraints: HashMap<String, Vec<String>>,
 }
-
 impl TypeEnv {
     fn new() -> Self {
         TypeEnv {
@@ -4725,24 +3947,17 @@ impl TypeEnv {
             constraints: HashMap::new(),
         }
     }
-
     fn get(&self, name: &str) -> Option<&Type> {
         self.vars.get(name)
     }
-
     fn insert(&mut self, name: String, ty: Type) {
         self.vars.insert(name, ty);
     }
-
     fn add_constraint(&mut self, tv: String, iface: String) {
         self.constraints.entry(tv).or_default().push(iface);
     }
 }
-
-
 fn type_from_str(s: &str, defs: &Defs) -> Type {
-    
-    
     if let Some(cached) = global_type_cache().lock().unwrap().get(s) {
         return cached.clone();
     }
@@ -4750,9 +3965,7 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
     global_type_cache().lock().unwrap().insert(s.to_string(), t.clone());
     t
 }
-
 fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
-    
     if let Some(inner) = s.strip_prefix("Option(") {
         if let Some(inner) = inner.strip_suffix(')') {
             return Type::Option(Box::new(type_from_str(inner, defs)));
@@ -4761,13 +3974,11 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
     if let Some(inner) = s.strip_suffix('?') {
         return Type::Option(Box::new(type_from_str(inner, defs)));
     }
-    
     if let Some(inner) = s.strip_prefix("List(") {
         if let Some(inner) = inner.strip_suffix(')') {
             return Type::List(Box::new(type_from_str(inner, defs)));
         }
     }
-    
     if s.starts_with('(') && s.ends_with(')') {
         let inner = &s[1..s.len()-1];
         if !inner.is_empty() {
@@ -4789,7 +4000,6 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
             return Type::Tuple(elems);
         }
     }
-
     match s {
         "int" | "i32" | "i" => Type::Int,
         "long" | "i64" | "l" => Type::Long,
@@ -4798,20 +4008,15 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
         "str" | "i8*" | "s" => Type::String,
         "void" | "unit" | "u" => Type::Unit,
         _ => {
-            
             let base = match s.find('(') {
                 Some(i) => &s[..i],
                 None => s,
             };
             if defs.structs.contains_key(base) {
-                
-                
-                
                 Type::Struct(s.to_string())
             } else if defs.states.contains_key(base) {
                 Type::State(s.to_string())
             } else if defs.interfaces.contains_key(base) {
-                
                 let args = if let Some(i) = s.find('(') {
                     let inner = &s[i + 1..];
                     let inner = inner.strip_suffix(')').unwrap_or(inner);
@@ -4828,13 +4033,6 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
                 };
                 Type::Interface(base.to_string(), args)
             } else {
-                
-                
-                
-                
-                
-                
-                
                 if let Some(qualified) = defs.resolve_type(base) {
                     type_from_str(&s.replacen(base, &qualified, 1), defs)
                 } else {
@@ -4844,11 +4042,6 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
         }
     }
 }
-
-
-
-
-
 fn substitute_vars_with_unknown(ty: &Type) -> Type {
     match ty {
         Type::Var(_) => Type::Unknown,
@@ -4861,10 +4054,6 @@ fn substitute_vars_with_unknown(ty: &Type) -> Type {
         other => other.clone(),
     }
 }
-
-
-
-
 fn resolve_field_type(state_type: &str, field_type: &str, defs: &Defs) -> Type {
     let concrete_args = generic_args_of(state_type);
     if concrete_args.is_empty() {
@@ -4875,7 +4064,6 @@ fn resolve_field_type(state_type: &str, field_type: &str, defs: &Defs) -> Type {
         Some(tp) => tp,
         None => return type_from_str(field_type, defs),
     };
-    
     for (i, param) in type_params.iter().enumerate() {
         if field_type.trim() == param.as_str() {
             if let Some(arg) = concrete_args.get(i) {
@@ -4883,7 +4071,6 @@ fn resolve_field_type(state_type: &str, field_type: &str, defs: &Defs) -> Type {
             }
         }
     }
-    
     let mut result = field_type.to_string();
     for (i, param) in type_params.iter().enumerate() {
         if let Some(arg) = concrete_args.get(i) {
@@ -4892,8 +4079,6 @@ fn resolve_field_type(state_type: &str, field_type: &str, defs: &Defs) -> Type {
     }
     type_from_str(&result, defs)
 }
-
-
 fn type_to_string(ty: &Type) -> String {
     match ty {
         Type::Int => "int".to_string(),
@@ -4920,11 +4105,6 @@ fn type_to_string(ty: &Type) -> String {
         }
     }
 }
-
-
-
-
-
 fn type_mismatch_msg(summary: &str, expected: &Type, received: &Type) -> String {
     format!(
         "Type error: {}\n\nexpected:\n    {}\n\nreceived:\n    {}",
@@ -4933,18 +4113,13 @@ fn type_mismatch_msg(summary: &str, expected: &Type, received: &Type) -> String 
         type_to_string(received)
     )
 }
-
 fn type_eq(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Unknown, _) | (_, Type::Unknown) => true,
         (Type::Option(inner_a), Type::Option(inner_b)) => type_eq(inner_a, inner_b),
         (Type::List(inner_a), Type::List(inner_b)) => type_eq(inner_a, inner_b),
         (Type::Array(inner_a), Type::Array(inner_b)) => type_eq(inner_a, inner_b),
-        
         (Type::Var(_), _) | (_, Type::Var(_)) => true,
-        
-        
-        
         (Type::Struct(a), Type::Struct(b)) => struct_base_eq(a, b),
         (Type::State(a), Type::State(b)) => struct_base_eq(a, b),
         (Type::Option(inner), Type::State(name)) | (Type::State(name), Type::Option(inner)) => {
@@ -4953,20 +4128,12 @@ fn type_eq(a: &Type, b: &Type) -> bool {
         _ => a == b,
     }
 }
-
-
-
-
 fn struct_base(name: &str) -> String {
     match name.find('(') {
         Some(i) => name[..i].to_string(),
         None => name.to_string(),
     }
 }
-
-
-
-
 fn struct_base_eq(a: &str, b: &str) -> bool {
     let ab = match a.find('(') {
         Some(i) => &a[..i],
@@ -4978,9 +4145,6 @@ fn struct_base_eq(a: &str, b: &str) -> bool {
     };
     ab == bb
 }
-
-
-
 fn generic_args_of(name: &str) -> Vec<String> {
     let inner = match name.find('(') {
         Some(i) => &name[i + 1..],
@@ -4992,9 +4156,6 @@ fn generic_args_of(name: &str) -> Vec<String> {
     }
     inner.split(',').map(|a| a.trim().to_string()).collect()
 }
-
-
-
 fn method_sig_matches(defs: &Defs, mdef: &FunctionDef, im: &InterfaceMethod) -> bool {
     if mdef.params.len() != im.params.len() {
         return false;
@@ -5016,9 +4177,6 @@ fn method_sig_matches(defs: &Defs, mdef: &FunctionDef, im: &InterfaceMethod) -> 
     };
     type_eq(&got_ret, &want_ret)
 }
-
-
-
 fn struct_satisfies_interface(defs: &Defs, sname: &str, iface_name: &str) -> bool {
     let sdef = match defs.structs.get(sname) {
         Some(s) => s,
@@ -5036,17 +4194,8 @@ fn struct_satisfies_interface(defs: &Defs, sname: &str, iface_name: &str) -> boo
     }
     true
 }
-
-
 fn subst_type(t: &str, type_params: &[String], arg: &str) -> String {
-    
-    
-    
     let concrete_args = split_top_args(arg);
-
-    
-    
-    
     if let Some(open) = t.find('(') {
         if let Some(close) = t.rfind(')') {
             if open < close {
@@ -5070,7 +4219,6 @@ fn subst_type(t: &str, type_params: &[String], arg: &str) -> String {
             }
         }
     }
-    
     if type_params.iter().any(|tp| tp.as_str() == t) {
         if let Some(idx) = type_params.iter().position(|tp| tp.as_str() == t) {
             if let Some(c) = concrete_args.get(idx) {
@@ -5080,9 +4228,6 @@ fn subst_type(t: &str, type_params: &[String], arg: &str) -> String {
     }
     t.to_string()
 }
-
-
-
 fn split_top_args(s: &str) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     let mut depth: i32 = 0;
@@ -5109,9 +4254,6 @@ fn split_top_args(s: &str) -> Vec<String> {
     }
     args
 }
-
-
-
 fn expr_from_path(path: &str) -> Expr {
     let mut parts: Vec<&str> = path.split('.').collect();
     let mut expr = Expr::Ident(parts.remove(0).to_string());
@@ -5123,10 +4265,6 @@ fn expr_from_path(path: &str) -> Expr {
     }
     expr
 }
-
-
-
-
 fn dispatch_method(
     obj: Value,
     method: &str,
@@ -5148,10 +4286,6 @@ fn dispatch_method(
         other => Err(format!("Type {:?} has no method '{}'", other, method)),
     }
 }
-
-
-
-
 fn eval_struct_method_or_call(
     name: &str,
     fields: &Vec<(String, Value)>,
@@ -5165,8 +4299,6 @@ fn eval_struct_method_or_call(
         Err(e) => Err(e),
     }
 }
-
-
 fn struct_implements_interface_with(
     defs: &Defs,
     sname: &str,
@@ -5203,9 +4335,6 @@ fn struct_implements_interface_with(
     }
     true
 }
-
-
-
 fn resolve_operator_interface(
     defs: &Defs,
     lt: &Type,
@@ -5236,21 +4365,12 @@ fn resolve_operator_interface(
                     return Some((method, rty));
                 }
             }
-            
-            
-            
-            
             if a == "_" {
                 return None;
             }
         }
         return None;
     }
-    
-    
-    
-    
-    
     if lt == &Type::Var("_".to_string()) || rt == &Type::Var("_".to_string()) {
         let concrete = if lt != &Type::Var("_".to_string()) { lt } else { rt };
         return match concrete {
@@ -5278,12 +4398,10 @@ fn resolve_operator_interface(
             _ => None,
         };
     }
-
     let sname = match (lt, rt) {
         (Type::Struct(a), Type::Struct(b)) if a == b => a.clone(),
         _ => return None,
     };
-    
     match op {
         "+" => {
             if struct_implements_interface_with(defs, &sname, "Add", &sname) {
@@ -5309,13 +4427,6 @@ fn resolve_operator_interface(
         _ => None,
     }
 }
-
-
-
-
-
-
-
 fn resolve_operators_stmts(
     stmts: &mut [Stmt],
     defs: &Defs,
@@ -5327,12 +4438,7 @@ fn resolve_operators_stmts(
         resolve_operators_stmt(s, defs, &mut env, constraints);
     }
 }
-
-
-
 fn resolve_operators_defs(defs: &mut Defs) {
-    
-    
     let mut fworks: Vec<(
         String,
         HashMap<String, Vec<String>>,
@@ -5356,7 +4462,6 @@ fn resolve_operators_defs(defs: &mut Defs) {
             fdef.body = body;
         }
     }
-
     let mut mworks: Vec<(String, String, HashMap<String, Vec<String>>, HashMap<String, Type>, Vec<Stmt>)> =
         Vec::new();
     for (sname, sdef) in defs.structs.iter() {
@@ -5390,7 +4495,6 @@ fn resolve_operators_defs(defs: &mut Defs) {
         }
     }
 }
-
 fn resolve_operators_stmt(
     s: &mut Stmt,
     defs: &Defs,
@@ -5418,7 +4522,6 @@ fn resolve_operators_stmt(
             resolve_operators_stmts(body, defs, constraints, env);
         }
         Stmt::For { var, iterable, body } => {
-            
             if let Ok(it_ty) = infer_type(iterable, env, defs, constraints) {
                 let elem = match &it_ty {
                     Type::List(e) | Type::Slice(e) => (**e).clone(),
@@ -5453,9 +4556,6 @@ fn resolve_operators_stmt(
         _ => {}
     }
 }
-
-
-
 fn infer_type(
     e: &Expr,
     env: &HashMap<String, Type>,
@@ -5497,8 +4597,6 @@ fn infer_type(
                 "split" => Ok(Type::List(Box::new(Type::String))),
                 "trim" | "slice" | "to_upper" | "to_lower" | "replace" | "repeat"
                     | "contains" | "starts_with" | "ends_with" | "byte_len" => {
-                    
-                    
                     match func.as_str() {
                         "contains" | "starts_with" | "ends_with" => Ok(Type::Bool),
                         _ => Ok(Type::String),
@@ -5506,7 +4604,6 @@ fn infer_type(
                 }
                 "push" | "reverse" | "remove_at" => {
                     if let Some(first) = args.first() {
-                        
                         infer_type(first, env, defs, constraints)
                     } else {
                         Ok(Type::Unknown)
@@ -5585,7 +4682,6 @@ fn infer_type(
                         } else {
                             state_name.clone()
                         };
-
                         if let Some(fields) = defs.variant_fields.get(&resolved) {
                             if args.len() != fields.len() {
                                 return Err(format!(
@@ -5646,7 +4742,6 @@ fn infer_type(
             let ot = infer_type(object, env, defs, constraints)?;
             match ot {
                 Type::Struct(s) => {
-                    
                     let mut tmp_env = TypeEnv::new();
                     for (k, v) in env.iter() {
                         tmp_env.vars.insert(k.clone(), v.clone());
@@ -5716,7 +4811,6 @@ fn infer_type(
                     "==" | "!=" | "<" | ">" | "<=" | ">=" | "and" | "or" => Ok(Type::Bool),
                     "+" | "-" | "*" | "/" | "%" => {
                         if matches!(&lt, Type::Var(_)) || matches!(&rt, Type::Var(_)) {
-                            
                             Ok(Type::Int)
                         } else {
                             Ok(lt)
@@ -5770,7 +4864,6 @@ fn infer_type(
         _ => Ok(Type::Unknown),
     }
 }
-
 fn resolve_operators_expr(
     e: &mut Expr,
     defs: &Defs,
@@ -5779,7 +4872,6 @@ fn resolve_operators_expr(
 ) {
     match e {
         Expr::BinOp { left, right, op, resolved_operator } => {
-            
             resolve_operators_expr(left, defs, env, constraints);
             resolve_operators_expr(right, defs, env, constraints);
             let lt = infer_type(left, env, defs, constraints);
@@ -5826,10 +4918,6 @@ fn resolve_operators_expr(
         _ => {}
     }
 }
-
-
-
-
 fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
     for (sname, sdef) in &defs.structs {
         for (iface_name, iface) in &defs.interfaces {
@@ -5840,7 +4928,6 @@ fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
             if !satisfies {
                 continue;
             }
-            
             for im in &iface.methods {
                 let mdef = sdef.methods.get(&im.name).unwrap();
                 if !method_sig_matches(defs, mdef, im) {
@@ -5854,13 +4941,9 @@ fn check_interface_conformance(defs: &Defs) -> Result<(), String> {
     }
     Ok(())
 }
-
-
 fn struct_implements(defs: &Defs, struct_name: &str, iface_name: &str) -> bool {
     struct_satisfies_interface(defs, struct_name, iface_name)
 }
-
-
 fn type_matches(defs: &Defs, actual: &Type, expected: &Type) -> bool {
     if let (Type::Struct(sname), Type::Interface(iface, _)) = (actual, expected) {
         if struct_implements(defs, sname, iface) {
@@ -5869,10 +4952,6 @@ fn type_matches(defs: &Defs, actual: &Type, expected: &Type) -> bool {
     }
     type_eq(actual, expected)
 }
-
-
-
-
 fn check_constraint(
     defs: &Defs,
     constraints: &[(String, String)],
@@ -5889,7 +4968,6 @@ fn check_constraint(
         (Type::Array(e_exp), Type::Array(e_act)) => {
             check_constraint(defs, constraints, e_act, e_exp)
         }
-        
         (Type::Var(tv), concrete) => {
             for (ctv, iface) in constraints {
                 if ctv == tv {
@@ -5916,12 +4994,6 @@ fn check_constraint(
         _ => Ok(()),
     }
 }
-
-
-
-
-
-
 fn check_library_struct_method(
     struct_name: &str,
     method: &str,
@@ -5929,8 +5001,6 @@ fn check_library_struct_method(
     env: &TypeEnv,
     _defs: &Defs,
 ) -> Option<Result<Type, String>> {
-    
-    
     let check_args = |expect: &[(Type, &str)]| -> Option<Result<Type, String>> {
         if args.len() != expect.len() {
             return Some(Err(format!(
@@ -5956,9 +5026,7 @@ fn check_library_struct_method(
         }
         None
     };
-
     let ret = |ty: Type| -> Option<Result<Type, String>> { Some(Ok(ty)) };
-
     match (struct_name, method) {
         ("time.Instant", "sleep") => {
             if let Some(e) = check_args(&[(Type::Float, "secs")]) {
@@ -6030,7 +5098,6 @@ fn check_library_struct_method(
         _ => None,
     }
 }
-
 fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     match expr {
         Expr::IntLit(_) => Ok(Type::Int),
@@ -6038,7 +5105,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         Expr::FloatLit(_) => Ok(Type::Float),
         Expr::StringLit(_) => Ok(Type::String),
         Expr::BoolLit(_) => Ok(Type::Bool),
-
         Expr::Ident(name) => {
             if let Some(t) = env.get(name) {
                 Ok(t.clone())
@@ -6048,7 +5114,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 Err(format!("Type error: undefined variable '{}'", name))
             }
         }
-
         Expr::Range { start, end } => {
             let st = check_expr(start, env, defs)?;
             let et = check_expr(end, env, defs)?;
@@ -6058,10 +5123,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             if et != Type::Int && et != Type::Unknown {
                 return Err(format!("Type error: range end must be int (got {:?})", et));
             }
-            
             Ok(Type::List(Box::new(Type::Int)))
         }
-
         Expr::Array(elements) => {
             let mut elem_ty = Type::Unknown;
             for e in elements {
@@ -6078,7 +5141,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
             Ok(Type::List(Box::new(elem_ty)))
         }
-
         Expr::UnOp { op, operand } => {
             let t = check_expr(operand, env, defs)?;
             match op.as_str() {
@@ -6093,18 +5155,14 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 other => Err(format!("Type error: unknown unary operator '{}'", other)),
             }
         }
-
         Expr::BinOp { left, op, right, .. } => {
             let lt = check_expr(left, env, defs)?;
             let rt = check_expr(right, env, defs)?;
-
             match op.as_str() {
-                
                 "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                     if let Some((_, result_ty)) =
                         resolve_operator_interface(defs, &lt, &rt, op, &env.constraints)
                     {
-                        
                         Ok(result_ty)
                     } else if (lt == Type::Int || lt == Type::Long)
                         && (rt == Type::Int || rt == Type::Long)
@@ -6120,7 +5178,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         Ok(Type::Bool)
                     }
                 }
-                
                 "and" | "or" => {
                     if (lt != Type::Bool && lt != Type::Unknown)
                         || (rt != Type::Bool && rt != Type::Unknown)
@@ -6132,12 +5189,10 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Bool)
                 }
-                
                 "+" | "-" | "*" | "/" | "%" => {
                     if let Some((_, result_ty)) =
                         resolve_operator_interface(defs, &lt, &rt, op, &env.constraints)
                     {
-                        
                         Ok(result_ty)
                     } else if lt == Type::Int && rt == Type::Long {
                         Ok(Type::Long)
@@ -6150,19 +5205,15 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             &rt,
                         ));
                     } else if matches!(&lt, Type::Var(_)) || matches!(&rt, Type::Var(_)) {
-                        
                         Ok(Type::Int)
                     } else {
-                        
                         Ok(lt)
                     }
                 }
                 other => Err(format!("Type error: unknown binary operator '{}'", other)),
             }
         }
-
         Expr::Call { func, args } => {
-            
             match func.as_str() {
                 "print" | "println" => {
                     for a in args {
@@ -6183,11 +5234,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             "Type error: StringBuilder() takes no arguments".to_string()
                         );
                     }
-                    
                     Ok(Type::Unknown)
                 }
-                
-                
         "int" | "float" | "str" => {
             if args.len() != 1 {
                 return Err(format!(
@@ -6195,7 +5243,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     func
                 ));
             }
-            
             check_expr(&args[0], env, defs)?;
             match func.as_str() {
                 "int" => Ok(Type::Int),
@@ -6204,7 +5251,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 _ => Ok(Type::Unknown),
             }
         }
-        
         "input" => {
             for a in args { check_expr(a, env, defs)?; }
             Ok(Type::String)
@@ -6217,8 +5263,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             for a in args { check_expr(a, env, defs)?; }
             Ok(Type::Bool)
         }
-        
-        
         "sqrt" | "abs" => {
             if args.len() != 1 {
                 return Err(format!("Type error: {}() takes exactly 1 argument", func));
@@ -6267,15 +5311,11 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
         }
         other => {
-                    
                     let base = match other.find('(') {
                         Some(i) => &other[..i],
                         None => other,
                     };
                     let resolved = resolve_pkg_name(defs, base).unwrap_or_else(|| base.to_string());
-                    
-                    
-                    
                     if args.is_empty() {
                         if let Some(fdef) = defs.functions.get(&resolved) {
                             if fdef.params.is_empty() {
@@ -6310,8 +5350,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         return Ok(Type::Struct(resolved.clone()));
                     }
-
-                    
                     if let Some(state_name) = defs.state_variants.get(&resolved) {
                         let state_base = struct_base(state_name);
                         let enum_tp = defs.enum_type_params.get(state_base.as_str());
@@ -6333,7 +5371,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         } else {
                             state_name.clone()
                         };
-
                         if let Some(fields) = defs.variant_fields.get(&resolved) {
                             if args.len() != fields.len() {
                                 return Err(format!(
@@ -6361,8 +5398,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         return Ok(Type::State(concrete_state));
                     }
-
-                    
                     if let Some(fdef) = defs.functions.get(&resolved) {
                         if args.len() != fdef.params.len() {
                             return Err(format!(
@@ -6395,12 +5430,10 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             None => Type::Unit,
                         });
                     }
-
                     Err(format!("Type error: unknown function '{}'", func))
                 }
             }
         }
-
         Expr::Tuple(elems) => {
             let mut types = Vec::new();
             for e in elems {
@@ -6408,7 +5441,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
             Ok(Type::Tuple(types))
         }
-
         Expr::TupleAccess { tuple, index } => {
             let t = check_expr(tuple, env, defs)?;
             match t {
@@ -6426,7 +5458,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 _ => Err(format!("Type error: cannot index non-tuple type {:?}", t)),
             }
         }
-
         Expr::FieldAccess { object, field } => {
             let obj_ty = check_expr(object, env, defs)?;
             match obj_ty {
@@ -6451,15 +5482,10 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 )),
             }
         }
-
         Expr::MethodCall { object, method, args } => {
             let obj_ty = check_expr(object, env, defs)?;
             match obj_ty {
                 Type::Struct(name) => {
-                    
-                    
-                    
-                    
                     if let Some(ty) = check_library_struct_method(&name, method, args, env, defs) {
                         return ty;
                     }
@@ -6501,8 +5527,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     Ok(Type::Unknown)
                 }
-                
-                
                 Type::Interface(iface, _) => {
                     let idef = defs.interfaces.get(&iface).ok_or_else(|| {
                         format!("Type error: unknown interface '{}'", iface)
@@ -6542,7 +5566,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         None => Type::Unit,
                     });
                 }
-                
                 Type::String => match method.as_str() {
                     "len" | "byte_len" => {
                         if !args.is_empty() {
@@ -6612,8 +5635,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         Ok(Type::Int)
                     }
-                    
-                    
                     "write" => {
                         if args.len() != 1 {
                             return Err(
@@ -6674,7 +5695,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
-                
                 Type::List(elem) => match method.as_str() {
                     "len" => {
                         if !args.is_empty() {
@@ -6805,8 +5825,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         other
                     )),
                 },
-                
-                
                 Type::Slice(elem) => match method.as_str() {
                     "len" => {
                         if !args.is_empty() {
@@ -6902,7 +5920,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 )),
             }
         }
-
         Expr::Index { target, index } => {
             let tt = check_expr(target, env, defs)?;
             match tt {
@@ -6923,7 +5940,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 )),
             }
         }
-
         Expr::Slice { target, start, end } => {
             let tt = check_expr(target, env, defs)?;
             match tt {
@@ -6955,15 +5971,10 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 )),
             }
         }
-
         Expr::Await(inner) => {
-            
-            
-            
             if let Expr::Call { func, .. } = inner.as_ref() {
                 match defs.functions.get(func) {
                     Some(fdef) if fdef.is_async => {
-                        
                         if let Some(rt) = &fdef.return_type {
                             Ok(type_from_str(rt, defs))
                         } else {
@@ -6971,7 +5982,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                     }
                     Some(_) => {
-                        
                         return Err(format!(
                             "Type error: await can only be applied to a lime (async) function, but '{}' is a synchronous fn",
                             func
@@ -6992,8 +6002,6 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
     }
 }
-
-
 fn check_stmt(
     stmt: &Stmt,
     env: &mut TypeEnv,
@@ -7003,19 +6011,10 @@ fn check_stmt(
     loc: &LocMap,
     diags: &mut Vec<Diagnostic>,
 ) -> Result<(), String> {
-    
-    
-    
-    
-    
-    
-    
     match check_stmt_inner(stmt, env, defs, expected_return, is_async, loc, diags) {
         Ok(()) => Ok(()),
         Err(e) => {
             if !e.is_empty() {
-                
-                
                 let hint = suggest_for(&e, env, defs);
                 diags.push(loc.diagnostic(stmt, e).with_hint(hint));
             }
@@ -7023,13 +6022,7 @@ fn check_stmt(
         }
     }
 }
-
-
-
-
-
 fn suggest_for(msg: &str, env: &TypeEnv, defs: &Defs) -> Option<String> {
-    
     if let Some(rest) = msg.strip_prefix("Type error: undefined variable '") {
         let name = rest.trim_end_matches('\'');
         let mut cands: Vec<String> = env.vars.keys().cloned().collect();
@@ -7046,7 +6039,6 @@ fn suggest_for(msg: &str, env: &TypeEnv, defs: &Defs) -> Option<String> {
         cands.extend(defs.states.keys().cloned());
         return nearest(name, cands.iter().map(|s| s.as_str()));
     }
-    
     if let Some(rest) = msg.strip_prefix("function '") {
         let name = rest.split('\'').next().unwrap_or("");
         let cands: Vec<&String> = defs.functions.keys().collect();
@@ -7062,7 +6054,6 @@ fn suggest_for(msg: &str, env: &TypeEnv, defs: &Defs) -> Option<String> {
         all.extend(defs.states.keys().cloned());
         return nearest(name, all.iter().map(|s| s.as_str()));
     }
-    
     if let Some(rest) = msg.strip_prefix("Type error: unknown field '") {
         let inner = rest.trim_end_matches('\'');
         if let Some((fname, sname)) = inner.split_once("' on struct ") {
@@ -7073,7 +6064,6 @@ fn suggest_for(msg: &str, env: &TypeEnv, defs: &Defs) -> Option<String> {
         }
     }
     if let Some(rest) = msg.strip_prefix("Unknown field: ") {
-        
         let inner = rest.trim_end_matches('\'');
         if let Some((fname, sname)) = inner.split_once(" on struct ") {
             if let Some(st) = defs.structs.get(sname) {
@@ -7084,7 +6074,6 @@ fn suggest_for(msg: &str, env: &TypeEnv, defs: &Defs) -> Option<String> {
     }
     None
 }
-
 fn check_stmt_inner(
     stmt: &Stmt,
     env: &mut TypeEnv,
@@ -7102,7 +6091,6 @@ fn check_stmt_inner(
                 None => Type::Unknown,
             };
             if declared != Type::Unknown && !type_eq(&v_ty, &declared) {
-                
                 if let (Type::Interface(iface, _), Type::Struct(sname)) = (&declared, &v_ty) {
                     if !struct_implements(defs, sname, iface) {
                         return Err(format!(
@@ -7126,7 +6114,6 @@ fn check_stmt_inner(
             env.insert(name.clone(), bind_ty);
             Ok(())
         }
-
         Stmt::Return { explicit_type, value } => {
             if let Some(et) = explicit_type {
                 if let Some(rt) = expected_return {
@@ -7164,7 +6151,6 @@ fn check_stmt_inner(
                 }
             }
         },
-
         Stmt::If { cond, then_branch, else_branch } => {
             let c_ty = check_expr(cond, env, defs)?;
             if c_ty != Type::Bool && c_ty != Type::Unknown {
@@ -7181,10 +6167,8 @@ fn check_stmt_inner(
             }
             Ok(())
         }
-
         Stmt::For { var, iterable, body } => {
             let iter_ty = check_expr(iterable, env, defs)?;
-            
             let elem_ty = match &iter_ty {
                 Type::List(elem) => (&**elem).clone(),
                 Type::Slice(elem) => (&**elem).clone(),
@@ -7197,7 +6181,6 @@ fn check_stmt_inner(
             if !diags.is_empty() { return Err(String::new()); }
             Ok(())
         }
-
         Stmt::While { cond, body } => {
             let c_ty = check_expr(cond, env, defs)?;
             if c_ty != Type::Bool && c_ty != Type::Unknown {
@@ -7210,10 +6193,8 @@ fn check_stmt_inner(
             if !diags.is_empty() { return Err(String::new()); }
             Ok(())
         }
-
         Stmt::Match { expr, arms } => {
             let m_ty = check_expr(expr, env, defs)?;
-
             if let Type::Tuple(elem_types) = &m_ty {
                 let mut has_wildcard = false;
                 for (pattern, body) in arms {
@@ -7247,8 +6228,6 @@ fn check_stmt_inner(
                 }
                 return Ok(());
             }
-
-            
             let (state_name, variants) = if let Type::State(sn) = &m_ty {
                 let base = struct_base(sn);
                 (sn.clone(), defs.states.get(&base).cloned().unwrap_or_default())
@@ -7258,7 +6237,6 @@ fn check_stmt_inner(
             } else {
                 (String::new(), Vec::new())
             };
-
             if !variants.is_empty() {
                 let mut covered: Vec<String> = Vec::new();
                 let mut has_wildcard = false;
@@ -7269,7 +6247,6 @@ fn check_stmt_inner(
                         if !diags.is_empty() { return Err(String::new()); }
                         continue;
                     }
-
                     if let Pattern::Try { elems } = pattern {
                         let pname = "Success";
                         if !variants.contains(&pname.to_string()) {
@@ -7291,7 +6268,6 @@ fn check_stmt_inner(
                         if !diags.is_empty() { return Err(String::new()); }
                         continue;
                     }
-
                     if let Pattern::Error = pattern {
                         let pname = "Error";
                         if !variants.contains(&pname.to_string()) {
@@ -7314,7 +6290,6 @@ fn check_stmt_inner(
                         if !diags.is_empty() { return Err(String::new()); }
                         continue;
                     }
-
                     let (pname, bindings) = match pattern {
                         Pattern::Variant { name, bindings } => (name.clone(), bindings.clone()),
                         Pattern::Tuple(_) => continue,
@@ -7329,7 +6304,6 @@ fn check_stmt_inner(
                         ));
                     }
                     covered.push(pname.clone());
-
                     let mut arm_env = env.clone();
                     let fields = defs.variant_fields.get(&pname);
                     for (i, b) in bindings.iter().enumerate() {
@@ -7344,7 +6318,6 @@ fn check_stmt_inner(
                     check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
                     if !diags.is_empty() { return Err(String::new()); }
                 }
-
                 if !has_wildcard {
                     for v in &variants {
                         if !covered.contains(v) {
@@ -7381,15 +6354,12 @@ fn check_stmt_inner(
             }
             Ok(())
         }
-
         Stmt::Expr(e) => {
             check_expr(e, env, defs)?;
             Ok(())
         }
-
         Stmt::Assign { name, value } => {
             let v_ty = check_expr(value, env, defs)?;
-            
             match env.get(name) {
                 Some(existing) => {
                     if !type_eq(existing, &v_ty) {
@@ -7407,8 +6377,6 @@ fn check_stmt_inner(
             env.insert(name.clone(), v_ty);
             Ok(())
         }
-
-        
         Stmt::Fn { .. } => Ok(()),
         Stmt::Struct { .. } => Ok(()),
         Stmt::State { .. } => Ok(()),
@@ -7420,7 +6388,6 @@ fn check_stmt_inner(
         _ => Ok(()),
     }
 }
-
 fn check_stmts(
     stmts: &[Stmt],
     env: &mut TypeEnv,
@@ -7430,16 +6397,10 @@ fn check_stmts(
     loc: &LocMap,
     diags: &mut Vec<Diagnostic>,
 ) {
-    
-    
-    
-    
-    
     for s in stmts {
         let _ = check_stmt(s, env, defs, expected_return, is_async, loc, diags);
     }
 }
-
 fn pattern_binding_names(elems: &[Pattern]) -> Vec<String> {
     elems
         .iter()
@@ -7452,7 +6413,6 @@ fn pattern_binding_names(elems: &[Pattern]) -> Vec<String> {
         })
         .collect()
 }
-
 fn bind_tuple_pattern(
     elems: &[Pattern],
     elem_types: &[Type],
@@ -7471,7 +6431,6 @@ fn bind_tuple_pattern(
     }
     Ok(())
 }
-
 fn bind_tuple_element(
     pat: &Pattern,
     ty: &Type,
@@ -7497,8 +6456,6 @@ fn bind_tuple_element(
         )),
     }
 }
-
-
 fn check_function(
     params: &[(String, String)],
     constraints: &[(String, String)],
@@ -7517,13 +6474,9 @@ fn check_function(
         env.insert(pname.clone(), type_from_str(ptype, defs));
     }
     let rt = return_type.as_ref().map(|r| type_from_str(r, defs));
-    
-    
-    
     let mut diags: Vec<Diagnostic> = Vec::new();
     check_stmts(body, &mut env, defs, rt.as_ref(), is_async, loc, &mut diags);
     if diags.is_empty() {
-        
         match infer_return_type_from_body(body, &env, defs) {
             Ok(t) => *out_inferred = Some(t),
             Err(e) => *out_inferred = None,
@@ -7537,9 +6490,6 @@ fn check_function(
             .join("\n"))
     }
 }
-
-
-
 fn infer_return_type_from_body(
     body: &[Stmt],
     env: &TypeEnv,
@@ -7549,7 +6499,6 @@ fn infer_return_type_from_body(
     scan_return_types(body, env, defs, &mut ret_type)?;
     Ok(ret_type.unwrap_or(Type::Unit))
 }
-
 fn scan_return_types(
     stmts: &[Stmt],
     env: &TypeEnv,
@@ -7567,7 +6516,6 @@ fn scan_return_types(
                         et.clone()
                     }
                     (_, Some(e)) => {
-                        
                         match infer_type(e, &env.vars, defs, &env.constraints) {
                             Ok(t) => t,
                             Err(_) => continue, 
@@ -7579,7 +6527,6 @@ fn scan_return_types(
                     Some(existing) if !type_eq(existing, &t) => {
                         let both_unit = *existing == Type::Unit && t == Type::Unit;
                         if both_unit {
-                            
                         } else if *existing == Type::Unit || t == Type::Unit {
                             return Err(format!(
                                 "Type error: cannot mix void and {} return",
@@ -7608,37 +6555,20 @@ fn scan_return_types(
     }
     Ok(())
 }
-
-
-
-
-
-
-
-
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DiagnosticLevel {
     Error,
     Warning,
 }
-
 struct Diagnostic {
     level: DiagnosticLevel,
     file: String,
     line: usize,
     col: usize,
     message: String,
-    
-    
-    
     has_position: bool,
-    
-    
-    
     hint: Option<String>,
 }
-
 impl Diagnostic {
     fn error(file: String, line: usize, col: usize, message: String) -> Diagnostic {
         Diagnostic {
@@ -7651,7 +6581,6 @@ impl Diagnostic {
             hint: None,
         }
     }
-
     fn error_no_pos(message: String) -> Diagnostic {
         Diagnostic {
             level: DiagnosticLevel::Error,
@@ -7663,8 +6592,6 @@ impl Diagnostic {
             hint: None,
         }
     }
-
-    
     fn warning(file: String, line: usize, col: usize, message: String) -> Diagnostic {
         Diagnostic {
             level: DiagnosticLevel::Warning,
@@ -7676,8 +6603,6 @@ impl Diagnostic {
             hint: None,
         }
     }
-
-    
     fn warning_no_pos(message: String) -> Diagnostic {
         Diagnostic {
             level: DiagnosticLevel::Warning,
@@ -7689,20 +6614,11 @@ impl Diagnostic {
             hint: None,
         }
     }
-
-    
     fn with_hint(mut self, hint: Option<String>) -> Diagnostic {
         self.hint = hint;
         self
     }
 }
-
-
-
-
-
-
-
 fn render_diagnostic(d: &Diagnostic) -> String {
     let tag = match d.level {
         DiagnosticLevel::Error => "error[type]",
@@ -7720,15 +6636,6 @@ fn render_diagnostic(d: &Diagnostic) -> String {
         None => base,
     }
 }
-
-
-
-
-
-
-
-
-
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
@@ -7740,7 +6647,6 @@ fn levenshtein(a: &str, b: &str) -> usize {
     if m == 0 {
         return n;
     }
-    
     let mut prev: Vec<usize> = (0..=m).collect();
     let mut curr: Vec<usize> = vec![0; m + 1];
     for i in 1..=n {
@@ -7755,11 +6661,6 @@ fn levenshtein(a: &str, b: &str) -> usize {
     }
     prev[m]
 }
-
-
-
-
-
 fn nearest<I, T>(name: &str, candidates: I) -> Option<String>
 where
     I: IntoIterator<Item = T>,
@@ -7782,38 +6683,19 @@ where
     }
     best.map(|(_, s)| s)
 }
-
-
-
-
-
-
-
-
-
 #[derive(Default)]
 struct LocMap {
-    
     by_addr: HashMap<usize, (usize, usize)>,
-    
     file: String,
 }
-
 impl LocMap {
     fn loc_of(&self, stmt: &Stmt) -> Option<(usize, usize)> {
         self.by_addr.get(&(stmt as *const Stmt as usize)).copied()
     }
-
-    
-    
     fn locate(&self, stmt: &Stmt) -> Option<(String, usize, usize)> {
         self.loc_of(stmt)
             .map(|(line, col)| (self.file.clone(), line, col))
     }
-
-    
-    
-    
     fn diagnostic(&self, stmt: &Stmt, msg: String) -> Diagnostic {
         match self.loc_of(stmt) {
             Some((line, col)) => Diagnostic::error(self.file.clone(), line, col, msg),
@@ -7821,7 +6703,6 @@ impl LocMap {
         }
     }
 }
-
 fn build_loc_map(
     stmts: &[Stmt],
     locs: &[(usize, usize)],
@@ -7833,14 +6714,8 @@ fn build_loc_map(
             map.insert(s as *const Stmt as usize, *pos);
         }
         *idx += 1;
-        
-        
         match s {
             Stmt::Fn { body, .. } => build_loc_map(body, locs, idx, map),
-            
-            
-            
-            
             Stmt::Struct { methods, .. } => {
                 for m in methods {
                     if let Stmt::Fn { body, .. } = m {
@@ -7866,22 +6741,15 @@ fn build_loc_map(
         }
     }
 }
-
-
-
 fn make_loc_map(stmts: &[Stmt], locs: &[(usize, usize)], file: &str) -> LocMap {
     let mut by_addr = HashMap::new();
     let mut idx = 0usize;
     build_loc_map(stmts, locs, &mut idx, &mut by_addr);
     LocMap { by_addr, file: file.to_string() }
 }
-
 fn type_check(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
     type_check_located(stmts, defs, &LocMap::default())
 }
-
-
-
 fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(), String> {
     let mut diags: Vec<Diagnostic> = Vec::new();
     let mut top_env = TypeEnv::new();
@@ -7898,17 +6766,11 @@ fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(
                 let _ = type_params;
                 let mut inferred = None;
                 if let Err(e) = check_function(params, constraints, &None, body, defs, *is_async, loc, &mut inferred) {
-                    
-                    
-                    
-                    
                     diags.push(Diagnostic::error_no_pos(format!(
                         "In function '{}': {}",
                         name, e
                     )));
                 }
-                
-                
                 if let Some(t) = inferred {
                     if let Some(fdef) = defs.functions.get_mut(name) {
                         fdef.return_type = Some(type_to_string(&t));
@@ -7957,8 +6819,6 @@ fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(
                     }
                 }
             }
-            
-            
             Stmt::Let { name, value, .. } => {
                 let _ = check_expr(value, &top_env, defs);
                 let v_ty = infer_type(value, &top_env.vars, defs, &top_env.constraints);
@@ -7966,8 +6826,6 @@ fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(
                 if let Ok(t) = &v_ty {
                     env.insert(name.clone(), t.clone());
                 }
-                
-                
                 let _ = check_stmt(stmt, &mut env, defs, None, false, loc, &mut diags);
                 if let Ok(t) = &v_ty {
                     top_env.insert(name.clone(), t.clone());
@@ -7994,18 +6852,6 @@ fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(
             .join("\n"))
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
 fn expr_vars(e: &Expr, out: &mut Vec<String>) {
     match e {
         Expr::Ident(n) => out.push(n.clone()),
@@ -8048,20 +6894,10 @@ fn expr_vars(e: &Expr, out: &mut Vec<String>) {
         _ => {}
     }
 }
-
-
-
-
-
-
-
-
 fn collect_escape_seeds(stmts: &[Stmt], seeds: &mut Vec<String>) {
     for s in stmts {
         match s {
-            
             Stmt::Return { explicit_type: _, value: Some(e) } => expr_vars(e, seeds),
-            
             Stmt::Expr(Expr::Await(inner)) => {
                 if let Expr::Call { args, .. } = inner.as_ref() {
                     for a in args {
@@ -8069,7 +6905,6 @@ fn collect_escape_seeds(stmts: &[Stmt], seeds: &mut Vec<String>) {
                     }
                 }
             }
-            
             Stmt::If { then_branch, else_branch, .. } => {
                 collect_escape_seeds(then_branch, seeds);
                 if let Some(els) = else_branch {
@@ -8088,10 +6923,6 @@ fn collect_escape_seeds(stmts: &[Stmt], seeds: &mut Vec<String>) {
         }
     }
 }
-
-
-
-
 fn collect_sources(stmts: &[Stmt], sources: &mut HashMap<String, Vec<String>>) {
     for s in stmts {
         match s {
@@ -8123,8 +6954,6 @@ fn collect_sources(stmts: &[Stmt], sources: &mut HashMap<String, Vec<String>>) {
         }
     }
 }
-
-
 fn escapes(v: &str, escaping: &mut Vec<String>, sources: &HashMap<String, Vec<String>>) {
     if escaping.contains(&v.to_string()) {
         return;
@@ -8136,10 +6965,6 @@ fn escapes(v: &str, escaping: &mut Vec<String>, sources: &HashMap<String, Vec<St
         }
     }
 }
-
-
-
-
 fn async_escapes(stmts: &[Stmt], is_async: bool) -> Vec<String> {
     if !is_async {
         return Vec::new();
@@ -8163,7 +6988,6 @@ fn async_escapes(stmts: &[Stmt], is_async: bool) -> Vec<String> {
     }
     result
 }
-
 fn stmt_has_await(s: &Stmt) -> bool {
     match s {
         Stmt::Expr(Expr::Await(_)) => true,
@@ -8179,7 +7003,6 @@ fn stmt_has_await(s: &Stmt) -> bool {
         _ => false,
     }
 }
-
 fn expr_has_await(e: &Expr) -> bool {
     match e {
         Expr::Await(_) => true,
@@ -8193,7 +7016,6 @@ fn expr_has_await(e: &Expr) -> bool {
         _ => false,
     }
 }
-
 fn stmt_vars(s: &Stmt, out: &mut Vec<String>) {
     match s {
         Stmt::Let { name, value, .. } => {
@@ -8241,9 +7063,6 @@ fn stmt_vars(s: &Stmt, out: &mut Vec<String>) {
         _ => {}
     }
 }
-
-
-
 fn analyze_block(
     stmts: &[Stmt],
     is_async: bool,
@@ -8252,21 +7071,17 @@ fn analyze_block(
 ) -> Result<(), String> {
     let mut seeds = Vec::new();
     collect_escape_seeds(stmts, &mut seeds);
-
     let mut sources: HashMap<String, Vec<String>> = HashMap::new();
     collect_sources(stmts, &mut sources);
-
     let mut escaping: Vec<String> = Vec::new();
     for s in &seeds {
         escapes(s, &mut escaping, &sources);
     }
-    
     for v in async_escapes(stmts, is_async) {
         if !escaping.contains(&v) {
             escaping.push(v);
         }
     }
-
     for s in stmts {
         match s {
             Stmt::Let {
@@ -8295,7 +7110,6 @@ fn analyze_block(
                 };
                 report.push((name.clone(), decision));
             }
-            
             Stmt::Fn {
                 name: fname,
                 body,
@@ -8323,14 +7137,9 @@ fn analyze_block(
     }
     Ok(())
 }
-
-
-
 fn mangled_name(base: &str, type_args: &[String]) -> String {
     format!("{}.{}", base, type_args.join("."))
 }
-
-
 fn parse_generic_call_name(func: &str) -> Option<(&str, Vec<&str>)> {
     if let Some(paren_idx) = func.find('(') {
         let base = &func[..paren_idx];
@@ -8345,7 +7154,6 @@ fn parse_generic_call_name(func: &str) -> Option<(&str, Vec<&str>)> {
         None
     }
 }
-
 fn monomorphize_type_str(t: &str, type_params: &[String], type_args: &[&str]) -> String {
     let mut result = t.to_string();
     for (i, tp) in type_params.iter().enumerate() {
@@ -8355,7 +7163,6 @@ fn monomorphize_type_str(t: &str, type_params: &[String], type_args: &[&str]) ->
     }
     result
 }
-
 fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: &[&str]) -> FunctionDef {
     let params: Vec<(String, String)> = fdef.params.iter()
         .map(|(n, t)| (n.clone(), monomorphize_type_str(t, type_params, type_args)))
@@ -8371,8 +7178,6 @@ fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: 
         is_async: fdef.is_async,
     }
 }
-
-
 fn infer_generic_args(
     func_name: &str,
     call_args: &[Expr],
@@ -8386,7 +7191,6 @@ fn infer_generic_args(
     if fdef.type_params.is_empty() {
         return Err(format!("'{}' is not a generic function", func_name));
     }
-
     let mut type_map: HashMap<String, String> = HashMap::new();
     for (arg, (_, ptype_str)) in call_args.iter().zip(fdef.params.iter()) {
         let arg_type = infer_type(arg, env, defs, &HashMap::new())?;
@@ -8395,8 +7199,6 @@ fn infer_generic_args(
         match &ptype {
             Type::Var(tv) => {
                 if let Some(existing) = type_map.get(tv) {
-                    
-                    
                     if existing != &arg_str && existing != "unknown" && arg_str != "unknown" {
                         return Err(format!(
                             "Type mismatch for type parameter '{}': inferred '{}' and '{}' (func={})",
@@ -8407,21 +7209,15 @@ fn infer_generic_args(
                 type_map.insert(tv.clone(), arg_str);
             }
             _ => {
-                
                 collect_var_bindings(&arg_type, &ptype, &mut type_map, defs)?;
             }
         }
     }
-
     let mut result = Vec::new();
     'outer: for tp in &fdef.type_params {
         match type_map.get(tp) {
             Some(s) => result.push(s.clone()),
             None => {
-                
-                
-                
-                
                 if let Some(exp) = expected {
                     let mut bindings: HashMap<String, String> = HashMap::new();
                     let ret_ty = type_from_str(&fdef.return_type.clone().unwrap_or_default(), defs);
@@ -8431,10 +7227,6 @@ fn infer_generic_args(
                             continue;
                         }
                     }
-                    
-                    
-                    
-                    
                     if let Some(rt_str) = &fdef.return_type {
                         let base = rt_str.split('(').next().unwrap_or(rt_str);
                         if let Some(sd) = defs.structs.get(base) {
@@ -8464,31 +7256,22 @@ fn infer_generic_args(
     }
     Ok(result)
 }
-
-
 fn collect_var_bindings(
     concrete: &Type,
     pattern: &Type,
     type_map: &mut HashMap<String, String>,
     defs: &Defs,
 ) -> Result<(), String> {
-    
-    
     if matches!(concrete, Type::Unknown) {
         return Ok(());
     }
     match (concrete, pattern) {
         (Type::Var(tv), _) => {
             let s = type_to_string(concrete);
-            
-            
-            
             if s == tv.as_str() || s == "unknown" {
                 return Ok(());
             }
             if let Some(existing) = type_map.get(tv) {
-                
-                
                 if existing != &s && existing != "unknown" && s != "unknown" {
                     return Err(format!(
                         "Type mismatch for type parameter '{}': '{}' vs '{}'",
@@ -8499,9 +7282,6 @@ fn collect_var_bindings(
             type_map.insert(tv.clone(), s);
             Ok(())
         }
-        
-        
-        
         (_, Type::Var(tv)) => {
             let s = type_to_string(concrete);
             if s == tv.as_str() || s == "unknown" {
@@ -8527,20 +7307,13 @@ fn collect_var_bindings(
         (Type::Array(p_inner), Type::Array(c_inner)) => {
             collect_var_bindings(p_inner, c_inner, type_map, defs)
         }
-        
-        
-        
         (Type::Struct(p), Type::Struct(c)) | (Type::State(p), Type::State(c)) => {
-            
-            
             let concrete_args = generic_args_of(p);
             let pattern_args = generic_args_of(c);
             if concrete_args.len() != pattern_args.len() {
                 return Ok(());
             }
             for (pat, con) in pattern_args.iter().zip(concrete_args.iter()) {
-                
-                
                 match type_from_str(pat, defs) {
                     Type::Var(tv) => {
                         let s = type_to_string(&type_from_str(con, defs));
@@ -8566,13 +7339,9 @@ fn collect_var_bindings(
             }
             Ok(())
         }
-        
         _ => Ok(()),
     }
 }
-
-
-
 fn check_generic_constraints(
     fdef: &FunctionDef,
     type_args: &[String],
@@ -8582,13 +7351,10 @@ fn check_generic_constraints(
         for (i, tp) in fdef.type_params.iter().enumerate() {
             if tp == tv && i < type_args.len() {
                 let concrete_type = type_from_str(&type_args[i], defs);
-                
                 let ok = match &concrete_type {
                     Type::Struct(sname) => struct_satisfies_interface(defs, sname, iface),
                     Type::Interface(iname, _) => iname == iface,
                     Type::Unknown => true,
-                    
-                    
                     Type::Int | Type::Float | Type::Bool | Type::String => true,
                     _ => false,
                 };
@@ -8605,10 +7371,6 @@ fn check_generic_constraints(
     }
     Ok(())
 }
-
-
-
-
 fn collect_mono_from_expr(
     e: &Expr,
     env: &mut HashMap<String, Type>,
@@ -8622,8 +7384,6 @@ fn collect_mono_from_expr(
         Expr::Call { func, args } => {
             let base_name;
             let explicit_type_args: Option<Vec<String>>;
-
-            
             if let Some((base, type_strs)) = parse_generic_call_name(func) {
                 base_name = base.to_string();
                 explicit_type_args = Some(type_strs.iter().map(|s| s.to_string()).collect());
@@ -8631,8 +7391,6 @@ fn collect_mono_from_expr(
                 base_name = func.clone();
                 explicit_type_args = None;
             }
-
-            
             let base_name = if defs.functions.contains_key(&base_name) {
                 base_name
             } else {
@@ -8640,22 +7398,13 @@ fn collect_mono_from_expr(
             };
             if let Some(fdef) = defs.functions.get(&base_name) {
                 if !fdef.type_params.is_empty() {
-                    
                     let type_args: Vec<String> = if let Some(ref explicit) = explicit_type_args {
                         explicit.clone()
                     } else {
                         infer_generic_args(&base_name, args, env, defs, expected)?
                     };
-
-                    
                     check_generic_constraints(fdef, &type_args, defs)?;
-
-                    
                     let mangled = mangled_name(&base_name, &type_args);
-
-                    
-                    
-                    
                     let key = MonoKey {
                         function: intern(&base_name),
                         types: type_args.clone(),
@@ -8667,18 +7416,11 @@ fn collect_mono_from_expr(
                         mono_fdefs.insert(key, mono);
                         worklist.push(mangled.clone());
                     }
-
-                    
                     if func != &mangled {
                         call_updates.insert(func.clone(), mangled);
                     }
                 }
             }
-
-            
-            
-            
-            
             for a in args {
                 collect_mono_from_expr(a, env, defs, mono_fdefs, call_updates, worklist, None)?;
             }
@@ -8728,8 +7470,6 @@ fn collect_mono_from_expr(
     }
     Ok(())
 }
-
-
 fn collect_mono_from_stmts(
     stmts: &[Stmt],
     env: &mut HashMap<String, Type>,
@@ -8741,14 +7481,9 @@ fn collect_mono_from_stmts(
     for s in stmts {
         match s {
             Stmt::Let { name, value, type_hint, .. } => {
-                
                 if let Ok(t) = infer_type(value, env, defs, &HashMap::new()) {
                     env.insert(name.clone(), t);
                 }
-                
-                
-                
-                
                 let expected = type_hint.as_ref().map(|h| type_from_str(h, defs));
                 if let Some(exp) = &expected {
                     env.insert(name.clone(), exp.clone());
@@ -8806,8 +7541,6 @@ fn collect_mono_from_stmts(
     }
     Ok(())
 }
-
-
 fn update_call_in_expr(e: &mut Expr, call_updates: &HashMap<String, String>) {
     match e {
         Expr::Call { func, .. } => {
@@ -8846,8 +7579,6 @@ fn update_call_in_expr(e: &mut Expr, call_updates: &HashMap<String, String>) {
         _ => {}
     }
 }
-
-
 fn update_call_in_stmts(stmts: &mut [Stmt], call_updates: &HashMap<String, String>) {
     for s in stmts.iter_mut() {
         match s {
@@ -8890,18 +7621,11 @@ fn update_call_in_stmts(stmts: &mut [Stmt], call_updates: &HashMap<String, Strin
         }
     }
 }
-
-
-
-
 fn monomorphize_all(defs: &mut Defs, stmts: &mut [Stmt]) -> Result<(), String> {
     let mut mono_fdefs: HashMap<MonoKey, FunctionDef> = HashMap::new();
     let mut call_updates: HashMap<String, String> = HashMap::new();
-
     let mut worklist: Vec<String> = defs.functions.keys().cloned().collect();
     let mut processed: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    
     let mut env: HashMap<String, Type> = HashMap::new();
     collect_mono_from_stmts(
         stmts,
@@ -8911,25 +7635,19 @@ fn monomorphize_all(defs: &mut Defs, stmts: &mut [Stmt]) -> Result<(), String> {
         &mut call_updates,
         &mut worklist,
     )?;
-
-    
     while let Some(func_name) = worklist.pop() {
         if processed.contains(&func_name) {
             continue;
         }
         processed.insert(func_name.clone());
-
         let fdef = match defs.functions.get(&func_name) {
             Some(f) => f.clone(),
             None => continue,
         };
-
-        
         let mut env: HashMap<String, Type> = HashMap::new();
         for (pname, ptype) in &fdef.params {
             env.insert(pname.clone(), type_from_str(ptype, defs));
         }
-
         collect_mono_from_stmts(
             &fdef.body,
             &mut env,
@@ -8939,44 +7657,27 @@ fn monomorphize_all(defs: &mut Defs, stmts: &mut [Stmt]) -> Result<(), String> {
             &mut worklist,
         )?;
     }
-
-    
     for (key, fdef) in &mono_fdefs {
         let mangled = &key.mangled;
         if !defs.functions.contains_key(mangled) {
             defs.functions.insert(mangled.clone(), fdef.clone());
         }
     }
-
-    
     for (_name, fdef) in defs.functions.iter_mut() {
         update_call_in_stmts(&mut fdef.body, &call_updates);
     }
-    
     update_call_in_stmts(stmts, &call_updates);
-
     Ok(())
 }
-
-
-
-
 fn memory_analyze(stmts: &[Stmt], defs: &Defs) -> Result<HashMap<String, MemoryPlace>, String> {
     let mut report: Vec<(String, MemoryPlace)> = Vec::new();
-    
-    
-    
     analyze_block(stmts, false, defs, &mut report)?;
-
     let mut map: HashMap<String, MemoryPlace> = HashMap::new();
     for (name, place) in &report {
         map.insert(name.clone(), *place);
     }
     Ok(map)
 }
-
-
-
 fn report_memory(memory: &HashMap<String, MemoryPlace>) {
     eprintln!("=== Memory ===");
     let mut entries: Vec<(&String, &MemoryPlace)> = memory.iter().collect();
@@ -8990,8 +7691,6 @@ fn report_memory(memory: &HashMap<String, MemoryPlace>) {
     }
     eprintln!();
 }
-
-
 fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "len" => Ok(Value::Int(s.chars().count() as i64)),
@@ -9016,7 +7715,6 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
                 Value::Int(n) => *n,
                 _ => return Err("slice() end must be int".to_string()),
             };
-            
             let chars: Vec<char> = s.chars().collect();
             let len = chars.len() as i64;
             let s_idx = if start < 0 { len + start } else { start }.max(0) as usize;
@@ -9042,8 +7740,6 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
             Ok(Value::String(s.repeat(n)))
         }
         "length" => Ok(Value::Int(s.chars().count() as i64)),
-        
-        
         "write" => {
             if args.len() != 1 {
                 return Err("write() takes exactly 1 argument (content)".to_string());
@@ -9115,8 +7811,6 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
         other => Err(format!("Unknown String method: {}", other)),
     }
 }
-
-
 fn eval_float_method(v: f64, method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "abs" => {
@@ -9134,8 +7828,6 @@ fn eval_float_method(v: f64, method: &str, args: &[Value]) -> Result<Value, Stri
         other => Err(format!("Unknown Float method: {}", other)),
     }
 }
-
-
 fn eval_list_method(arr: &[Value], method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "add" => {
@@ -9178,10 +7870,6 @@ fn eval_list_method(arr: &[Value], method: &str, args: &[Value]) -> Result<Value
         other => Err(format!("Unknown List method: {}", other)),
     }
 }
-
-
-
-
 fn eval_list_method_ext(arr: &[Value], method: &str, args: &[Value]) -> Result<Value, String> {
     match method {
         "push" => {
@@ -9254,20 +7942,9 @@ fn eval_list_method_ext(arr: &[Value], method: &str, args: &[Value]) -> Result<V
         _ => eval_list_method(arr, method, args),
     }
 }
-
-
-
-
-
-
 fn resolve_pkg_name(defs: &Defs, name: &str) -> Option<String> {
     defs.resolve_function(name)
 }
-
-
-
-
-
 fn is_runtime_builtin(name: &str) -> bool {
     matches!(
         name,
@@ -9281,7 +7958,6 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "abs" | "sqrt" | "min" | "max" | "clamp" | "pow"
     )
 }
-
 fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Result<Value, String> {
     match expr {
         Expr::IntLit(n) => Ok(Value::Int(*n)),
@@ -9296,10 +7972,8 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
         Expr::BinOp { left, op, right, resolved_operator } => {
             let l = eval_expr(left, env, defs)?;
             let r = eval_expr(right, env, defs)?;
-            
             match resolved_operator {
                 Some(ResolvedOperator::MethodCall { method, op: mop }) => {
-                    
                     let (sname, fields) = match &l {
                         Value::Struct { name, fields } => (name.clone(), fields.clone()),
                         _ => return Err("Operator interface target is not a struct".to_string()),
@@ -9330,7 +8004,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     }
                 }
                 Some(ResolvedOperator::Builtin) | None => {
-                    
                     match (&l, &r) {
                         (Value::Int(a), Value::Int(b)) => {
                             let result = match op.as_str() {
@@ -9420,7 +8093,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
             Ok(Value::Tuple(vals))
         }
-
         Expr::TupleAccess { tuple, index } => {
             let val = eval_expr(tuple, env, defs)?;
             match val {
@@ -9438,9 +8110,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 _ => Err(format!("Runtime error: cannot index non-tuple value")),
             }
         }
-
         Expr::Call { func, args } => {
-            
             match func.as_str() {
                 "print" | "println" => {
                     for arg in args {
@@ -9466,8 +8136,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     }
                     Ok(Value::StringBuilder(String::new()))
                 }
-                
-                
                 "int" => {
                     if args.len() != 1 {
                         return Err("int() takes exactly 1 argument".to_string());
@@ -9507,7 +8175,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             let val = eval_expr(&args[0], env, defs)?;
             Ok(Value::String(val.to_string()))
         }
-        
         "Some" => {
             if args.len() != 1 {
                 return Err("Some() takes exactly 1 argument".to_string());
@@ -9521,8 +8188,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
             Ok(Value::Option(None))
         }
-        
-        
         "push" => {
             let list = eval_expr(&args[0], env, defs)?;
             let item = eval_expr(&args[1], env, defs)?;
@@ -9580,7 +8245,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("contains_item() expects a list".to_string())
             }
         }
-        
         "contains" => {
             let s = eval_expr(&args[0], env, defs)?;
             let sub = eval_expr(&args[1], env, defs)?;
@@ -9661,8 +8325,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("byte_len() expects a string".to_string())
             }
         }
-        
-        
         "reverse" => {
             let list = eval_expr(&args[0], env, defs)?;
             if let Value::Array(mut arr) = list {
@@ -9672,7 +8334,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("reverse() expects a list".to_string())
             }
         }
-        
         "remove_at" => {
             let list = eval_expr(&args[0], env, defs)?;
             let idx = eval_expr(&args[1], env, defs)?;
@@ -9686,7 +8347,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("remove_at() expects (list, int)".to_string())
             }
         }
-        
         "to_upper" => {
             let s = eval_expr(&args[0], env, defs)?;
             if let Value::String(a) = s {
@@ -9713,7 +8373,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("repeat() expects (string, int)".to_string())
             }
         }
-        
         "time_now" => {
             let secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -9732,7 +8391,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("time_sleep() expects a float (seconds)".to_string())
             }
         }
-        
         "fs_exists" => {
             let p = eval_expr(&args[0], env, defs)?;
             if let Value::String(path) = p {
@@ -9799,7 +8457,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("fs_create_dir() expects a string path".to_string())
             }
         }
-        
         "abs" => {
             let x = eval_expr(&args[0], env, defs)?;
             if let Value::Float(f) = x {
@@ -9853,7 +8510,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("pow() expects two floats".to_string())
             }
         }
-        
         "input" => {
             use std::io::Write as _;
             if let Some(p) = args.first() {
@@ -9867,7 +8523,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 .map_err(|e| format!("input() failed: {}", e))?;
             Ok(Value::String(line.trim_end_matches(['\n', '\r']).to_string()))
         }
-        
         "read_file" => {
             let p = eval_expr(&args[0], env, defs)?;
             if let Value::String(path) = p {
@@ -9925,10 +8580,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
         }
         other => {
-                    
-                    
-                    
-                    
                     if other.contains('.') && !defs.functions.contains_key(other) {
                         if let Some(dot) = other.rfind('.') {
                             let (obj_path, method) = other.split_at(dot);
@@ -9942,15 +8593,11 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                             return dispatch_method(obj_val, method, arg_vals, env, defs);
                         }
                     }
-                    
-                    
                     let base = match other.find('(') {
                         Some(i) => &other[..i],
                         None => other,
                     };
                     let base = resolve_pkg_name(defs, base).unwrap_or_else(|| base.to_string());
-                    
-                    
                     if args.is_empty() {
                         if let Some(fdef) = defs.functions.get(&base) {
                             if fdef.params.is_empty() {
@@ -10041,19 +8688,15 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             }
         }
         Expr::MethodCall { object, method, args } => {
-            
             let mut arg_vals = Vec::new();
             for a in args {
                 arg_vals.push(eval_expr(a, env, defs)?);
             }
-
-            
             if let Expr::Ident(var) = object.as_ref() {
                 let current = env
                     .get(var)
                     .cloned()
                     .ok_or_else(|| format!("Undefined variable: {}", var))?;
-
                 match current {
                     Value::StringBuilder(mut s) => match method.as_str() {
                         "add" => {
@@ -10069,7 +8712,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     },
                     Value::Array(arr) => {
                         let result = eval_list_method_ext(&arr, method, &arg_vals)?;
-                        
                         if method == "add" || method == "set" {
                             env.insert(var.clone(), result.clone());
                         }
@@ -10090,7 +8732,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     )),
                 }
             } else {
-                
                 let obj = eval_expr(object, env, defs)?;
                 match obj {
                     Value::StringBuilder(s) => match method.as_str() {
@@ -10141,7 +8782,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 (Value::Int(a), Value::Int(b)) => {
                     let mut values = Vec::new();
                     let mut i = *a;
-                    
                     while i < *b {
                         values.push(Value::Int(i));
                         i += 1;
@@ -10151,7 +8791,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 _ => Err("Range requires integer bounds".to_string()),
             }
         }
-
         Expr::Index { target, index } => {
             let target_val = eval_expr(target, env, defs)?;
             let index_val = eval_expr(index, env, defs)?;
@@ -10173,7 +8812,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 _ => Err("Runtime error: cannot index non-list type".to_string()),
             }
         }
-
         Expr::Slice { target, start, end } => {
             let target_val = eval_expr(target, env, defs)?;
             let values = match target_val {
@@ -10206,12 +8844,10 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             let end_idx = if end_idx < start_idx as i64 { start_idx as i64 } else { end_idx };
             Ok(Value::Slice(values[start_idx..end_idx as usize].to_vec()))
         }
-
         Expr::Await(inner) => {
             let fut = eval_expr(inner, env, defs)?;
             match fut {
                 Value::Future { func, args } => {
-                    
                     call_function_impl(&func, args, defs, true)
                 }
                 other => Err(format!(
@@ -10222,7 +8858,6 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
         }
     }
 }
-
 fn call_function(
     name: &str,
     args: Vec<Value>,
@@ -10230,9 +8865,6 @@ fn call_function(
 ) -> Result<Value, String> {
     call_function_impl(name, args, defs, false)
 }
-
-
-
 fn call_function_impl(
     name: &str,
     args: Vec<Value>,
@@ -10244,7 +8876,6 @@ fn call_function_impl(
         .get(name)
         .cloned()
         .ok_or_else(|| format!("Unknown function: {}", name))?;
-
     if args.len() != func.params.len() {
         return Err(format!(
             "Function {} expects {} argument(s), got {}",
@@ -10253,24 +8884,18 @@ fn call_function_impl(
             args.len()
         ));
     }
-
     let mut local: HashMap<String, Value> = HashMap::new();
     for ((param_name, _param_type), val) in func.params.iter().zip(args.iter().cloned()) {
         local.insert(param_name.clone(), val);
     }
-
-    
-    
     if func.is_async && !force_run {
         return Ok(Value::Future {
             func: name.to_string(),
             args,
         });
     }
-
     Ok(exec_value(execute_stmts(&func.body, &mut local, defs)?))
 }
-
 fn call_method(
     struct_name: &str,
     fields: &Vec<(String, Value)>,
@@ -10282,14 +8907,11 @@ fn call_method(
         .structs
         .get(struct_name)
         .ok_or_else(|| format!("Unknown struct: {}", struct_name))?;
-
     let func = struct_def
         .methods
         .get(method)
         .cloned()
         .ok_or_else(|| format!("Unknown method: {} on {}", method, struct_name))?;
-
-
     if args.len() != func.params.len() {
         return Err(format!(
             "{}.{} expects {} argument(s), got {}",
@@ -10299,28 +8921,15 @@ fn call_method(
             args.len()
         ));
     }
-
-    
     let mut local: HashMap<String, Value> = HashMap::new();
     for (fname, fval) in fields {
         local.insert(fname.clone(), fval.clone());
     }
-
-    
     for ((param_name, _param_type), val) in func.params.iter().zip(args.into_iter()) {
         local.insert(param_name.clone(), val);
     }
-
     Ok(exec_value(execute_stmts(&func.body, &mut local, defs)?))
 }
-
-
-
-
-
-
-
-
 fn eval_struct_method(
     struct_name: &str,
     fields: &Vec<(String, Value)>,
@@ -10335,9 +8944,7 @@ fn eval_struct_method(
             .map(|(_, v)| v.clone())
             .ok_or_else(|| format!("struct {} missing field '{}'", struct_name, name))
     };
-
     match (struct_name, method) {
-        
         ("time.Instant", "sleep") => {
             if args.len() != 1 {
                 return Err("Instant.sleep() takes exactly 1 argument".to_string());
@@ -10370,11 +8977,9 @@ fn eval_struct_method(
             })
         }
         ("time.Duration", "secs") => field("secs"),
-        
         ("fs.FileMetadata", "size") => field("size"),
         ("fs.FileMetadata", "is_dir") => field("is_dir"),
         ("fs.FileMetadata", "is_file") => field("is_file"),
-        
         ("collections.HashMap", "insert") => {
             if args.len() != 2 {
                 return Err("HashMap.insert() takes exactly 2 arguments".to_string());
@@ -10456,7 +9061,6 @@ fn eval_struct_method(
                 _ => Err("HashMap.entries is not a list".to_string()),
             }
         }
-        
         ("collections.HashSet", "add") => {
             if args.len() != 1 {
                 return Err("HashSet.add() takes exactly 1 argument".to_string());
@@ -10492,7 +9096,6 @@ fn eval_struct_method(
                 _ => Err("HashSet.items is not a list".to_string()),
             }
         }
-        
         ("string.String", "to_upper") => match field("0")? {
             Value::String(s) => Ok(Value::String(s.to_uppercase())),
             _ => Err("string.String value is not a String".to_string()),
@@ -10529,27 +9132,18 @@ fn eval_struct_method(
         )),
     }
 }
-
 #[derive(Debug)]
 enum ExecResult {
-    
     Continue,
-    
-    
     Value(Value),
-    
     Return(Value),
 }
-
-
-
 fn exec_value(r: ExecResult) -> Value {
     match r {
         ExecResult::Return(v) | ExecResult::Value(v) => v,
         ExecResult::Continue => Value::Int(0),
     }
 }
-
 fn execute_stmts(
     stmts: &[Stmt],
     env: &mut HashMap<String, Value>,
@@ -10567,15 +9161,12 @@ fn execute_stmts(
             _ => execute_stmt(stmt, env, defs)?,
         };
         match r {
-            
             ExecResult::Return(v) => {
                 for d in defers.iter().rev() {
                     execute_stmts(d, env, defs)?;
                 }
                 return Ok(ExecResult::Return(v));
             }
-            
-            
             other => {
                 if idx == len - 1 {
                     last = other;
@@ -10588,7 +9179,6 @@ fn execute_stmts(
     }
     Ok(last)
 }
-
 fn bind_tuple_value(
     pat_elems: &[Pattern],
     vals: &[Value],
@@ -10626,7 +9216,6 @@ fn bind_tuple_value(
     }
     Ok(())
 }
-
 fn execute_stmt(
     stmt: &Stmt,
     env: &mut HashMap<String, Value>,
@@ -10687,7 +9276,6 @@ fn execute_stmt(
                     ))
                 }
             };
-
             if is_true {
                 execute_stmts(then_branch, env, defs)
             } else if let Some(els) = else_branch {
@@ -10696,10 +9284,8 @@ fn execute_stmt(
                 Ok(ExecResult::Continue)
             }
         }
-
         Stmt::For { var, iterable, body } => {
             let val = eval_expr(iterable, env, defs)?;
-            
             let items: Vec<Value> = match val {
                 Value::Array(arr) | Value::Slice(arr) => arr,
                 other => return Err(format!("Cannot iterate over {:?}", other)),
@@ -10713,7 +9299,6 @@ fn execute_stmt(
             }
             Ok(ExecResult::Continue)
         }
-
         Stmt::While { cond, body } => {
             loop {
                 let cond_val = eval_expr(cond, env, defs)?;
@@ -10736,13 +9321,9 @@ fn execute_stmt(
             }
             Ok(ExecResult::Continue)
         }
-
-        
         Stmt::Fn { .. } => Ok(ExecResult::Continue),
-
         Stmt::Match { expr, arms } => {
             let val = eval_expr(expr, env, defs)?;
-
             match val {
                 Value::State { name, values } => {
                     for (pattern, body) in arms {
@@ -10813,7 +9394,6 @@ fn execute_stmt(
                                 match pattern {
                                     Pattern::Variant { name: pname, bindings } => {
                                         if pname == "None" {
-                                            
                                             let _ = bindings;
                                             return execute_stmts(body, env, defs);
                                         }
@@ -10852,18 +9432,13 @@ fn execute_stmt(
                 )),
             }
         }
-
-        
         Stmt::State { .. } => Ok(ExecResult::Continue),
-
         _ => Ok(ExecResult::Continue),
     }
 }
-
 #[cfg(test)]
 mod phase10_tests {
     use super::*;
-
     #[test]
     fn fmt_normalizes_and_is_idempotent() {
         let src = "fn main():\n\t\tprintln(1)   \n\n\n    println(2)\n";
@@ -10874,7 +9449,6 @@ mod phase10_tests {
         let twice = format_lime_source(&once);
         assert_eq!(once, twice, "formatter must be idempotent");
     }
-
     #[test]
     fn dce_removes_unused_functions() {
         let src = "fn used():\n    return 1\n\nfn unused():\n    return 2\n\nfn main():\n    println(used())\n";
@@ -10889,7 +9463,6 @@ mod phase10_tests {
         assert!(defs.functions.contains_key("used"));
         assert!(defs.functions.contains_key("main"));
     }
-
     #[test]
     fn type_shorthands_resolve() {
         let d = Defs::new();
@@ -10898,10 +9471,6 @@ mod phase10_tests {
         assert_eq!(type_from_str("b", &d), Type::Bool);
         assert_eq!(type_from_str("s", &d), Type::String);
     }
-
-    
-    
-    
     #[test]
     fn type_from_str_void_maps_to_unit() {
         let d = Defs::new();
@@ -10909,23 +9478,15 @@ mod phase10_tests {
         assert_eq!(type_from_str("unit", &d), Type::Unit);
         assert_eq!(type_to_string(&Type::Unit), "void");
     }
-
-    
     fn codegen_from_source(src: &str) -> (String, Vec<String>) {
         let (tokens, locs) = tokenize(src).expect("tokenize");
         let stmts = parse(tokens, locs).expect("parse");
         let mut defs = Defs::new();
         collect_defs(&stmts, &mut defs);
-        
-        
         let _ = infer_function_return_types(&mut defs);
         let memory = memory_analyze(&stmts, &defs).expect("memory analyze");
         codegen::emit_llvm(&stmts, &defs, &memory)
     }
-
-    
-    
-    
     #[test]
     fn codegen_reports_warning_for_unsupported_body() {
         let src = "fn main():\n    let x = missing_fn()\n    return\n";
@@ -10940,11 +9501,8 @@ mod phase10_tests {
             "warning should name the offending function 'main': {:?}",
             warnings
         );
-        
         assert!(ir.contains("define"), "expected a function definition in IR");
     }
-
-    
     #[test]
     fn codegen_no_warning_for_supported_body() {
         let src = "fn main():\n    let x = 1 + 2\n    println(x)\n    return\n";
@@ -10956,11 +9514,6 @@ mod phase10_tests {
         );
         assert!(ir.contains("define"), "expected a function definition in IR");
     }
-
-    
-
-    
-    
     #[test]
     fn codegen_list_literal_uses_runtime_alloc() {
         let src = "fn main():\n    let nums = [1, 2, 3]\n    return\n";
@@ -10981,9 +9534,6 @@ mod phase10_tests {
             ir
         );
     }
-
-    
-    
     #[test]
     fn codegen_list_add_set_store_back() {
         let src = "fn main():\n    let nums = [1, 2, 3]\n    nums.add(4)\n    nums.set(0, 9)\n    return\n";
@@ -11003,7 +9553,6 @@ mod phase10_tests {
             "set must use the sret ABI\n--- ir ---\n{}",
             ir
         );
-        
         let stores = ir.matches("store %LimeList").count();
         assert!(
             stores >= 3,
@@ -11011,9 +9560,6 @@ mod phase10_tests {
             stores, ir
         );
     }
-
-    
-    
     #[test]
     fn codegen_get_on_non_int_list_warns() {
         let src = "fn main():\n    let strs = [\"a\", \"b\"]\n    println(strs.get(0))\n    return\n";
@@ -11024,8 +9570,6 @@ mod phase10_tests {
             warnings, ir
         );
     }
-
-    
     #[test]
     fn codegen_string_runtime_methods() {
         let src = "fn main():\n    let s = \"hello\"\n    println(s.length())\n    println(s.slice(1, 3))\n    let t = s + \"!\"\n    println(t)\n    return\n";
@@ -11051,8 +9595,6 @@ mod phase10_tests {
             ir
         );
     }
-
-    
     #[test]
     fn codegen_chars_bytes_sret_abi() {
         let src = "fn main():\n    let cs = \"abc\".chars()\n    let bs = \"abc\".bytes()\n    return\n";
@@ -11073,10 +9615,6 @@ mod phase10_tests {
             ir
         );
     }
-
-    
-    
-    
     #[test]
     fn codegen_bare_return_matches_inferred_type() {
         let src = "fn main():\n    println(\"hi\")\n    return\n";
@@ -11097,8 +9635,6 @@ mod phase10_tests {
             ir
         );
     }
-
-    
     #[test]
     fn codegen_bare_return_void_stays_void() {
         let src = "fn main():\n    let x = 1\n    return\n";
@@ -11114,11 +9650,6 @@ mod phase10_tests {
             ir
         );
     }
-
-    
-
-    
-    
     fn type_check_source_as(name: &str, src: &str) -> String {
         let (tokens, locs) = tokenize(src).expect("tokenize");
         let (stmts, stmt_locs) = parse_with_locs(tokens, locs, &std::collections::HashSet::new()).expect("parse");
@@ -11130,9 +9661,6 @@ mod phase10_tests {
             Err(e) => e,
         }
     }
-
-    
-    
     fn warnings_from_source(src: &str) -> Vec<String> {
         let (tokens, locs) = tokenize(src).expect("tokenize");
         let (stmts, stmt_locs) = parse_with_locs(tokens, locs, &std::collections::HashSet::new()).expect("parse");
@@ -11143,22 +9671,17 @@ mod phase10_tests {
         collect_warnings(&stmts, &None, &loc, &mut diags);
         diags.iter().map(render_diagnostic).collect()
     }
-
-    
     #[test]
     fn type_error_carries_position() {
         for (label, src) in [
-            
             (
                 "undef",
                 "fn main():\n    println(missing)\n    return\n",
             ),
-            
             (
                 "mismatch",
                 "fn main():\n    let x = 1\n    let y = x + \"s\"\n    println(y)\n    return\n",
             ),
-            
             (
                 "field",
                 "fn main():\n    let x = 1\n    let y = x.foo\n    return\n",
@@ -11171,7 +9694,6 @@ mod phase10_tests {
                 label,
                 err
             );
-            
             let after = err.split("error[type] main.lime:").nth(1).unwrap_or("");
             assert!(
                 after.chars().next().map_or(false, |c| c.is_ascii_digit()),
@@ -11181,22 +9703,16 @@ mod phase10_tests {
             );
         }
     }
-
-    
     #[test]
     fn valid_program_has_no_type_error() {
         let src = "fn main():\n    let x = 1 + 2\n    println(x)\n    return\n";
         let err = type_check_source_as("main.lime", src);
         assert!(err.is_empty(), "valid program should not error, got:\n{}", err);
     }
-
-    
-    
     #[test]
     fn multiple_type_errors_collected() {
         let src = "fn main():\n    let x = 1\n    let y = x + \"s\"\n    let z = missing_var\n    let w = 2\n    let q = w.foo\n    println(q)\n";
         let err = type_check_source_as("main.lime", src);
-        
         assert!(
             err.contains("binary '+' type mismatch"),
             "expected type-mismatch error, got:\n{}",
@@ -11212,7 +9728,6 @@ mod phase10_tests {
             "expected field-access error, got:\n{}",
             err
         );
-        
         let annotated = err.matches("error[type] main.lime:").count();
         assert!(
             annotated >= 3,
@@ -11221,22 +9736,13 @@ mod phase10_tests {
             err
         );
     }
-
-    
-    
-    
     #[test]
     fn did_you_mean_suggests_similar_name() {
-        
-        
-        
         let src = r#"
 struct Message:
     s: message
-
 fn print(s: s):
     return
-
 fn main():
     let counter = 1
     let n = countre
@@ -11246,7 +9752,6 @@ fn main():
     return
 "#;
         let err = type_check_source_as("main.lime", src);
-        
         assert!(
             err.contains("did you mean 'counter'?"),
             "expected hint for undefined variable 'countre', got:\n{}",
@@ -11263,9 +9768,6 @@ fn main():
             err
         );
     }
-
-    
-    
     #[test]
     fn no_hint_when_no_close_candidate() {
         let src = "fn main():\n    let q = completely_unrelated_name_xyz\n    return\n";
@@ -11281,9 +9783,6 @@ fn main():
             err
         );
     }
-
-    
-    
     #[test]
     fn warns_on_unused_local() {
         let src = "fn main():\n    let x = 1\n    let y = 2\n    println(y)\n    return\n";
@@ -11298,16 +9797,12 @@ fn main():
             "'y' is used, should not be flagged:\n{:?}",
             warns
         );
-        
         assert!(
             warns.iter().any(|w| w.starts_with("warning[type] main.lime:")),
             "warnings must render via render_diagnostic, got:\n{:?}",
             warns
         );
     }
-
-    
-    
     #[test]
     fn warns_on_unreachable_code() {
         let src = "fn main():\n    let x = 1\n    return x\n    let y = 2\n    return y\n";
@@ -11318,8 +9813,6 @@ fn main():
             warns
         );
     }
-
-    
     #[test]
     fn no_warnings_for_clean_program() {
         let src = "fn main():\n    let x = 1\n    println(x)\n    return\n";
@@ -11327,6 +9820,3 @@ fn main():
         assert!(warns.is_empty(), "clean program should warn nothing, got:\n{:?}", warns);
     }
 }
-
-
-

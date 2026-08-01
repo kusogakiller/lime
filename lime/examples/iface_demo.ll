@@ -29,26 +29,36 @@ declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)
 
 %Cat = type { i8*, i64 }
 %Dog = type { i8*, i64 }
-%Result = type { i32, [4 x i64] }
 %Option = type { i32, [4 x i64] }
+%Result = type { i32, [4 x i64] }
 
-@.str.1 = private unnamed_addr constant [1 x i8] c"\00"
-@.str.4 = private unnamed_addr constant [5 x i8] c"woof\00"
+@.str.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.str.2 = private unnamed_addr constant [5 x i8] c"Mimi\00"
-@.str.0 = private unnamed_addr constant [4 x i8] c"Rex\00"
 @.str.3 = private unnamed_addr constant [5 x i8] c"meow\00"
+@.str.1 = private unnamed_addr constant [4 x i8] c"Rex\00"
+@.str.4 = private unnamed_addr constant [5 x i8] c"woof\00"
 
+
+; Function make_sound()
+define void @make_sound (%LimeIface %p0) {
+L0:
+  %t0 = alloca %LimeIface, align 8
+  store %LimeIface %p0, %LimeIface* %t0, align 8
+  %t1 = load %LimeIface, %LimeIface* %t0, align 8
+  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([3 x i8], ptr @.str.str, i64 0, i64 0), i8* 0)
+  ret void
+}
 
 ; Function main()
 define void @main_lime () {
 L0:
-  %t0 = getelementptr inbounds [4 x i8], ptr @.str.0, i64 0, i64 0
+  %t0 = getelementptr inbounds [4 x i8], ptr @.str.1, i64 0, i64 0
   %t1 = insertvalue %Dog undef, i8* %t0, 0
   %t2 = insertvalue %Dog %t1, i64 4, 1
   %t3 = alloca %Dog, align 8
   store %Dog %t2, %Dog* %t3, align 8
   %t4 = load %Dog, %Dog* %t3, align 8
-  %t5 = getelementptr inbounds [1 x i8], ptr @.str.1, i64 0, i64 0
+  %t5 = getelementptr inbounds [1 x i8], ptr @.str.0, i64 0, i64 0
   %t6 = call i8* @Dog_speak(%Dog %t4, i8* %t5)
   call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([3 x i8], ptr @.str.str, i64 0, i64 0), i8* %t6)
   %t7 = load %Dog, %Dog* %t3, align 8
@@ -60,23 +70,13 @@ L0:
   %t12 = alloca %Cat, align 8
   store %Cat %t11, %Cat* %t12, align 8
   %t13 = load %Cat, %Cat* %t12, align 8
-  %t14 = getelementptr inbounds [1 x i8], ptr @.str.1, i64 0, i64 0
+  %t14 = getelementptr inbounds [1 x i8], ptr @.str.0, i64 0, i64 0
   %t15 = call i8* @Cat_speak(%Cat %t13, i8* %t14)
   call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([3 x i8], ptr @.str.str, i64 0, i64 0), i8* %t15)
   %t16 = load %Dog, %Dog* %t3, align 8
   call void @make_sound(%LimeIface %t16)
   %t17 = load %Cat, %Cat* %t12, align 8
   call void @make_sound(%LimeIface %t17)
-  ret void
-}
-
-; Function make_sound()
-define void @make_sound (%LimeIface %p0) {
-L0:
-  %t0 = alloca %LimeIface, align 8
-  store %LimeIface %p0, %LimeIface* %t0, align 8
-  %t1 = load %LimeIface, %LimeIface* %t0, align 8
-  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([3 x i8], ptr @.str.str, i64 0, i64 0), i8* 0)
   ret void
 }
 

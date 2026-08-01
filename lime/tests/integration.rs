@@ -1,4 +1,3 @@
-
 use std::process::Command;
 
 fn lime_run(dir: &str) -> String {
@@ -13,8 +12,6 @@ fn lime_run(dir: &str) -> String {
     s.push_str(&String::from_utf8_lossy(&output.stderr));
     s
 }
-
-
 
 fn lime_cmd(subcmd: &str, toml: &str, extra: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_lime");
@@ -58,7 +55,6 @@ fn collections_demo() {
     }
 }
 
-
 #[test]
 fn collections_demo2() {
     let out = lime_run("examples/collections_demo2");
@@ -82,7 +78,6 @@ fn collections_demo2() {
     }
 }
 
-
 #[test]
 fn fs_demo2() {
     let out = lime_run("examples/fs_demo2");
@@ -95,7 +90,6 @@ fn fs_demo2() {
         );
     }
 }
-
 
 #[test]
 fn string_demo2() {
@@ -119,7 +113,6 @@ fn string_demo2() {
     }
 }
 
-
 #[test]
 fn time_demo() {
     let out = lime_run("examples/time_demo");
@@ -132,8 +125,6 @@ fn time_demo() {
         );
     }
 }
-
-
 
 #[test]
 fn unified_pipeline_legacy_shorthand_runs() {
@@ -192,9 +183,6 @@ fn backend_demo() {
     assert!(ir.contains("@main()"), "expected C main wrapper\n--- ir ---\n{}", ir);
 }
 
-
-
-
 #[test]
 fn unified_pipeline_writes_lock_and_cache() {
     let lock = "examples/pipeline_demo/citrus.lock";
@@ -213,10 +201,6 @@ fn unified_pipeline_writes_lock_and_cache() {
         cached
     );
 }
-
-
-
-
 
 #[test]
 fn emit_llvm_smoke() {
@@ -280,11 +264,6 @@ fn iface_demo() {
     }
 }
 
-
-
-
-
-
 #[test]
 fn emit_llvm_interface() {
     let bin = env!("CARGO_BIN_EXE_lime");
@@ -323,13 +302,6 @@ fn emit_llvm_interface() {
         ir
     );
 }
-
-
-
-
-
-
-
 
 #[test]
 fn emit_llvm_phase9_demo() {

@@ -27,21 +27,11 @@ declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)
 @.str.true   = private unnamed_addr constant [5 x i8] c"true\00"
 @.str.false  = private unnamed_addr constant [6 x i8] c"false\00"
 
-%Option = type { i32, [4 x i64] }
-%math.Result = type { i32, [4 x i64] }
 %math.Option = type { i32, [4 x i64] }
+%math.Result = type { i32, [4 x i64] }
+%Option = type { i32, [4 x i64] }
 %Result = type { i32, [4 x i64] }
 
-
-; Function used()
-define i64 @used (i64 %p0) {
-L0:
-  %t0 = alloca i64, align 8
-  store i64 %p0, i64* %t0, align 8
-  %t1 = load i64, i64* %t0, align 8
-  %t2 = add i64 %t1, 1
-  ret i64 %t2
-}
 
 ; Function main()
 define void @main_lime () {
@@ -54,6 +44,16 @@ L0:
   %t3 = load double, double* %t2, align 8
   call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], ptr @.str.float_nl, i64 0, i64 0), double %t3)
   ret void
+}
+
+; Function used()
+define i64 @used (i64 %p0) {
+L0:
+  %t0 = alloca i64, align 8
+  store i64 %p0, i64* %t0, align 8
+  %t1 = load i64, i64* %t0, align 8
+  %t2 = add i64 %t1, 1
+  ret i64 %t2
 }
 
 ; Function math.sqrt()

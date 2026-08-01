@@ -31,8 +31,8 @@ declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)
 %Option = type { i32, [4 x i64] }
 %Result = type { i32, [4 x i64] }
 
-@.str.1 = private unnamed_addr constant [7 x i8] c" world\00"
 @.str.0 = private unnamed_addr constant [6 x i8] c"hello\00"
+@.str.1 = private unnamed_addr constant [7 x i8] c" world\00"
 
 
 ; Function make_point()

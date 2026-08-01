@@ -1,24 +1,4 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 use std::process::Command;
-
-
 
 fn lime_cmd(subcmd: &str, toml: &str, extra: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_lime");
@@ -47,17 +27,9 @@ fn write_project(dir: &str, source: &str) {
     .unwrap();
 }
 
-
-
-
 fn llvm_toolchain_available() -> bool {
     std::env::var("LLVM_SYS_221_PREFIX").is_ok() || std::env::var("LIME_LLVM_PREFIX").is_ok()
 }
-
-
-
-
-
 
 #[test]
 fn emit_object_bare_return_compiles_and_runs() {
@@ -109,9 +81,6 @@ fn emit_object_bare_return_compiles_and_runs() {
     );
 }
 
-
-
-
 #[test]
 fn emit_object_list_add_set_runs() {
     use std::fs;
@@ -152,10 +121,6 @@ fn emit_object_list_add_set_runs() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
-
-
-
-
 
 #[test]
 fn emit_object_let_literal_runs() {
@@ -213,8 +178,6 @@ fn emit_object_let_literal_runs() {
     );
 }
 
-
-
 #[test]
 fn emit_object_let_literal_binop_runs() {
     use std::fs;
@@ -262,9 +225,6 @@ fn emit_object_let_literal_binop_runs() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
-
-
-
 
 #[test]
 fn emit_object_nested_literal_binop_runs() {
@@ -317,10 +277,6 @@ fn emit_object_nested_literal_binop_runs() {
     );
 }
 
-
-
-
-
 #[test]
 fn emit_object_mixed_literal_binop_runs() {
     use std::fs;
@@ -371,8 +327,6 @@ fn emit_object_mixed_literal_binop_runs() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
-
-
 
 #[test]
 fn emit_object_reassignment_runs() {
@@ -425,9 +379,6 @@ fn emit_object_reassignment_runs() {
     );
 }
 
-
-
-
 #[test]
 fn emit_object_refuses_unlowered_function() {
     use std::fs;
@@ -453,11 +404,6 @@ fn emit_object_refuses_unlowered_function() {
         "no executable may be produced when lowering is incomplete"
     );
 }
-
-
-
-
-
 
 #[test]
 fn emit_object_await_int_runs() {
@@ -520,9 +466,6 @@ fn emit_object_await_int_runs() {
     );
 }
 
-
-
-
 #[test]
 fn emit_object_await_string_runs() {
     use std::fs;
@@ -583,9 +526,6 @@ fn emit_object_await_string_runs() {
         String::from_utf8_lossy(&run.stderr)
     );
 }
-
-
-
 
 #[test]
 fn emit_object_await_nested_runs() {
