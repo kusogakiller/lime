@@ -1,0 +1,6 @@
+[package]
+name = "inference_demo"
+version = "v0.1.0"
+
+[files]
+main = "main.lime"

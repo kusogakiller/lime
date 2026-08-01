@@ -1,0 +1,14 @@
+fn main():
+    let str: s = "  Hello, Lime  "
+    println(string.trim(s))
+    println(string.to_upper(s))
+    println(string.to_lower(s))
+    println(string.repeat("ab", 3))
+    println(string.replace("a-b-c", "-", "_"))
+    let List(str): parts = string.split("x,y,z", ",")
+    println(parts)
+    println(string.slice("abcdef", 1, 4))
+    println(string.contains(s, "Lime"))
+    println(string.starts_with(s, "  Hello"))
+    println(string.ends_with(s, "Lime  "))
+    return

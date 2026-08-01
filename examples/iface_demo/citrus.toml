@@ -1,0 +1,8 @@
+[package]
+name = "iface_demo"
+version = "v0.1.0"
+
+[files]
+main = "main.lime"
+
+[import]

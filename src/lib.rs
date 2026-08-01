@@ -209,16 +209,26 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
             continue;
         }
         if ch == '/' && i + 1 < n && chars[i + 1] == '*' {
+            let comment_start = line;
             i += 2;
-            while i + 1 < n && !(chars[i] == '*' && chars[i + 1] == '/') {
+            let mut closed = false;
+            while i + 1 < n {
+                if chars[i] == '*' && chars[i + 1] == '/' {
+                    closed = true;
+                    i += 2;
+                    break;
+                }
                 if chars[i] == '\n' {
                     line += 1;
                     col = 1;
                 }
                 i += 1;
             }
-            if i + 1 < n {
-                i += 2;
+            if !closed {
+                return Err(format!(
+                    "Unterminated block comment (opened on line {})",
+                    comment_start
+                ));
             }
             continue;
         }
@@ -659,12 +669,10 @@ enum Pattern {
         bindings: Vec<String>,
     },
     Try {
-        name: String,
+        elems: Vec<Pattern>,
     },
-    ErrorAs {
-        name: String,
-    },
-    Ignore,
+    Error,
+    Catch,
     Tuple(Vec<Pattern>),
 }
 
@@ -1217,6 +1225,12 @@ impl Parser {
             }
             _ => return Err(format!("Expected type, got {:?}", self.current())),
         };
+        if base == "void" || base == "unit" || base == "u" {
+            return Err(format!(
+                "'{}' is not a user-facing type; omit the annotation and let Lime infer the type",
+                base
+            ));
+        }
         // T? 鬯ｨ・ｾ繝ｻ・ｵ驕ｶ謫ｾ・ｽ・ｫ髫ｰ繝ｻ蝮ｩ陜ｮ謇句ｰ・・・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ 鬮ｯ貅ｷ萓帙・・ｾ鬲・ｼ夲ｽｽ・ｽ陷･・ｲ繝ｻ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ ? 鬩搾ｽｵ繝ｻ・ｺ髫ｶ蜻ｵ・ｶ・｣繝ｻ・ｽ繝ｻ・ｶ髯橸ｽ｢繝ｻ・ｹ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｶ・ｽ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬮｣魃会ｽｽ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE Option(T) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髯ｷ・ｷ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
         if self.current() == &Token::Question {
             self.advance();
@@ -1827,6 +1841,7 @@ impl Parser {
         }
 
         let mut arms = Vec::new();
+        let mut seen_try = false;
         while self.current() != &Token::Dedent && self.current() != &Token::Eof {
             if matches!(self.current(), Token::Newline | Token::Indent) {
                 self.advance();
@@ -1839,7 +1854,10 @@ impl Parser {
             }
 
             let pattern = if self.current() == &Token::LParen {
-                self.parse_tuple_pattern()?
+                return Err(
+                    "Expected a variant or `try (...)` in match arm, got a bare tuple pattern (write `try (...)` to match a tuple)"
+                        .to_string(),
+                );
             } else {
                 let name = match self.current() {
                     Token::Ident(n) => n.clone(),
@@ -1848,24 +1866,42 @@ impl Parser {
                 self.advance();
 
                 if name == "_" {
-                    Pattern::Ignore
-                } else if name == "try" && self.current() == &Token::LParen {
+                    return Err(
+                        "`_` is no longer a wildcard pattern; use `catch:` instead".to_string(),
+                    );
+                } else if name == "catch" {
+                    if matches!(self.current(), Token::Ident(_) | Token::LParen) {
+                        return Err(
+                            "`catch` is a catch-all arm and does not bind values".to_string(),
+                        );
+                    }
+                    Pattern::Catch
+                } else if name == "try" {
+                    if self.current() != &Token::LParen {
+                        return Err(
+                            "`try` must be followed by a tuple pattern, e.g. `try (a, b):`"
+                                .to_string(),
+                        );
+                    }
                     self.advance();
-                    let b = match self.current() {
-                        Token::Ident(n) => n.clone(),
-                        other => return Err(format!("Expected binding name in try pattern, got {:?}", other)),
-                    };
-                    self.advance();
+                    let elems = self.parse_tuple_elems()?;
                     self.expect(Token::RParen)?;
-                    Pattern::Try { name: b }
-                } else if name == "error" && self.current() == &Token::Ident("as".to_string()) {
-                    self.advance();
-                    let b = match self.current() {
-                        Token::Ident(n) => n.clone(),
-                        other => return Err(format!("Expected binding name after 'error as', got {:?}", other)),
-                    };
-                    self.advance();
-                    Pattern::ErrorAs { name: b }
+                    seen_try = true;
+                    Pattern::Try { elems }
+                } else if name == "error" {
+                    if self.current() == &Token::Ident("as".to_string()) {
+                        return Err(
+                            "`error as x` is deprecated; write `error:` and use the failure payload inside the body"
+                                .to_string(),
+                        );
+                    }
+                    if !seen_try {
+                        return Err(
+                            "`error:` is only valid in a match arm following a `try (...)` arm"
+                                .to_string(),
+                        );
+                    }
+                    Pattern::Error
                 } else {
                     let mut bindings = Vec::new();
                     if self.current() == &Token::LParen {
@@ -1906,6 +1942,12 @@ impl Parser {
 
     fn parse_tuple_pattern(&mut self) -> Result<Pattern, String> {
         self.expect(Token::LParen)?;
+        let elems = self.parse_tuple_elems()?;
+        self.expect(Token::RParen)?;
+        Ok(Pattern::Tuple(elems))
+    }
+
+    fn parse_tuple_elems(&mut self) -> Result<Vec<Pattern>, String> {
         let mut elems = Vec::new();
         while self.current() != &Token::RParen {
             let elem = if self.current() == &Token::LParen {
@@ -1917,7 +1959,12 @@ impl Parser {
                 };
                 self.advance();
                 if name == "_" {
-                    Pattern::Ignore
+                    return Err(
+                        "`_` is no longer a wildcard; use `catch` to ignore a tuple element"
+                            .to_string(),
+                    );
+                } else if name == "catch" {
+                    Pattern::Catch
                 } else {
                     Pattern::Variant { name, bindings: vec![] }
                 }
@@ -1928,8 +1975,7 @@ impl Parser {
                 self.advance();
             }
         }
-        self.expect(Token::RParen)?;
-        Ok(Pattern::Tuple(elems))
+        Ok(elems)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, String> {
@@ -7172,12 +7218,12 @@ fn check_stmt_inner(
                 let mut has_wildcard = false;
                 for (pattern, body) in arms {
                     match pattern {
-                        Pattern::Ignore => {
+                        Pattern::Catch => {
                             has_wildcard = true;
                             check_stmts(body, env, defs, expected_return, is_async, loc, diags);
                             if !diags.is_empty() { return Err(String::new()); }
                         }
-                        Pattern::Tuple(elems) => {
+                        Pattern::Tuple(elems) | Pattern::Try { elems } => {
                             let mut arm_env = env.clone();
                             bind_tuple_pattern(elems, elem_types, defs, &mut arm_env)?;
                             check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
@@ -7191,9 +7237,11 @@ fn check_stmt_inner(
                         }
                     }
                 }
-                if !has_wildcard && !arms.iter().any(|(p, _)| matches!(p, Pattern::Tuple(_))) {
+                if !has_wildcard
+                    && !arms.iter().any(|(p, _)| matches!(p, Pattern::Tuple(_) | Pattern::Try { .. }))
+                {
                     return Err(
-                        "Type error: match on tuple is not exhaustive (add a wildcard `_` or a tuple pattern)"
+                        "Type error: match on tuple is not exhaustive (add a `catch:` arm or a `try (...)` pattern)"
                             .to_string(),
                     );
                 }
@@ -7215,18 +7263,62 @@ fn check_stmt_inner(
                 let mut covered: Vec<String> = Vec::new();
                 let mut has_wildcard = false;
                 for (pattern, body) in arms {
-                    if matches!(pattern, Pattern::Ignore) {
+                    if matches!(pattern, Pattern::Catch) {
                         has_wildcard = true;
                         check_stmts(body, env, defs, expected_return, is_async, loc, diags);
                         if !diags.is_empty() { return Err(String::new()); }
                         continue;
                     }
+
+                    if let Pattern::Try { elems } = pattern {
+                        let pname = "Success";
+                        if !variants.contains(&pname.to_string()) {
+                            let known: Vec<String> = variants.iter().filter(|v| *v != "Success" && *v != "Error").cloned().collect();
+                            return Err(format!(
+                                "Type error: unknown variant '{}' for state {}. available variants: {}",
+                                pname, state_name,
+                                known.join(", ")
+                            ));
+                        }
+                        covered.push(pname.to_string());
+                        let mut arm_env = env.clone();
+                        let fields = defs.variant_fields.get(pname);
+                        let field_types: Vec<Type> = fields
+                            .map(|f| f.iter().map(|(_, ft)| resolve_field_type(&state_name, ft, defs)).collect())
+                            .unwrap_or_default();
+                        bind_tuple_pattern(elems, &field_types, defs, &mut arm_env)?;
+                        check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
+                        if !diags.is_empty() { return Err(String::new()); }
+                        continue;
+                    }
+
+                    if let Pattern::Error = pattern {
+                        let pname = "Error";
+                        if !variants.contains(&pname.to_string()) {
+                            let known: Vec<String> = variants.iter().filter(|v| *v != "Success" && *v != "Error").cloned().collect();
+                            return Err(format!(
+                                "Type error: unknown variant '{}' for state {}. available variants: {}",
+                                pname, state_name,
+                                known.join(", ")
+                            ));
+                        }
+                        covered.push(pname.to_string());
+                        let mut arm_env = env.clone();
+                        let fields = defs.variant_fields.get(pname);
+                        let err_ty = fields
+                            .and_then(|f| f.first())
+                            .map(|(_, ft)| resolve_field_type(&state_name, ft, defs))
+                            .unwrap_or(Type::Unknown);
+                        arm_env.insert("error".to_string(), err_ty);
+                        check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
+                        if !diags.is_empty() { return Err(String::new()); }
+                        continue;
+                    }
+
                     let (pname, bindings) = match pattern {
                         Pattern::Variant { name, bindings } => (name.clone(), bindings.clone()),
-                        Pattern::Try { name } => ("Success".to_string(), vec![name.clone()]),
-                        Pattern::ErrorAs { name } => ("Error".to_string(), vec![name.clone()]),
-                        Pattern::Ignore => unreachable!(),
                         Pattern::Tuple(_) => continue,
+                        Pattern::Catch | Pattern::Try { .. } | Pattern::Error => unreachable!(),
                     };
                     if !variants.contains(&pname) {
                         let known: Vec<String> = variants.iter().filter(|v| *v != "Success" && *v != "Error").cloned().collect();
@@ -7268,16 +7360,10 @@ fn check_stmt_inner(
                     let mut arm_env = env.clone();
                     let (pname, bindings) = match pattern {
                         Pattern::Variant { name, bindings } => (name.clone(), bindings.clone()),
-                        Pattern::Try { name } => ("Success".to_string(), vec![name.clone()]),
-                        Pattern::ErrorAs { name } => ("Error".to_string(), vec![name.clone()]),
-                        Pattern::Ignore => (String::new(), vec![]),
-                        Pattern::Tuple(elems) => {
-                            let names: Vec<String> = elems.iter().filter_map(|p| {
-                                if let Pattern::Variant { name, .. } = p { Some(name.clone()) }
-                                else { None }
-                            }).collect();
-                            (String::new(), names)
-                        }
+                        Pattern::Try { elems } => ("Success".to_string(), pattern_binding_names(elems)),
+                        Pattern::Error => ("Error".to_string(), vec!["error".to_string()]),
+                        Pattern::Catch => (String::new(), vec![]),
+                        Pattern::Tuple(elems) => (String::new(), pattern_binding_names(elems)),
                     };
                     let fields = defs.variant_fields.get(&pname);
                     for (i, b) in bindings.iter().enumerate() {
@@ -7354,6 +7440,19 @@ fn check_stmts(
     }
 }
 
+fn pattern_binding_names(elems: &[Pattern]) -> Vec<String> {
+    elems
+        .iter()
+        .flat_map(|p| match p {
+            Pattern::Variant { name, .. } => vec![name.clone()],
+            Pattern::Catch => vec![],
+            Pattern::Tuple(inner) => pattern_binding_names(inner),
+            Pattern::Try { elems } => pattern_binding_names(elems),
+            Pattern::Error => vec!["error".to_string()],
+        })
+        .collect()
+}
+
 fn bind_tuple_pattern(
     elems: &[Pattern],
     elem_types: &[Type],
@@ -7380,7 +7479,7 @@ fn bind_tuple_element(
     env: &mut TypeEnv,
 ) -> Result<(), String> {
     match pat {
-        Pattern::Ignore => Ok(()),
+        Pattern::Catch => Ok(()),
         Pattern::Variant { name, bindings } if bindings.is_empty() => {
             env.insert(name.clone(), ty.clone());
             Ok(())
@@ -10504,7 +10603,7 @@ fn bind_tuple_value(
     }
     for (pat, v) in pat_elems.iter().zip(vals.iter()) {
         match pat {
-            Pattern::Ignore => {}
+            Pattern::Catch => {}
             Pattern::Variant { name, bindings } if bindings.is_empty() => {
                 out.push((name.clone(), v.clone()));
             }
@@ -10647,28 +10746,38 @@ fn execute_stmt(
             match val {
                 Value::State { name, values } => {
                     for (pattern, body) in arms {
-                        let (pname, bindings) = match pattern {
-                            Pattern::Variant { name: pname, bindings } => (pname.clone(), bindings.clone()),
-                            Pattern::Try { .. } => ("Success".to_string(), vec![]),
-                            Pattern::ErrorAs { .. } => ("Error".to_string(), vec![]),
-                            Pattern::Ignore => continue,
-                            Pattern::Tuple(_) => continue,
-                        };
-                        if pname == name {
-                            let bind_vals: Vec<String> = match pattern {
-                                Pattern::Variant { bindings, .. } => bindings.clone(),
-                                Pattern::Try { name } => vec![name.clone()],
-                                Pattern::ErrorAs { name } => vec![name.clone()],
-                                Pattern::Ignore => vec![],
-                                Pattern::Tuple(_) => vec![],
-                            };
-                            for (idx, binding) in bind_vals.iter().enumerate() {
-                                if binding != "Ignore" {
-                                    let v = values.get(idx).cloned().unwrap_or(Value::Int(0));
-                                    env.insert(binding.clone(), v);
+                        match pattern {
+                            Pattern::Catch => return execute_stmts(body, env, defs),
+                            Pattern::Try { elems } => {
+                                if name == "Success" {
+                                    let mut binds: Vec<(String, Value)> = Vec::new();
+                                    bind_tuple_value(elems, &values, &mut binds)?;
+                                    for (k, v) in binds {
+                                        env.insert(k, v);
+                                    }
+                                    return execute_stmts(body, env, defs);
                                 }
                             }
-                            return execute_stmts(body, env, defs);
+                            Pattern::Error => {
+                                if name == "Error" {
+                                    if let Some(v) = values.first() {
+                                        env.insert("error".to_string(), v.clone());
+                                    }
+                                    return execute_stmts(body, env, defs);
+                                }
+                            }
+                            Pattern::Variant { name: pname, bindings } => {
+                                if pname == &name {
+                                    for (idx, binding) in bindings.iter().enumerate() {
+                                        if binding != "Ignore" {
+                                            let v = values.get(idx).cloned().unwrap_or(Value::Int(0));
+                                            env.insert(binding.clone(), v);
+                                        }
+                                    }
+                                    return execute_stmts(body, env, defs);
+                                }
+                            }
+                            Pattern::Tuple(_) => {}
                         }
                     }
                     Err(format!("Unhandled state: {}", name))
@@ -10693,7 +10802,8 @@ fn execute_stmt(
                                             return execute_stmts(body, env, defs);
                                         }
                                     }
-                                    Pattern::Ignore | Pattern::Try { .. } | Pattern::ErrorAs { .. } | Pattern::Tuple(_) => {}
+                                    Pattern::Catch => return execute_stmts(body, env, defs),
+                                    Pattern::Try { .. } | Pattern::Error | Pattern::Tuple(_) => {}
                                 }
                             }
                             Err("Unhandled Option: Some".to_string())
@@ -10708,7 +10818,8 @@ fn execute_stmt(
                                             return execute_stmts(body, env, defs);
                                         }
                                     }
-                                    Pattern::Ignore | Pattern::Try { .. } | Pattern::ErrorAs { .. } | Pattern::Tuple(_) => {}
+                                    Pattern::Catch => return execute_stmts(body, env, defs),
+                                    Pattern::Try { .. } | Pattern::Error | Pattern::Tuple(_) => {}
                                 }
                             }
                             Err("Unhandled Option: None".to_string())
@@ -10718,10 +10829,10 @@ fn execute_stmt(
                 Value::Tuple(elems) => {
                     for (pattern, body) in arms {
                         match pattern {
-                            Pattern::Ignore => {
+                            Pattern::Catch => {
                                 return execute_stmts(body, env, defs);
                             }
-                            Pattern::Tuple(pat_elems) => {
+                            Pattern::Tuple(pat_elems) | Pattern::Try { elems: pat_elems } => {
                                 let mut binds: Vec<(String, Value)> = Vec::new();
                                 if bind_tuple_value(pat_elems, &elems, &mut binds).is_ok() {
                                     for (k, v) in binds {

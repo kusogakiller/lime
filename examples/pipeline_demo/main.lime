@@ -1,0 +1,14 @@
+// Verifies the unified pipeline: DCE removes `never_used`, an import is
+// resolved (math), and lock/cache side effects run even for the legacy
+// `lime <citrus.toml>` shorthand.
+
+fn never_used(i: x):
+    return x + 999
+
+fn used(i: x):
+    return x + 1
+
+fn main():
+    println(used(41))
+    let r = math.sqrt(16.0)
+    println(r)

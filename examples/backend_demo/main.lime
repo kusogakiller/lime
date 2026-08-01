@@ -1,0 +1,20 @@
+struct Point:
+    int: x
+    int: y
+
+fn add(int: a, int: b):
+    return a + b
+
+fn main():
+    let p = Point(3, 4)
+    let sum = add(p.x, p.y)
+    print(sum)
+
+    let mut i = 1
+    let mut total = 0
+    while i <= 5:
+        total = total + i
+        i = i + 1
+    print(total)
+
+    return

@@ -1,0 +1,16 @@
+// Example: 標準ライブラリ string / math の利用。実行: cargo run -- examples/stdlib_demo/citrus.toml
+
+fn main():
+    let str: text = "hello world"
+    println(string.contains(text, "world"))
+    println(string.starts_with(text, "hello"))
+    println(string.ends_with(text, "world"))
+    println(string.trim("  spaced  "))
+    println(string.replace(text, "world", "lime"))
+    println(string.split(text, " "))
+
+    println(math.abs(-42.0))
+    println(math.max(3.0, 7.0))
+    println(math.min(3.0, 7.0))
+    println(math.sqrt(16.0))
+    println(math.pow(2.0, 10.0))

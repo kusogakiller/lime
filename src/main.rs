@@ -6,12 +6,13 @@ fn print_usage() {
     eprintln!("Lime compiler");
     eprintln!("Usage:");
     eprintln!("  lime build <path> [--emit-ll] [--emit-object] [--release]  Build to binary");
-    eprintln!("  lime run   <path> [--emit-ll]                              Build and execute");
+    eprintln!("  lime run   <path> [--emit-ll]                              Execute via interpreter (deprecated)");
     eprintln!("  lime check <path>                                          Type-check only");
     eprintln!("  lime fmt   <file.lime> [--write]                           Format source");
     eprintln!("  lime <path> [--emit-ll] [--verbose|-v]                     Shorthand for `run`");
     eprintln!();
-    eprintln!("  <path> is a `.lime` file or a `demon.toml` project manifest.");
+    eprintln!("  <path> is a `.lime` file or a `citrus.toml` project manifest.");
+    eprintln!("  For projects, `lime run` is deprecated; use `citrus run` instead.");
     eprintln!("  --emit-ll       Emit textual LLVM IR (.ll)");
     eprintln!("  --emit-object   Emit object file and link to executable");
     eprintln!("  --release       Enable optimizations (-O2 equivalent)");
@@ -72,6 +73,11 @@ fn cli_build(path: &str, emit_ll: bool, emit_object: bool, release: bool, verbos
 }
 
 fn cli_run(path: &str, emit_ll: bool, verbose: bool) {
+    if path.ends_with("citrus.toml") {
+        eprintln!(
+            "warning: `lime run` on a project is deprecated; use `citrus run` to build and run"
+        );
+    }
     let opts = CompileOptions {
         emit_ll,
         emit_object: false,
