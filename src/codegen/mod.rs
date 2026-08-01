@@ -26,13 +26,20 @@ use crate::codegen::types::llvm_type_name;
 const DEFAULT_TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 const LIME_MAIN: &str = "main_lime";
 
-pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPlace>) -> String {
+pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPlace>) -> (String, Vec<String>) {
     let _ = stmts;
     let mut out = String::new();
+    let mut warnings: Vec<String> = Vec::new();
 
     out.push_str("; ModuleID = 'lime'\n");
     out.push_str("source_filename = \"lime\"\n");
     out.push_str(&format!("target triple = \"{}\"\n\n", DEFAULT_TARGET_TRIPLE));
+
+    // Runtime aggregate types must precede any declaration that uses them
+    // (LLVM rejects forward-referenced struct types in function signatures).
+    out.push_str("%LimeList = type { i8*, i64, i64 }\n");
+    out.push_str("%LimeOption = type { i1, i8* }\n");
+    out.push_str("%LimeIface = type { i8*, i8* }\n\n");
 
     // Runtime declarations
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
@@ -44,10 +51,10 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i64 @strlen(i8*)\n");
     out.push_str("declare i8* @runtime_str_slice(i8*, i64, i64)\n");
     out.push_str("declare i8* @runtime_str_concat(i8*, i8*)\n");
-    out.push_str("declare %LimeList @runtime_str_chars(i8*)\n");
-    out.push_str("declare %LimeList @runtime_str_bytes(i8*)\n");
-    out.push_str("declare %LimeList @runtime_list_add(%LimeList, i64)\n");
-    out.push_str("declare %LimeList @runtime_list_set(%LimeList, i64, i64)\n\n");
+    out.push_str("declare void @runtime_str_chars(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare void @runtime_str_bytes(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare void @runtime_list_add(ptr sret(%LimeList), ptr, i64)\n");
+    out.push_str("declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)\n\n");
 
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
@@ -81,8 +88,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
 
     // Emit monomorphized function definitions first
     for (mangled, mono_fdef) in &mono_fdefs {
-        let func_ir = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, mangled, mono_fdef);
+        let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, mangled, mono_fdef);
         out.push_str(&func_ir);
+        warnings.extend(fw);
     }
 
     // Function definitions using fn_builder (Phase 1) - skip generic templates
@@ -90,8 +98,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
         if !fdef.type_params.is_empty() {
             continue;
         }
-        let func_ir = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, name, fdef);
+        let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, name, fdef);
         out.push_str(&func_ir);
+        warnings.extend(fw);
     }
 
     // Phase 7: Struct method function definitions
@@ -112,15 +121,16 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
                 body: mdef.body.clone(),
                 is_async: false,
             };
-            let func_ir = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, &method_func_name, &method_fdef);
+            let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, &method_func_name, &method_fdef);
             out.push_str(&func_ir);
+            warnings.extend(fw);
         }
     }
 
     // C runtime main wrapper
     emit_main_wrapper(&mut out, defs);
 
-    out
+    (out, warnings)
 }
 
 /// Phase 5: escape a string for LLVM IR constant format.
@@ -161,8 +171,8 @@ fn collect_strings_from_stmts(stmts: &[Stmt], strings: &mut HashMap<String, Stri
     for s in stmts {
         match s {
             Stmt::Let { value, .. } => collect_strings_from_expr(value, strings, idx),
-            Stmt::Return(e) => {
-                if let Some(e) = e {
+            Stmt::Return { explicit_type: _, value } => {
+                if let Some(e) = value {
                     collect_strings_from_expr(e, strings, idx);
                 }
             }
@@ -314,8 +324,8 @@ fn collect_mono_from_stmts(
     for s in stmts {
         match s {
             Stmt::Let { value, .. } => collect_mono_from_expr(value, defs, mono_name_map, mono_fdefs, worklist),
-            Stmt::Return(e) => {
-                if let Some(e) = e {
+            Stmt::Return { explicit_type: _, value } => {
+                if let Some(e) = value {
                     collect_mono_from_expr(e, defs, mono_name_map, mono_fdefs, worklist);
                 }
             }
@@ -417,10 +427,6 @@ fn emit_aggregate_decls(out: &mut String, defs: &Defs) {
     for sname in defs.states.keys() {
         out.push_str(&format!("%{} = type {{ i32, [4 x i64] }}\n", sname));
     }
-    // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・ runtime 型
-    out.push_str("%LimeList = type { i8*, i64, i64 }\n");
-    out.push_str("%LimeOption = type { i1, i8* }\n");
-    out.push_str("%LimeIface = type { i8*, i8* }\n");
     out.push('\n');
 }
 

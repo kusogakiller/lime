@@ -40,6 +40,7 @@ struct Cg<'a> {
     temp: usize,
     block: usize,
     terminated: bool,
+    warnings: Vec<String>,
 }
 
 impl<'a> Cg<'a> {
@@ -57,6 +58,7 @@ impl<'a> Cg<'a> {
             temp: 0,
             block: 0,
             terminated: false,
+            warnings: Vec::new(),
         }
     }
 
@@ -191,7 +193,9 @@ impl<'a> Cg<'a> {
         self.current_block = entry;
         self.out.push_str(&param_allocs);
         self.out.push_str(&field_extracts);
-        let _ = self.codegen_stmts(&fdef.body);
+        if let Err(e) = self.codegen_stmts(&fdef.body) {
+            self.warnings.push(format!("{}: {}", name, e));
+        }
         if !self.terminated {
             if ret_ty == "void" {
                 self.out.push_str("  ret void\n");
@@ -232,11 +236,7 @@ impl<'a> Cg<'a> {
                         "  {} = call i8* @runtime_alloc(i64 {}, i64 {})\n",
                         raw, size, align
                     ));
-                    let ptr = self.fresh_temp();
-                    self.out.push_str(&format!(
-                        "  {} = bitcast i8* {} to {}*\n",
-                        ptr, raw, llty
-                    ));
+                    let ptr = raw;
                     ptr
                 } else {
                     let ptr = self.fresh_temp();
@@ -254,9 +254,9 @@ impl<'a> Cg<'a> {
                 self.named.insert(name.clone(), ptr);
                 Ok(())
             }
-            Stmt::Return(e) => {
+            Stmt::Return { explicit_type: _, value } => {
                 self.terminated = true;
-                match e {
+                match value {
                     Some(expr) => {
                         let (v, ty) = self.codegen_expr(expr)?;
                         let llty = llvm_type_name(&ty);
@@ -754,8 +754,8 @@ impl<'a> Cg<'a> {
         // Store tag
         let tag_gep = self.fresh_temp();
         self.out.push_str(&format!(
-            "  {} = getelementptr inbounds {}, {}* {}, i64 0, i32 0\n",
-            tag_gep, llvm_type, llvm_type, tmp_alloca
+            "  {} = getelementptr inbounds {}, ptr {}, i64 0, i32 0\n",
+            tag_gep, llvm_type, tmp_alloca
         ));
         self.out.push_str(&format!(
             "  store i32 {}, i32* {}, align 4\n",
@@ -767,8 +767,8 @@ impl<'a> Cg<'a> {
             let (v, t) = self.codegen_expr(arg)?;
             let payload_gep = self.fresh_temp();
             self.out.push_str(&format!(
-                "  {} = getelementptr inbounds {}, {}* {}, i64 0, i32 1, i32 {}\n",
-                payload_gep, llvm_type, llvm_type, tmp_alloca, i
+                "  {} = getelementptr inbounds {}, ptr {}, i64 0, i32 1, i32 {}\n",
+                payload_gep, llvm_type, tmp_alloca, i
             ));
             let converted = self.convert_to_i64(&v, &t)?;
             self.out.push_str(&format!(
@@ -839,8 +839,8 @@ impl<'a> Cg<'a> {
                 };
                 let arr_size = if add_nl { "6" } else { "5" };
                 self.out.push_str(&format!(
-                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], [{} x i8]* @.str.int{}, i64 0, i64 0), {})\n",
-                    arr_size, arr_size, nl_suffix, arg_str
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.int{}, i64 0, i64 0), {})\n",
+                    arr_size, nl_suffix, arg_str
                 ));
             }
             Type::Float => {
@@ -851,21 +851,21 @@ impl<'a> Cg<'a> {
                 };
                 let arr_size = if add_nl { "4" } else { "3" };
                 self.out.push_str(&format!(
-                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], [{} x i8]* @.str.float{}, i64 0, i64 0), {})\n",
-                    arr_size, arr_size, nl_suffix, arg_str
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.float{}, i64 0, i64 0), {})\n",
+                    arr_size, nl_suffix, arg_str
                 ));
             }
             Type::Bool => {
                 let bare = self.bare_value(&v).to_string();
                 let str_tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = select i1 {}, i8* getelementptr inbounds ([5 x i8], [5 x i8]* @.str.true, i64 0, i64 0), i8* getelementptr inbounds ([6 x i8], [6 x i8]* @.str.false, i64 0, i64 0)\n",
+                    "  {} = select i1 {}, i8* getelementptr inbounds ([5 x i8], ptr @.str.true, i64 0, i64 0), i8* getelementptr inbounds ([6 x i8], ptr @.str.false, i64 0, i64 0)\n",
                     str_tmp, bare
                 ));
                 let arr_size_str = if add_nl { "4" } else { "3" };
                 self.out.push_str(&format!(
-                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], [{} x i8]* @.str.str{}, i64 0, i64 0), i8* {})\n",
-                    arr_size_str, arr_size_str, nl_suffix, str_tmp
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.str{}, i64 0, i64 0), i8* {})\n",
+                    arr_size_str, nl_suffix, str_tmp
                 ));
             }
             Type::String => {
@@ -876,8 +876,8 @@ impl<'a> Cg<'a> {
                 };
                 let arr_size = if add_nl { "4" } else { "3" };
                 self.out.push_str(&format!(
-                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], [{} x i8]* @.str.str{}, i64 0, i64 0), {})\n",
-                    arr_size, arr_size, nl_suffix, arg_str
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.str{}, i64 0, i64 0), {})\n",
+                    arr_size, nl_suffix, arg_str
                 ));
             }
             _ => {
@@ -1000,8 +1000,8 @@ impl<'a> Cg<'a> {
         let len = s.len() + 1;
         let tmp = self.fresh_temp();
         self.out.push_str(&format!(
-            "  {} = getelementptr inbounds ([{} x i8], [{} x i8]* @{}, i64 0, i64 0)\n",
-            tmp, len, len, global_name
+            "  {} = getelementptr inbounds [{} x i8], ptr @{}, i64 0, i64 0\n",
+            tmp, len, global_name
         ));
         Ok((tmp, Type::String))
     }
@@ -1022,16 +1022,16 @@ impl<'a> Cg<'a> {
 
         let arr_ptr = self.fresh_temp();
         self.out.push_str(&format!(
-            "  {} = alloca [{} x i64], align 8\n",
-            arr_ptr, arr_size
+            "  {} = call i8* @runtime_alloc(i64 {}, i64 8)\n",
+            arr_ptr, (arr_size as i64) * 8
         ));
 
         for (i, (v, t)) in elem_values.iter().enumerate() {
             let converted = self.convert_to_i64(v, t)?;
             let elem_gep = self.fresh_temp();
             self.out.push_str(&format!(
-                "  {} = getelementptr inbounds [{} x i64], [{} x i64]* {}, i64 0, i64 {}\n",
-                elem_gep, arr_size, arr_size, arr_ptr, i
+                "  {} = getelementptr inbounds i64, ptr {}, i64 {}\n",
+                elem_gep, arr_ptr, i
             ));
             self.out.push_str(&format!(
                 "  store i64 {}, i64* {}, align 8\n",
@@ -1039,17 +1039,11 @@ impl<'a> Cg<'a> {
             ));
         }
 
-        let data_ptr = self.fresh_temp();
-        self.out.push_str(&format!(
-            "  {} = bitcast [{} x i64]* {} to i8*\n",
-            data_ptr, arr_size, arr_ptr
-        ));
-
         let mut cur = String::from("undef");
         let t1 = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = insertvalue %LimeList {}, i8* {}, 0\n",
-            t1, cur, data_ptr
+            t1, cur, arr_ptr
         ));
         cur = t1;
         let t2 = self.fresh_temp();
@@ -1155,7 +1149,7 @@ impl<'a> Cg<'a> {
     // Phase 5: string method codegen (len, byte_len, slice, chars, bytes)
     fn codegen_string_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
         match method {
-            "len" | "byte_len" => {
+            "len" | "byte_len" | "length" => {
                 let tmp = self.fresh_temp();
                 let obj_arg = if obj.starts_with('%') {
                     format!("i8* {}", obj)
@@ -1182,18 +1176,30 @@ impl<'a> Cg<'a> {
                 Ok((tmp, Type::String))
             }
             "chars" => {
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  {} = call %LimeList @runtime_str_chars(i8* {})\n",
-                    tmp, obj
+                    "  call void @runtime_str_chars(ptr sret(%LimeList) {}, ptr {})\n",
+                    slot, obj
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
                 ));
                 Ok((tmp, Type::List(Box::new(Type::String))))
             }
             "bytes" => {
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  {} = call %LimeList @runtime_str_bytes(i8* {})\n",
-                    tmp, obj
+                    "  call void @runtime_str_bytes(ptr sret(%LimeList) {}, ptr {})\n",
+                    slot, obj
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
                 ));
                 Ok((tmp, Type::List(Box::new(Type::Int))))
             }
@@ -1222,15 +1228,10 @@ impl<'a> Cg<'a> {
                     "  {} = extractvalue %LimeList {}, 0\n",
                     data, obj
                 ));
-                let cast = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = bitcast i8* {} to i64*\n",
-                    cast, data
-                ));
                 let elem_ptr = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds i64, i64* {}, i64 {}\n",
-                    elem_ptr, cast, idx_v
+                    "  {} = getelementptr inbounds i64, ptr {}, i64 {}\n",
+                    elem_ptr, data, self.bare_value(&idx_v)
                 ));
                 let val = self.fresh_temp();
                 self.out.push_str(&format!(
@@ -1245,11 +1246,17 @@ impl<'a> Cg<'a> {
                 }
                 let (elem_v, elem_t) = self.codegen_expr(&args[0])?;
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
+                let arg_slot = self.fresh_temp();
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  {} = call %LimeList @runtime_list_add(%LimeList {}, i64 {})\n",
-                    tmp, obj, converted
+                    "  call void @runtime_list_add(ptr sret(%LimeList) {}, ptr {}, i64 {})\n",
+                    slot, arg_slot, converted
                 ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
                 Ok((tmp, Type::List(Box::new(elem_t))))
             }
             "set" => {
@@ -1259,11 +1266,17 @@ impl<'a> Cg<'a> {
                 let (idx_v, _) = self.codegen_expr(&args[0])?;
                 let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
+                let arg_slot = self.fresh_temp();
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  {} = call %LimeList @runtime_list_set(%LimeList {}, i64 {}, i64 {})\n",
-                    tmp, obj, idx_v, converted
+                    "  call void @runtime_list_set(ptr sret(%LimeList) {}, ptr {}, i64 {}, i64 {})\n",
+                    slot, arg_slot, self.bare_value(&idx_v), converted
                 ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
                 Ok((tmp, Type::List(Box::new(elem_t))))
             }
             _ => Err(format!("Phase 5: unknown List method '{}'", method)),
@@ -1284,7 +1297,7 @@ fn body_supported(stmts: &[Stmt]) -> bool {
 fn stmt_supported(s: &Stmt) -> bool {
     match s {
         Stmt::Let { value, .. } => expr_supported(value),
-        Stmt::Return(e) => match e {
+        Stmt::Return { explicit_type: _, value } => match value {
             Some(e) => expr_supported(e),
             None => true,
         },
@@ -1333,7 +1346,8 @@ fn expr_supported(e: &Expr) -> bool {
 }
 
 /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・(Step 1-7) 縺ｦ繧､繝ｳ繝・・ｽ・ｽ繝医ｒ髢峨�ｸｦ縺ｧ繧｢蜷阪→。
-pub fn codegen_function(defs: &Defs, memory: &HashMap<String, MemoryPlace>, string_literals: &HashMap<String, String>, mono_name_map: &HashMap<String, String>, mono_fdefs: &HashMap<String, FunctionDef>, name: &str, fdef: &FunctionDef) -> String {
+pub fn codegen_function(defs: &Defs, memory: &HashMap<String, MemoryPlace>, string_literals: &HashMap<String, String>, mono_name_map: &HashMap<String, String>, mono_fdefs: &HashMap<String, FunctionDef>, name: &str, fdef: &FunctionDef) -> (String, Vec<String>) {
     let mut cg = Cg::new(defs, memory, string_literals, mono_name_map, mono_fdefs);
-    cg.codegen_function(name, fdef)
+    let ir = cg.codegen_function(name, fdef);
+    (ir, cg.warnings)
 }
