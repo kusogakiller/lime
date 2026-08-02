@@ -1,54 +1,37 @@
-// Lime Runtime Library - public declarations.
-//
-// These C types and functions back the LLVM runtime declarations the Lime
-// codegen emits (see src/codegen/mod.rs). The ABI is fixed by the target
-// object (test_print/runtime.obj) and docs/runtime.md:
-//
-//   LimeList  = { i8*, i64, i64 }  ->  { char* data; int64_t len; int64_t cap }
-//   LimeOption= { i1, i8* }        ->  { int8_t has_value; void* value }
-//   LimeIface = { i8*, i8* }       ->  { void* data; void* vtable }
-//
-// Functions taking/returning these structs by value follow the platform C ABI
-// (on x86_64-windows-msvc the result is returned through a hidden pointer).
-
 #ifndef LIME_RUNTIME_H
 #define LIME_RUNTIME_H
 
 #include <stdint.h>
 
 typedef struct {
-    char* data;   // pointer to element data (i64 elements)
-    int64_t len;  // number of elements
-    int64_t cap;  // capacity (number of elements)
+    char* data;
+    int64_t len;
+    int64_t cap;
 } LimeList;
 
 typedef struct {
-    int8_t has_value; // 0 = None, 1 = Some
-    void* value;      // pointer to value
+    int8_t has_value;
+    void* value;
 } LimeOption;
 
 typedef struct {
-    void* data;   // pointer to struct data
-    void* vtable; // interface vtable
+    void* data;
+    void* vtable;
 } LimeIface;
 
-// -- Allocation / control flow --
 void* runtime_alloc(int64_t size, int64_t align);
 void runtime_free(void* p);
 void runtime_panic(char* msg);
 
-// -- Print --
 void runtime_print(char* s);
 
-// -- String operations --
 char* runtime_str_slice(char* s, int64_t start, int64_t end);
 char* runtime_str_concat(char* a, char* b);
 LimeList runtime_str_chars(char* s);
 LimeList runtime_str_bytes(char* s);
 
-// -- List operations --
 LimeList runtime_list_empty(void);
 LimeList runtime_list_add(LimeList list, int64_t elem);
 LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem);
 
-#endif // LIME_RUNTIME_H
+#endif
