@@ -1,18 +1,18 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// Phase 1 (Step 10): LLVM backend - function/statement/expression codegen.
+//
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・(Step 1-7) 縺ｦ文本 IR 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+//   Step 1: 蜈ｷ蜊･阪�ｸｦ/蜈ｷ遘ｻ/boolean 縺ｮ Constant
+//   Step 2: let -> alloca/store/load (Memory Analysis 縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蝗ｲ繧)
+//   Step 3: 蜈ｷ隹ｿ演算 (+ - * / %) 縺ｮ Builtin 型縺の明縺ｮ縺ｪ縺ｿ縺ｪ縺・
+//   Step 4: 斎惻演算 (== != < > <= >=) -> icmp / fcmp
+//   Step 5: 輔旓演算 (and or not) -> 蜈ｷ遨ｺ繧ｳ繝｡繝ｳ繝・阜ｼ (short circuit)
+//   Step 6: if -> BasicBlock (entry/then/else/merge)
+//   Step 7: while -> CFG (cond/body/merge)
+//
+// 蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・(Struct/State/Match/Generic/Interface/Async/List/
+// String Runtime 縺ｯ Phase 1 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・駘ｽ蜿ｪ縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// (Phase 0 縺ｮ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ ret <zero> 縺ｾ縺ｧ繧｢蜷阪→)
 
 use crate::Defs;
 use crate::Expr;
@@ -76,9 +76,25 @@ impl<'a> Cg<'a> {
         format!("L{}", b)
     }
 
-    
+    /// Whether the last emitted line already terminates the current block
+    /// (ret / br / switch / unreachable), so we don't append instructions or
+    /// duplicate terminators after it.
+    fn block_terminated(&self) -> bool {
+        let trimmed = self.out.trim_end();
+        let last = trimmed
+            .rsplit('\n')
+            .next()
+            .unwrap_or("")
+            .trim();
+        last.starts_with("ret ")
+            || last.starts_with("br ")
+            || last.starts_with("switch ")
+            || last.starts_with("unreachable")
+    }
+
+    /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ define 縺ｾ縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
     fn codegen_function(&mut self, name: &str, fdef: &FunctionDef) -> String {
-        
+        // 忣削蜈ｰ縺ｯ Lime main 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ main_lime 縺ｾ縺ｧ繧｢蜷阪→
         let llvm_name = if name == "main" {
             "main_lime".to_string()
         } else {
@@ -91,7 +107,7 @@ impl<'a> Cg<'a> {
         };
         self.fn_ret_ty = ret_ty.clone();
 
-        
+        // Function params with names (%p0, %p1, ...) so alloca/store can reference them
         let mut params = Vec::new();
         let mut param_idx = 0;
         for (_, ptype) in &fdef.params {
@@ -111,9 +127,9 @@ impl<'a> Cg<'a> {
             name, async_note, ret_ty, llvm_name, params_str
         ));
 
-        
+        // 蝗ｲ繧險ｱ蜿ｯ: 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
         if !body_supported(&fdef.body) {
-            
+            // Phase 1 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ stub (Phase 0 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・)
             let mut s = String::new();
             if ret_ty == "void" {
                 s.push_str("  ret void\n");
@@ -124,7 +140,7 @@ impl<'a> Cg<'a> {
             return format!("{}{}}}\n", head, s);
         }
 
-        
+        // 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ param 縺ｯ alloca + store
         let mut param_allocs = String::new();
         let mut pidx = 0;
         for (pname, ptype) in &fdef.params {
@@ -145,17 +161,17 @@ impl<'a> Cg<'a> {
             self.named.insert(pname.clone(), ptr);
         }
 
-        
-        
-        
-        
+        // Phase 7: struct method field extraction
+        // For struct methods, the first param is 'self' of struct type.
+        // Extract each field into a named local variable so the body can
+        // reference fields directly (e.g. 'x' instead of 'self.x').
         let mut field_extracts = String::new();
         if let Some((first_pname, first_ptype)) = fdef.params.first() {
             if first_pname == "self" {
                 if let Type::Struct(ref sname) = type_from_str(first_ptype, self.defs) {
                     if let Some(sdef) = self.defs.structs.get(sname) {
                         let self_llty = llvm_type_name(&Type::Struct(sname.clone()));
-                        
+                        // self was alloca'd and stored; load it back
                         let self_ptr = self.named.get("self").cloned().unwrap();
                         let self_loaded = self.fresh_temp();
                         field_extracts.push_str(&format!(
@@ -188,7 +204,7 @@ impl<'a> Cg<'a> {
             }
         }
 
-        
+        // entry block
         let entry = self.fresh_block();
         let mut body_ir = String::new();
         std::mem::swap(&mut self.out, &mut body_ir);
@@ -199,7 +215,7 @@ impl<'a> Cg<'a> {
         if let Err(e) = self.codegen_stmts(&fdef.body) {
             self.warnings.push(format!("{}: {}", name, e));
         }
-        if !self.terminated {
+        if !self.block_terminated() {
             if ret_ty == "void" {
                 self.out.push_str("  ret void\n");
             } else {
@@ -211,7 +227,7 @@ impl<'a> Cg<'a> {
         format!("{}{}", head, self.out)
     }
 
-    
+    /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・
     fn codegen_stmts(&mut self, stmts: &[Stmt]) -> Result<(), String> {
         for s in stmts {
             self.codegen_stmt(s)?;
@@ -228,8 +244,8 @@ impl<'a> Cg<'a> {
                 let is_heap = matches!(place, Some(MemoryPlace::Heap))
                     || self.memory.get(name) == Some(&MemoryPlace::Heap);
                 let ptr = if is_heap {
-                    
-                    
+                    // Phase 1: Heap 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE runtime_alloc 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+                    // (Runtime 縺ｯ Phase 3 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｪ縺ｿ縺ｪ縺・蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・)
                     let size = match ty {
                         Type::Float => 8i64,
                         _ => 8i64,
@@ -267,9 +283,9 @@ impl<'a> Cg<'a> {
                         Ok(())
                     }
                     None => {
-                        
-                        
-                        
+                        // A bare `return` still has to satisfy the function's
+                        // (possibly inferred) return type: emit the default
+                        // value instead of `ret void` when the type is non-void.
                         if self.fn_ret_ty == "void" {
                             self.out.push_str("  ret void\n");
                         } else {
@@ -364,12 +380,12 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｪ縺ｿ縺ｪ縺・(SSA value, Type) 縺ｦ股�ｸｦ縺ｧ繧｢蜷阪→
     fn codegen_expr(&mut self, e: &Expr) -> Result<(String, Type), String> {
         match e {
             Expr::IntLit(i) => Ok((format!("i64 {}", i), Type::Int)),
             Expr::FloatLit(f) => {
-                
+                // LLVM 縺ｯ double 縺ｯ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・ format 縺ｯ蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・
                 let s = if f.fract() == 0.0 {
                     format!("{}.0", f)
                 } else {
@@ -404,6 +420,23 @@ impl<'a> Cg<'a> {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!("  {} = xor i1 {}, true\n", tmp, self.bare_value(&v)));
                     Ok((tmp, Type::Bool))
+                } else if op == "-" {
+                    let (v, t) = self.codegen_expr(operand)?;
+                    let tmp = self.fresh_temp();
+                    match t {
+                        Type::Float => self.out.push_str(&format!(
+                            "  {} = fsub double 0.0, {}\n",
+                            tmp,
+                            self.bare_value(&v)
+                        )),
+                        Type::Int | Type::Long => self.out.push_str(&format!(
+                            "  {} = sub i64 0, {}\n",
+                            tmp,
+                            self.bare_value(&v)
+                        )),
+                        _ => return Err(format!("Phase 1: unary '-' not supported for {:?}", t)),
+                    }
+                    Ok((tmp, t))
                 } else {
                     Err(format!("Phase 1: unsupported unary operator '{}'", op))
                 }
@@ -428,7 +461,7 @@ impl<'a> Cg<'a> {
         let (lv, lt) = self.codegen_expr(left)?;
         let (rv, rt) = self.codegen_expr(right)?;
 
-        
+        // Phase 7: Operator interface lowering (resolved_operator -> direct LLVM call)
         if let Some(ResolvedOperator::MethodCall { method, op: mop }) = resolved_operator {
             let sname = match &lt {
                 Type::Struct(s) => s.clone(),
@@ -492,7 +525,7 @@ impl<'a> Cg<'a> {
             }
         }
 
-        
+        // Phase 5: string concatenation
         if lt == Type::String && rt == Type::String && op == "+" {
             let tmp = self.fresh_temp();
             self.out.push_str(&format!(
@@ -602,9 +635,9 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    /// Phase 2+3: function call codegen (builtin / struct ctor / user functions)
     fn codegen_call(&mut self, func: &str, args: &[Expr]) -> Result<(String, Type), String> {
-        
+        // Builtin print/println
         if func == "print" || func == "println" {
             let add_nl = func == "println";
             for arg in args {
@@ -612,15 +645,88 @@ impl<'a> Cg<'a> {
             }
             return Ok((String::new(), Type::Unit));
         }
-        
+        // Builtin panic: print the message to stderr and abort the program.
+        if func == "panic" {
+            if args.len() != 1 {
+                return Err("panic() takes exactly 1 argument".to_string());
+            }
+            let (v, t) = self.codegen_expr(&args[0])?;
+            if t != Type::String {
+                return Err(format!(
+                    "panic() argument must be a string, got {:?}",
+                    t
+                ));
+            }
+            self.out.push_str(&format!(
+                "  call void @runtime_panic({})\n",
+                self.fmt_call_arg(&v, &Type::String)
+            ));
+            return Ok((String::new(), Type::Unit));
+        }
+        // Builtin str(): converts a value to its string form. For String
+        // arguments this is an identity; for an `unknown`-typed value (e.g. an
+        // `Error(e)` payload whose concrete type was never pinned, which is a
+        // string at runtime) it is a pass-through. Int/float/bool require a
+        // runtime conversion helper.
+        if func == "str" {
+            if args.len() != 1 {
+                return Err("str() takes exactly 1 argument".to_string());
+            }
+            let (v, t) = self.codegen_expr(&args[0])?;
+            match t {
+                Type::String | Type::Unknown => {
+                    return Ok((v, Type::String));
+                }
+                Type::Int => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_i64({})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Int)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
+                Type::Float => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_f64({})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Float)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
+                Type::Bool => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_bool({})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Bool)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
+                _ => return Err(format!(
+                    "str() cannot convert {:?} to a string in codegen",
+                    t
+                )),
+            }
+        }
+        // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
+        if let Some(result) = self.codegen_runtime_builtin(func, args)? {
+            return Ok(result);
+        }
+        // Phase 3: struct constructor
         if let Some(sdef) = self.defs.structs.get(func) {
             return self.codegen_struct_ctor(func, sdef, args);
         }
-        
+        // Phase 12 Step 1: package-qualified struct constructor called by its
+        // bare name (e.g. `Instant(f)` resolves to `time.Instant`).
+        if let Some(resolved) = self.defs.resolve_type(func) {
+            if let Some(sdef) = self.defs.structs.get(&resolved) {
+                return self.codegen_struct_ctor(&resolved, sdef, args);
+            }
+        }
+        // Phase 4: state variant constructor (Success/Error or user state variant)
         if let Some(state_name) = self.defs.state_variants.get(func) {
             return self.codegen_state_ctor(state_name, func, args);
         }
-        
+        // Phase 6: monomorphized generic function call
         if let Some(mangled) = self.mono_name_map.get(func) {
             let mono_fdef = self.mono_fdefs.get(mangled).ok_or_else(|| {
                 format!("monomorphized function '{}' not found", mangled)
@@ -655,10 +761,19 @@ impl<'a> Cg<'a> {
                 return Ok((tmp, ret_type.1));
             }
         }
-        
-        let fdef = self.defs.functions.get(func).ok_or_else(|| {
-            format!("undefined function '{}'", func)
-        })?;
+        // User function call
+        let fdef = self
+            .defs
+            .functions
+            .get(func)
+            // Phase 12 Step 1: resolve a bare user-function name to its
+            // package-qualified key (e.g. a package function calling another).
+            .or_else(|| {
+                self.defs
+                    .resolve_function(func)
+                    .and_then(|resolved| self.defs.functions.get(&resolved))
+            })
+            .ok_or_else(|| format!("undefined function '{}'", func))?;
         let llvm_name = if func == "main" { "main_lime" } else { func };
         let mut call_args = Vec::new();
         for (arg, (_, ptype)) in args.iter().zip(&fdef.params) {
@@ -690,7 +805,330 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    /// Phase 12 Step 1: stdlib runtime builtin lowering.
+    ///
+    /// Lowers the bare runtime builtins that the stdlib packages wrap
+    /// (`string`/`math`/`time`/`fs`/`io`) to calls into the C runtime helpers
+    /// declared in src/codegen/mod.rs. Returns `Ok(None)` when `func` is not a
+    /// builtin handled here so the caller can continue to user-function lookup.
+    fn codegen_runtime_builtin(&mut self, func: &str, args: &[Expr]) -> Result<Option<(String, Type)>, String> {
+        // Evaluate an argument and format it for a call of the given type.
+        fn arg(cg: &mut Cg, e: &Expr, want: &Type) -> Result<String, String> {
+            let (v, t) = cg.codegen_expr(e)?;
+            if &t != want {
+                return Err(format!(
+                    "builtin argument type mismatch: expected {:?}, got {:?}",
+                    want, t
+                ));
+            }
+            Ok(cg.fmt_call_arg(&v, want))
+        }
+        // N string arguments -> i8* formatted list.
+        fn str_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
+            if exprs.len() != n {
+                return Err(format!("builtin expects {} string argument(s), got {}", n, exprs.len()));
+            }
+            exprs.iter().map(|e| arg(cg, e, &Type::String)).collect()
+        }
+        fn str_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            str_args(cg, std::slice::from_ref(e), 1).map(|v| v.into_iter().next().unwrap())
+        }
+        // N float arguments -> double formatted list.
+        fn f64_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
+            if exprs.len() != n {
+                return Err(format!("builtin expects {} float argument(s), got {}", n, exprs.len()));
+            }
+            exprs.iter().map(|e| arg(cg, e, &Type::Float)).collect()
+        }
+        fn f64_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            f64_args(cg, std::slice::from_ref(e), 1).map(|v| v.into_iter().next().unwrap())
+        }
+        fn i64_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            arg(cg, e, &Type::Int)
+        }
+
+        // Emit a call returning an i8* string.
+        fn call_str(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i8* @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            (tmp, Type::String)
+        }
+        // Emit a call returning an int (0/1) and convert it to an i1 bool.
+        fn call_bool(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            let flag = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i32 @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            cg.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", flag, tmp));
+            (flag, Type::Bool)
+        }
+        // Emit a call returning a double.
+        fn call_f64(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call double @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            (tmp, Type::Float)
+        }
+        // Emit a call returning an i64.
+        fn call_i64(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i64 @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            (tmp, Type::Int)
+        }
+        // Emit a call returning a %LimeList via sret (strings boxed as i64
+        // element slots, matching `split`/`fs_list_dir`).
+        fn call_list(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let slot = cg.fresh_temp();
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+            cg.out.push_str(&format!(
+                "  call void @{}(ptr sret(%LimeList) {}, {})\n",
+                helper, slot, call_args.join(", ")
+            ));
+            cg.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+            (tmp, Type::List(Box::new(Type::String)))
+        }
+
+        match func {
+            // ---- string builtins ----
+            "len" => {
+                if args.len() != 1 {
+                    return Err("len() takes exactly 1 argument".to_string());
+                }
+                let (v, t) = self.codegen_expr(&args[0])?;
+                match t {
+                    Type::String => {
+                        let s = self.fmt_call_arg(&v, &Type::String);
+                        let tmp = self.fresh_temp();
+                        self.out.push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
+                        Ok(Some((tmp, Type::Int)))
+                    }
+                    Type::List(_) => {
+                        let tmp = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue %LimeList {}, 1\n",
+                            tmp,
+                            self.bare_value(&v)
+                        ));
+                        Ok(Some((tmp, Type::Int)))
+                    }
+                    other => Err(format!("builtin len() not supported for {:?}", other)),
+                }
+            }
+            "byte_len" => {
+                let s = str_arg(self, &args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "contains" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_contains", &a);
+                Ok(Some((v, t)))
+            }
+            "starts_with" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_starts_with", &a);
+                Ok(Some((v, t)))
+            }
+            "ends_with" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_ends_with", &a);
+                Ok(Some((v, t)))
+            }
+            "trim" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_trim", &[s]);
+                Ok(Some((v, t)))
+            }
+            "to_upper" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_to_upper", &[s]);
+                Ok(Some((v, t)))
+            }
+            "to_lower" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_to_lower", &[s]);
+                Ok(Some((v, t)))
+            }
+            "replace" => {
+                let a = str_args(self, args, 3)?;
+                let (v, t) = call_str(self, "runtime_str_replace", &a);
+                Ok(Some((v, t)))
+            }
+            "repeat" => {
+                let s = str_arg(self, &args[0])?;
+                let n = i64_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_str_repeat", &[s, n]);
+                Ok(Some((v, t)))
+            }
+            "slice" => {
+                let s = str_arg(self, &args[0])?;
+                let start = i64_arg(self, &args[1])?;
+                let end = i64_arg(self, &args[2])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_slice({}, {}, {})\n",
+                    tmp, s, start, end
+                ));
+                Ok(Some((tmp, Type::String)))
+            }
+            "split" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_list(self, "runtime_str_split", &a);
+                Ok(Some((v, t)))
+            }
+            // ---- math builtins ----
+            "abs" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_abs", &[x]);
+                Ok(Some((v, t)))
+            }
+            "sqrt" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_sqrt", &[x]);
+                Ok(Some((v, t)))
+            }
+            "min" => {
+                let a = f64_args(self, args, 2)?;
+                let (v, t) = call_f64(self, "runtime_math_min", &a);
+                Ok(Some((v, t)))
+            }
+            "max" => {
+                let a = f64_args(self, args, 2)?;
+                let (v, t) = call_f64(self, "runtime_math_max", &a);
+                Ok(Some((v, t)))
+            }
+            "clamp" => {
+                let a = f64_args(self, args, 3)?;
+                let (v, t) = call_f64(self, "runtime_math_clamp", &a);
+                Ok(Some((v, t)))
+            }
+            "pow" => {
+                let a = f64_args(self, args, 2)?;
+                let (v, t) = call_f64(self, "runtime_math_pow", &a);
+                Ok(Some((v, t)))
+            }
+            // ---- time builtins ----
+            "time_now" => {
+                let (v, t) = call_f64(self, "runtime_time_now", &[]);
+                Ok(Some((v, t)))
+            }
+            "time_sleep" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_time_sleep", &[x]);
+                Ok(Some((v, t)))
+            }
+            // ---- stdio builtin ----
+            "input" => {
+                if args.len() > 1 {
+                    return Err("input() takes at most 1 argument".to_string());
+                }
+                let prompt = match args.first() {
+                    Some(p) => str_arg(self, p)?,
+                    None => "i8* null".to_string(),
+                };
+                let (v, t) = call_str(self, "runtime_input", &[prompt]);
+                Ok(Some((v, t)))
+            }
+            // ---- filesystem builtins ----
+            "read_file" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_read_file", &[p]);
+                Ok(Some((v, t)))
+            }
+            "write_file" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_write_file", &a);
+                Ok(Some((v, t)))
+            }
+            "append_file" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_append_file", &a);
+                Ok(Some((v, t)))
+            }
+            "file_exists" | "fs_exists" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_file_exists", &[p]);
+                Ok(Some((v, t)))
+            }
+            "remove_file" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_remove_file", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_create_dir" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_fs_create_dir", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_size" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_fs_size", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_metadata" => {
+                if args.len() != 1 {
+                    return Err("fs_metadata() takes exactly 1 argument".to_string());
+                }
+                let p = str_arg(self, &args[0])?;
+                let size_slot = self.fresh_temp();
+                let isdir_slot = self.fresh_temp();
+                let isfile_slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca i64, align 8\n", size_slot));
+                self.out.push_str(&format!("  {} = alloca i8, align 1\n", isdir_slot));
+                self.out.push_str(&format!("  {} = alloca i8, align 1\n", isfile_slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_fs_metadata({}, ptr {}, ptr {}, ptr {})\n",
+                    p, size_slot, isdir_slot, isfile_slot
+                ));
+                let size = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load i64, ptr {}, align 8\n", size, size_slot));
+                let isdir_raw = self.fresh_temp();
+                let isdir = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load i8, ptr {}, align 1\n", isdir_raw, isdir_slot));
+                self.out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", isdir, isdir_raw));
+                let isfile_raw = self.fresh_temp();
+                let isfile = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load i8, ptr {}, align 1\n", isfile_raw, isfile_slot));
+                self.out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", isfile, isfile_raw));
+                let t1 = self.fresh_temp();
+                let t2 = self.fresh_temp();
+                let t3 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = insertvalue %fs.FileMetadata undef, i64 {}, 0\n",
+                    t1, size
+                ));
+                self.out.push_str(&format!(
+                    "  {} = insertvalue %fs.FileMetadata {}, i1 {}, 1\n",
+                    t2, t1, isdir
+                ));
+                self.out.push_str(&format!(
+                    "  {} = insertvalue %fs.FileMetadata {}, i1 {}, 2\n",
+                    t3, t2, isfile
+                ));
+                Ok(Some((t3, Type::Struct("fs.FileMetadata".to_string()))))
+            }
+            "fs_list_dir" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_fs_list_dir", &[p]);
+                Ok(Some((v, t)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Phase 3: struct constructor codegen (insertvalue chain)
     fn codegen_struct_ctor(
         &mut self,
         name: &str,
@@ -726,7 +1164,7 @@ impl<'a> Cg<'a> {
         Ok((current, Type::Struct(name.to_string())))
     }
 
-    
+    /// Phase 3: field access codegen (extractvalue)
     fn codegen_field_access(&mut self, object: &Expr, field: &str) -> Result<(String, Type), String> {
         let (obj_v, obj_t) = self.codegen_expr(object)?;
         match obj_t {
@@ -751,7 +1189,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    /// Phase 4: state variant constructor codegen (tagged union)
     fn codegen_state_ctor(
         &mut self,
         state_name: &str,
@@ -772,7 +1210,7 @@ impl<'a> Cg<'a> {
             tmp_alloca, llvm_type
         ));
 
-        
+        // Store tag
         let tag_gep = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = getelementptr inbounds {}, ptr {}, i64 0, i32 0\n",
@@ -783,7 +1221,7 @@ impl<'a> Cg<'a> {
             tag as i32, tag_gep
         ));
 
-        
+        // Store payload values converted to i64
         for (i, arg) in args.iter().enumerate() {
             let (v, t) = self.codegen_expr(arg)?;
             let payload_gep = self.fresh_temp();
@@ -806,7 +1244,7 @@ impl<'a> Cg<'a> {
         Ok((tmp, Type::State(state_name.to_string())))
     }
 
-    
+    /// Phase 4: convert a value to i64 for state payload storage
     fn convert_to_i64(&mut self, v: &str, t: &Type) -> Result<String, String> {
         match t {
             Type::Int => Ok(self.bare_value(v).to_string()),
@@ -847,7 +1285,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    /// Phase 2: codegen print/println for one argument (Int, Float, Bool)
     fn codegen_print(&mut self, arg: &Expr, add_nl: bool) -> Result<(), String> {
         let (v, t) = self.codegen_expr(arg)?;
         let nl_suffix = if add_nl { "_nl" } else { "" };
@@ -911,7 +1349,7 @@ impl<'a> Cg<'a> {
         Ok(())
     }
 
-    
+    /// Format a value for use as a call argument: add type prefix if needed.
     fn fmt_call_arg(&self, v: &str, t: &Type) -> String {
         if v.is_empty() {
             return v.to_string();
@@ -923,7 +1361,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    /// Extract bare value (strip type prefix) from a typed constant.
     fn bare_value<'b>(&self, v: &'b str) -> &'b str {
         for p in &["i64 ", "double ", "i1 ", "i8* ", "void "] {
             if let Some(rest) = v.strip_prefix(p) {
@@ -933,15 +1371,25 @@ impl<'a> Cg<'a> {
         v
     }
 
-    
+    /// Phase 4: match codegen (switch on tag + extract payload + bind)
     fn codegen_match(&mut self, expr: &Expr, arms: &[(Pattern, Vec<Stmt>)]) -> Result<(), String> {
         let (val, ty) = self.codegen_expr(expr)?;
+        // `Option(T)` is represented as the `Option` tagged-union state at the
+        // LLVM level (see emit_aggregate_decls), so normalize the dual type
+        // form before looking up the state's variants.
+        let ty = match ty {
+            Type::Option(inner) => Type::State(format!("Option({})", crate::type_to_string(&inner))),
+            other => other,
+        };
         match ty {
             Type::State(ref state_name) => {
-                let variants = self.defs.states.get(state_name).ok_or_else(|| {
-                    format!("unknown state '{}'", state_name)
+                // Generic states are registered under their base name
+                // (e.g. `Option` for `Option(int)`); look up by base.
+                let base = crate::struct_base(state_name);
+                let variants = self.defs.states.get(&base).ok_or_else(|| {
+                    format!("unknown state '{}'", base)
                 })?;
-                let llvm_state = format!("%{}", state_name);
+                let llvm_state = format!("%{}", base);
 
                 let tag = self.fresh_temp();
                 self.out.push_str(&format!(
@@ -999,11 +1447,18 @@ impl<'a> Cg<'a> {
                     }
 
                     self.codegen_stmts(body)?;
-                    self.out.push_str(&format!("  br label %{}\n", merge_b));
+                    // If the arm already returned (block terminated), a trailing
+                    // `br` would be an instruction after a terminator.
+                    if !self.block_terminated() {
+                        self.out.push_str(&format!("  br label %{}\n", merge_b));
+                    }
                 }
 
                 self.out.push_str(&format!("{}:\n", merge_b));
                 self.current_block = merge_b;
+                // If the match is the final statement of a function and every
+                // arm terminated, the merge block is empty; the function-end
+                // ret (or an enclosing `br`) terminates it. Nothing to emit here.
                 Ok(())
             }
             _ => Err(format!(
@@ -1013,7 +1468,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    // Phase 5: string literal -> global constant pointer
     fn codegen_string_lit(&mut self, s: &str) -> Result<(String, Type), String> {
         let global_name = self.string_literals.get(s).ok_or_else(|| {
             format!("string literal '{}' not found in globals", s)
@@ -1027,7 +1482,7 @@ impl<'a> Cg<'a> {
         Ok((tmp, Type::String))
     }
 
-    
+    // Phase 5: array literal -> construct %LimeList on stack
     fn codegen_array_lit(&mut self, items: &[Expr]) -> Result<(String, Type), String> {
         let count = items.len();
         let mut elem_values: Vec<(String, Type)> = Vec::new();
@@ -1082,16 +1537,16 @@ impl<'a> Cg<'a> {
         Ok((t3, Type::List(Box::new(elem_type))))
     }
 
-    
+    // Phase 5/7: method call dispatch by object type
     fn codegen_method_call(&mut self, object: &Expr, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
         let (obj_v, obj_t) = self.codegen_expr(object)?;
         match obj_t {
             Type::String => self.codegen_string_method(&obj_v, method, args),
             Type::List(ref elem) => {
-                
-                
-                
-                
+                // `add`/`set` mutate the receiver: the runtime returns a new
+                // list, which must be stored back into the receiver variable
+                // (mirrors the interpreter's rebind in eval_expr). Non-ident
+                // receivers (e.g. temporaries) stay pure.
                 let rebind_slot = if matches!(method, "add" | "set") {
                     match object {
                         Expr::Ident(name) => self.named.get(name).cloned(),
@@ -1102,11 +1557,11 @@ impl<'a> Cg<'a> {
                 };
                 self.codegen_list_method(&obj_v, method, args, elem, rebind_slot)
             }
-            
+            // Phase 7: struct method call -> direct LLVM function call
             Type::Struct(ref sname) => {
                 self.codegen_struct_method_call(sname, &obj_v, method, args)
             }
-            
+            // Phase 7: interface dispatch stub (concrete type unknown at compile time)
             Type::Interface(ref iface, _) => {
                 let idef = self.defs.interfaces.get(iface).ok_or_else(|| {
                     format!("unknown interface '{}'", iface)
@@ -1114,7 +1569,7 @@ impl<'a> Cg<'a> {
                 let im = idef.methods.iter().find(|m| m.name == method).ok_or_else(|| {
                     format!("unknown method '{}.{}'", iface, method)
                 })?;
-                
+                // Stub: emit zero value of the interface method's return type
                 let ret_type = match &im.return_type {
                     Some(rt) => {
                         let t = type_from_str(rt, self.defs);
@@ -1136,7 +1591,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    // Phase 7: struct method call -> direct LLVM call @StructName_method
     fn codegen_struct_method_call(
         &mut self,
         sname: &str,
@@ -1181,7 +1636,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    // Phase 5: string method codegen (len, byte_len, slice, chars, bytes)
     fn codegen_string_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
         match method {
             "len" | "byte_len" | "length" => {
@@ -1206,7 +1661,10 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_str_slice(i8* {}, {}, {})\n",
-                    tmp, obj, start_v, end_v
+                    tmp,
+                    obj,
+                    self.fmt_call_arg(&start_v, &Type::Int),
+                    self.fmt_call_arg(&end_v, &Type::Int)
                 ));
                 Ok((tmp, Type::String))
             }
@@ -1242,7 +1700,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    
+    // Phase 5: list method codegen (len, get, add, set)
     fn codegen_list_method(
         &mut self,
         obj: &str,
@@ -1265,9 +1723,9 @@ impl<'a> Cg<'a> {
                     return Err("get() takes exactly 1 argument".to_string());
                 }
                 if *elem != Type::Int {
-                    
-                    
-                    
+                    // The element buffer stores i64 slots; only Int lists can
+                    // be lowered faithfully today. Refuse rather than emit a
+                    // value that would be silently misinterpreted.
                     return Err(format!(
                         "List.get() is only supported for lists of Int (element type is {:?})",
                         elem
@@ -1309,8 +1767,8 @@ impl<'a> Cg<'a> {
                 ));
                 self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
                 if let Some(slot) = rebind_slot {
-                    
-                    
+                    // Mutation semantics: write the returned list back into the
+                    // receiver variable's storage.
                     self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", tmp, slot));
                 }
                 Ok((tmp, Type::List(Box::new(elem_t))))
@@ -1334,8 +1792,8 @@ impl<'a> Cg<'a> {
                 ));
                 self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
                 if let Some(slot) = rebind_slot {
-                    
-                    
+                    // Mutation semantics: write the returned list back into the
+                    // receiver variable's storage.
                     self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", tmp, slot));
                 }
                 Ok((tmp, Type::List(Box::new(elem_t))))
@@ -1345,7 +1803,7 @@ impl<'a> Cg<'a> {
     }
 }
 
-
+/// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・ Phase 1 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・
 fn body_supported(stmts: &[Stmt]) -> bool {
     for s in stmts {
         if !stmt_supported(s) {
@@ -1370,7 +1828,7 @@ fn stmt_supported(s: &Stmt) -> bool {
                 && else_branch.as_ref().map(|b| body_supported(b)).unwrap_or(true)
         }
         Stmt::While { cond, body } => expr_supported(cond) && body_supported(body),
-        
+        // Phase 4: match (supports all arms if expr and bodies are supported)
         Stmt::Match { expr, arms } => {
             expr_supported(expr) && arms.iter().all(|(_, body)| body_supported(body))
         }
@@ -1390,24 +1848,24 @@ fn expr_supported(e: &Expr) -> bool {
             ok_op && expr_supported(left) && expr_supported(right)
         }
         Expr::UnOp { op, operand } => op == "not" && expr_supported(operand),
-        
+        // Phase 2+3: function calls (print/println builtin + struct ctor + user functions)
         Expr::Call { func, args } => {
             func == "print" || func == "println" || args.iter().all(|a| expr_supported(a))
         }
-        
+        // Phase 3: field access on struct
         Expr::FieldAccess { object, .. } => expr_supported(object),
-        
+        // Phase 5: method calls (string/list methods)
         Expr::MethodCall { object, args, .. } => {
             expr_supported(object) && args.iter().all(|a| expr_supported(a))
         }
-        
+        // Phase 5: array/list literals
         Expr::Array(items) => items.iter().all(|a| expr_supported(a)),
         Expr::Await(inner) => expr_supported(inner),
         _ => false,
     }
 }
 
-
+/// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・(Step 1-7) 縺ｦ繧､繝ｳ繝・・ｽ・ｽ繝医ｒ髢峨�ｸｦ縺ｧ繧｢蜷阪→。
 pub fn codegen_function(defs: &Defs, memory: &HashMap<String, MemoryPlace>, string_literals: &HashMap<String, String>, mono_name_map: &HashMap<String, String>, mono_fdefs: &HashMap<String, FunctionDef>, name: &str, fdef: &FunctionDef) -> (String, Vec<String>) {
     let mut cg = Cg::new(defs, memory, string_literals, mono_name_map, mono_fdefs);
     let ir = cg.codegen_function(name, fdef);

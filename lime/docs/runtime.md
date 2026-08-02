@@ -1,205 +1,126 @@
 # Lime Runtime (Phase 9)
 
-Lime runtime は、`src/codegen` が出力する LLVM IR と一緒にリンクされる、最小限の C ABI ヘルパーライブラリです。
+The Lime runtime is a minimal C-ABI helper library linked alongside the LLVM
+IR emitted by `src/codegen`. It owns the only pieces of code that cannot be
+expressed as plain LLVM IR: heap allocation, string manipulation, and list
+(buffer) management.
 
-LLVM IR だけでは表現が難しい以下の処理のみを担当します。
+## Files
 
-* ヒープメモリ確保
-* 文字列操作
-* リスト（バッファ）管理
+| File | Role |
+|------|------|
+| `src/codegen/runtime/runtime.h` | C declarations of every runtime symbol. |
+| `src/codegen/runtime/runtime.c` | Implementations. |
+| `src/codegen/runtime.rs` | Rust side: `extern "C"` declarations, `LimeList` repr(C) mirror, and `RUNTIME_C` / `RUNTIME_H` path constants used by a future `cc`/link step. |
 
----
+## Value conventions
 
-# ファイル構成
+Lime is a single-owner, copy-on-use language with **no GC and no reference
+counting** (see `docs/llvm_backend.md` §5.3). Every runtime value is stored as
+a flat, fixed-width word so it can live in an SSA register or a list slot:
 
-| ファイル                            | 役割                                                                                                                 |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `src/codegen/runtime/runtime.h` | すべての runtime symbol の C 宣言。                                                                                        |
-| `src/codegen/runtime/runtime.c` | runtime の実装。                                                                                                       |
-| `src/codegen/runtime.rs`        | Rust 側定義。`extern "C"` 宣言、`LimeList` の `repr(C)` ミラー、将来的な `cc` / link step で使用する `RUNTIME_C` / `RUNTIME_H` パス定数を保持。 |
+- `Int`   → `i64`
+- `Float` → `double` (bitcast to `i64` when stored in a list)
+- `Bool`  → `i1` (zext to `i64` when stored in a list)
+- `String`→ `i8*` (NUL-terminated UTF-8; ptrtoint to `i64` in lists)
+- `List(T)` → `%LimeList = { i8* data; i64 len; i64 cap }`
 
----
-
-# 値の表現規約
-
-Lime は、
-
-* GC なし
-* 参照カウントなし
-* single-owner
-* copy-on-use
-
-の言語です。
-
-（詳細は `docs/llvm_backend.md` §5.3）
-
-すべての runtime value は、SSA register または list slot に格納できるように、固定幅の flat word として保持されます。
-
----
-
-## 型マッピング
-
-| Lime 型    | 表現                                                 |
-| --------- | -------------------------------------------------- |
-| `Int`     | `i64`                                              |
-| `Float`   | `double`（list 保存時は `i64` に bitcast）                |
-| `Bool`    | `i1`（list 保存時は `i64` に zero extend）                |
-| `String`  | `i8*`（NUL 終端 UTF-8、list 保存時は `ptrtoint` で `i64` 化） |
-| `List(T)` | `%LimeList = { i8* data; i64 len; i64 cap }`       |
-
----
-
-# LimeList ABI
-
-LLVM 側の `%LimeList` は C struct と完全一致します。
-
-C 定義：
+`%LimeList` matches the C struct exactly:
 
 ```c
 typedef struct {
-    char *data;   // cap 個の int64_t 要素を持つ heap 配列
+    char *data;   // heap array of `cap` int64_t elements
     int64_t len;
     int64_t cap;
 } LimeList;
 ```
 
----
+The Rust mirror `codegen::runtime::LimeList` is `#[repr(C)]` with the same
+field order (`data` @0, `len` @8, `cap` @16) so the two sides agree on the
+ABI. A unit test (`runtime::tests::lime_list_layout_matches_llvm`) guards this.
 
-Rust 側：
+## Runtime symbols
 
-```rust
-codegen::runtime::LimeList
-```
+| Symbol | Signature | Notes |
+|--------|-----------|-------|
+| `runtime_alloc` | `i8* (i64 size, i64 align)` | `malloc`; aborts on OOM. |
+| `runtime_free` | `void (i8*)` | `free`. Phase 1 does not yet insert frees (leaks tolerated). |
+| `runtime_panic` | `void (i8* msg)` | prints and `abort()`. |
+| `runtime_print` | `void (i8*)` | writes a NUL-terminated string to stdout. |
+| `runtime_str_slice` | `i8* (i8* s, i64 start, i64 end)` | substring `[start, end)` (byte offsets). |
+| `runtime_str_concat` | `i8* (i8* a, i8* b)` | immutable concatenation. |
+| `runtime_str_chars` | `LimeList (i8* s)` | list of UTF-8 codepoints. |
+| `runtime_str_bytes` | `LimeList (i8* s)` | list of byte values. |
+| `runtime_list_empty` | `LimeList ()` | empty list. |
+| `runtime_list_add` | `LimeList (LimeList, i64)` | append (grows x2). |
+| `runtime_list_set` | `LimeList (LimeList, i64, i64)` | bounds-checked replace. |
 
-は：
+## Stdlib builtin helpers (Phase 12 Step 1)
 
-```rust
-#[repr(C)]
-```
+The bundled stdlib packages (`string`/`math`/`time`/`fs`/`io`) wrap the
+interpreter runtime builtins. The native backend now lowers those wrappers to
+the C helpers below, so a stdlib-using program compiles to a native executable
+whose output matches the interpreter.
 
-として定義され、フィールド順も一致します。
+| Symbol | Signature | Notes |
+|--------|-----------|-------|
+| `runtime_str_contains` | `int (i8* s, i8* sub)` | substring test. |
+| `runtime_str_starts_with` | `int (i8* s, i8* prefix)` | |
+| `runtime_str_ends_with` | `int (i8* s, i8* suffix)` | |
+| `runtime_str_trim` | `i8* (i8* s)` | ASCII whitespace trim. |
+| `runtime_str_replace` | `i8* (i8* s, i8* from, i8* to)` | empty `from` returns a copy. |
+| `runtime_str_to_upper` | `i8* (i8* s)` | ASCII case mapping. |
+| `runtime_str_to_lower` | `i8* (i8* s)` | |
+| `runtime_str_repeat` | `i8* (i8* s, i64 times)` | `times < 0` returns empty. |
+| `runtime_str_split` | `LimeList (i8* s, i8* sep)` | list of substrings (boxed as `i64` slots); matches Rust `str::split`. |
+| `runtime_math_abs` | `double (double)` | |
+| `runtime_math_sqrt` | `double (double)` | |
+| `runtime_math_min` | `double (double, double)` | |
+| `runtime_math_max` | `double (double, double)` | |
+| `runtime_math_clamp` | `double (double, double, double)` | |
+| `runtime_math_pow` | `double (double, double)` | |
+| `runtime_time_now` | `double ()` | epoch seconds. |
+| `runtime_time_sleep` | `int (double secs)` | sleeps; returns 1. |
+| `runtime_input` | `i8* (i8* prompt)` | writes prompt, reads a line (newline stripped). |
+| `runtime_read_file` | `i8* (i8* path)` | reads a file into a NUL-terminated string. |
+| `runtime_write_file` | `int (i8* path, i8* content)` | overwrites; returns success. |
+| `runtime_append_file` | `int (i8* path, i8* content)` | creates if missing. |
+| `runtime_file_exists` | `int (i8* path)` | |
+| `runtime_remove_file` | `int (i8* path)` | |
+| `runtime_fs_create_dir` | `int (i8* path)` | creates missing parents. |
+| `runtime_fs_size` | `i64 (i8* path)` | byte size of a file or directory. |
+| `runtime_fs_metadata` | `void (i8* path, i64* size, i8* is_dir, i8* is_file)` | out-params. |
+| `runtime_fs_list_dir` | `LimeList (i8* path)` | full paths of immediate children. |
 
-配置：
+`string.split` and `fs.list_dir` return `%LimeList` via the MSVC `sret` ABI
+(`declare void @runtime_str_split(ptr sret(%LimeList), ptr, ptr)`). Their
+string elements are boxed into the list's `i64` slots, so only `Int`-list
+operations (`len`) apply natively today.
 
-| Field  | Offset |
-| ------ | ------ |
-| `data` | 0      |
-| `len`  | 8      |
-| `cap`  | 16     |
+## Memory policy
 
----
+- Allocations are never freed by the runtime itself in Phase 1. The compiler
+  is responsible for emitting `runtime_free` at the last use of a heap value
+  (planned for a later phase via linear escape analysis).
+- Strings produced by `runtime_str_*` are freshly allocated and owned by the
+  caller.
+- The runtime is intentionally dependency-free (only libc: `malloc`/`free`/
+  `stdio`/`string`).
 
-ABI の一致は unit test：
+## Building / testing the runtime
 
-```
-runtime::tests::lime_list_layout_matches_llvm
-```
-
-によって保証されます。
-
----
-
-# Runtime Symbol
-
-| Symbol               | Signature                         | 説明                                    |
-| -------------------- | --------------------------------- | ------------------------------------- |
-| `runtime_alloc`      | `i8* (i64 size, i64 align)`       | `malloc`。メモリ不足時は abort。               |
-| `runtime_free`       | `void (i8*)`                      | `free`。Phase 1 では自動挿入されないため leak を許容。 |
-| `runtime_panic`      | `void (i8* msg)`                  | メッセージを表示して `abort()`。                 |
-| `runtime_print`      | `void (i8*)`                      | NUL 終端文字列を stdout に出力。                |
-| `runtime_str_slice`  | `i8* (i8* s, i64 start, i64 end)` | 部分文字列 `[start,end)` を取得（byte offset）。 |
-| `runtime_str_concat` | `i8* (i8* a, i8* b)`              | immutable な文字列結合。                     |
-| `runtime_str_chars`  | `LimeList (i8* s)`                | UTF-8 codepoint の list を生成。           |
-| `runtime_str_bytes`  | `LimeList (i8* s)`                | byte 値の list を生成。                     |
-| `runtime_list_empty` | `LimeList ()`                     | 空 list を生成。                           |
-| `runtime_list_add`   | `LimeList (LimeList, i64)`        | append（容量は x2 で拡張）。                   |
-| `runtime_list_set`   | `LimeList (LimeList, i64, i64)`   | 範囲チェック付き置換。                           |
-
----
-
-# メモリ管理方針
-
-## Phase 1 の仕様
-
-* runtime 自身は allocation を解放しません。
-* compiler が heap value の最後の使用箇所で `runtime_free` を生成する責任を持ちます。
-
-これは後続フェーズで：
-
-* linear escape analysis
-* lifetime analysis
-
-を利用して実装予定です。
-
----
-
-## String
-
-`runtime_str_*` が生成する文字列：
-
-* 常に新規 allocation
-* caller が所有
-
-します。
-
-対象：
-
-```
-runtime_str_slice
-runtime_str_concat
-```
-
-など。
-
----
-
-## Runtime の依存
-
-runtime は意図的に依存を最小化しています。
-
-必要なのは libc のみ：
-
-```
-malloc
-free
-stdio
-string
-```
-
----
-
-# Runtime のビルド / テスト
-
-runtime は通常の C99 コードであり、単独コンパイルできます。
-
-例：
+The runtime is plain C99 and compiles standalone:
 
 ```sh
 cc -std=c99 -c src/codegen/runtime/runtime.c -o /tmp/runtime.o
 ```
 
----
+(No C toolchain is required to build the `lime` compiler itself; the runtime
+is only needed when producing a native executable from emitted IR.)
 
-注意：
-
-Lime コンパイラ本体をビルドするために C コンパイラは必要ありません。
-
-C runtime が必要になるのは、生成された LLVM IR から **ネイティブ実行ファイルを作成するときだけ**です。
-
----
-
-# まとめ
-
-Phase 9 runtime は Lime の LLVM backend における **最小実行基盤**です。
-
-役割は明確に分離されています。
-
-* LLVM IR
-  → 制御フロー、型、計算、構造体操作
-
-* C runtime
-  → LLVM IR では扱いづらい低レベル処理
-
-という構成になっています。
-
-現在は GC や自動解放を持たないため、メモリ管理は compiler 側の責務として後続フェーズで拡張されます。
+`compile_runtime_c` (in `src/lib.rs`) embeds `runtime.c`/`runtime.h` via
+`include_str!`, writes them to the OS temp dir, and invokes clang (`-O2 -c`).
+The object file is named by a hash of the embedded source
+(`runtime-<hash>.obj`), so editing `runtime.c` never links a stale cached
+object. The compiler locates clang/lld-link via the LLVM prefix
+(`LIME_LLVM_PREFIX`, `LLVM_SYS_221_PREFIX`, or PATH lookup).

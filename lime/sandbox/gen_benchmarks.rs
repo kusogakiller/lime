@@ -1,19 +1,19 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// Benchmark program generator for the Lime performance test suite.
+//
+// Produces six deterministic benchmark programs. Each lives in its own
+// directory as `citrus.toml` + `main.lime` so they run through the same
+// manifest entry path as the real compiler workflow (the `.lime`-direct
+// entry point exercises a different, stricter path and is not used here).
+//
+// Benchmarks and the bottleneck they stress:
+//   small                 -> baseline tiny program
+//   medium                -> moderate func/stmt count, no generics/imports
+//   large                 -> large stmt count, structs, light generics
+//   generic_heavy         -> many distinct generic type instantiations
+//   package_heavy         -> imports all stdlib packages + deep cross-pkg calls
+//   monomorphization_heavy-> nested generics yielding many mono instances
+//
+// No language/spec/API/stdlib changes. Output is valid Lime source.
 use std::fs::File;
 use std::io::Write;
 
@@ -147,7 +147,7 @@ fn main() {
     let dir = "benchmarks/programs";
     std::fs::create_dir_all(dir).unwrap();
 
-    
+    // non-importing benchmarks use a plain manifest
     for (name, body) in [
         ("small", small()),
         ("medium", medium()),
@@ -161,7 +161,7 @@ fn main() {
         write(&format!("{}/main.lime", p), &body);
     }
 
-    
+    // package-heavy imports all stdlib packages
     let p = format!("{}/package_heavy", dir);
     std::fs::create_dir_all(&p).unwrap();
     write(&format!("{}/citrus.toml", p), &manifest("package_heavy"));

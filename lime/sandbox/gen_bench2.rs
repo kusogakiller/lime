@@ -8,7 +8,7 @@ fn main() {
     writeln!(f, "import string").unwrap();
     writeln!(f, "import math").unwrap();
     writeln!(f).unwrap();
-    
+    // A generic identity / container library exercised heavily.
     writeln!(f, "fn id<T>(x: T) -> T {{ return x }}").unwrap();
     writeln!(f, "fn pair<T>(a: T, b: T) -> List<T> {{ let l: List<T> = List(); l.push(a); l.push(b); return l }}").unwrap();
     writeln!(f, "fn get<K,V>(m: HashMap<K,V>, k: K) -> V {{ return m.get(k) }}").unwrap();

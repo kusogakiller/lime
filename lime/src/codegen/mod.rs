@@ -1,15 +1,15 @@
-
-
-
-
-
-
-
-
-
-
-
-
+// Phase 0 (Step 10): LLVM backend foundation (textual IR emitter).
+//
+// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・LLVM IR (text) 縺ｦ榆帥蜴ｻ縺ｦ縺ｪ縺ｿ縺ｪ縺・
+// Inkwell / llvm-sys 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・蟋ｩ蜉ｨ蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// (System LLVM 縺ｯ蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・)
+// 蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・(aggregates) 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+// 壓ｵ蜈ｰ縺ｯ縺ｪ縺ｿ縺ｪ縺・ Phase 1+ 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+//
+// Design (docs/llvm_backend.md) 縺ｮ codegen/ 縺ｯ繝ｼ繝牙ｒ繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・:
+//   mod.rs (Context/Module/Builder-like) / types.rs (型マッピング) /
+//   fn_builder.rs / structs.rs / calls.rs / generic.rs / interface.rs /
+//   async_rt.rs / runtime/ ... (Phase 1+ 縺ｯ頒ｦ)
 
 pub mod types;
 pub mod fn_builder;
@@ -35,19 +35,20 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("source_filename = \"lime\"\n");
     out.push_str(&format!("target triple = \"{}\"\n\n", DEFAULT_TARGET_TRIPLE));
 
-    
-    
+    // Runtime aggregate types must precede any declaration that uses them
+    // (LLVM rejects forward-referenced struct types in function signatures).
     out.push_str("%LimeList = type { i8*, i64, i64 }\n");
     out.push_str("%LimeOption = type { i1, i8* }\n");
     out.push_str("%LimeIface = type { i8*, i8* }\n\n");
 
-    
+    // Runtime declarations
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
     out.push_str("declare void @runtime_print(i8*)\n");
-    
-    out.push_str("declare i32 @printf(i8*, ...)\n\n");
+    // Printf for print/println builtin lowering (Phase 2)
+    out.push_str("declare i32 @printf(i8*, ...)\n");
+    out.push_str("declare void @runtime_panic(i8*)\n\n");
 
-    
+    // Phase 5: String/List runtime function declarations
     out.push_str("declare i64 @strlen(i8*)\n");
     out.push_str("declare i8* @runtime_str_slice(i8*, i64, i64)\n");
     out.push_str("declare i8* @runtime_str_concat(i8*, i8*)\n");
@@ -56,7 +57,39 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare void @runtime_list_add(ptr sret(%LimeList), ptr, i64)\n");
     out.push_str("declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)\n\n");
 
-    
+    // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
+    out.push_str("declare i32 @runtime_str_contains(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_str_starts_with(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_str_ends_with(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_str_trim(i8*)\n");
+    out.push_str("declare i8* @runtime_str_replace(i8*, i8*, i8*)\n");
+    out.push_str("declare void @runtime_str_split(ptr sret(%LimeList), ptr, ptr)\n");
+    out.push_str("declare i8* @runtime_str_to_upper(i8*)\n");
+    out.push_str("declare i8* @runtime_str_to_lower(i8*)\n");
+    out.push_str("declare i8* @runtime_str_repeat(i8*, i64)\n");
+    out.push_str("declare i8* @runtime_str_from_i64(i64)\n");
+    out.push_str("declare i8* @runtime_str_from_f64(double)\n");
+    out.push_str("declare i8* @runtime_str_from_bool(i1)\n");
+    out.push_str("declare double @runtime_math_abs(double)\n");
+    out.push_str("declare double @runtime_math_sqrt(double)\n");
+    out.push_str("declare double @runtime_math_min(double, double)\n");
+    out.push_str("declare double @runtime_math_max(double, double)\n");
+    out.push_str("declare double @runtime_math_clamp(double, double, double)\n");
+    out.push_str("declare double @runtime_math_pow(double, double)\n");
+    out.push_str("declare double @runtime_time_now()\n");
+    out.push_str("declare i32 @runtime_time_sleep(double)\n");
+    out.push_str("declare i8* @runtime_input(i8*)\n");
+    out.push_str("declare i8* @runtime_read_file(i8*)\n");
+    out.push_str("declare i32 @runtime_write_file(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_append_file(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_file_exists(i8*)\n");
+    out.push_str("declare i32 @runtime_remove_file(i8*)\n");
+    out.push_str("declare i32 @runtime_fs_create_dir(i8*)\n");
+    out.push_str("declare i64 @runtime_fs_size(i8*)\n");
+    out.push_str("declare void @runtime_fs_metadata(i8*, ptr, ptr, ptr)\n");
+    out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n\n");
+
+    // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.str.int_nl = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
     out.push_str("@.str.float  = private unnamed_addr constant [3 x i8] c\"%g\\00\"\n");
@@ -66,10 +99,10 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("@.str.true   = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
     out.push_str("@.str.false  = private unnamed_addr constant [6 x i8] c\"false\\00\"\n\n");
 
-    
+    // Aggregate type declarations
     emit_aggregate_decls(&mut out, defs);
 
-    
+    // Phase 5: collect string literals and emit globals
     let string_literals = collect_string_literals(defs);
     for (s, name) in &string_literals {
         let len = s.len() + 1;
@@ -83,17 +116,17 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
         out.push('\n');
     }
 
-    
+    // Phase 6: Generic monomorphization - collect generic calls and create monomorphized copies
     let (mono_name_map, mono_fdefs) = monomorphize_all(defs);
 
-    
+    // Emit monomorphized function definitions first
     for (mangled, mono_fdef) in &mono_fdefs {
         let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, mangled, mono_fdef);
         out.push_str(&func_ir);
         warnings.extend(fw);
     }
 
-    
+    // Function definitions using fn_builder (Phase 1) - skip generic templates
     for (name, fdef) in &defs.functions {
         if !fdef.type_params.is_empty() {
             continue;
@@ -103,14 +136,14 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
         warnings.extend(fw);
     }
 
-    
+    // Phase 7: Struct method function definitions
     for (sname, sdef) in &defs.structs {
         for (mname, mdef) in &sdef.methods {
             if !mdef.type_params.is_empty() {
                 continue;
             }
             let method_func_name = format!("{}_{}", sname, mname);
-            
+            // Prepend self parameter (struct type name, not LLVM IR notation)
             let mut params = vec![(String::from("self"), sname.clone())];
             params.extend(mdef.params.clone());
             let method_fdef = FunctionDef {
@@ -127,13 +160,13 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
         }
     }
 
-    
+    // C runtime main wrapper
     emit_main_wrapper(&mut out, defs);
 
     (out, warnings)
 }
 
-
+/// Phase 5: escape a string for LLVM IR constant format.
 fn escape_llvm_string(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -151,14 +184,14 @@ fn escape_llvm_string(s: &str) -> String {
     out
 }
 
-
+/// Phase 5: pre-scan all function bodies for Expr::StringLit, collect unique strings.
 fn collect_string_literals(defs: &Defs) -> HashMap<String, String> {
     let mut strings = HashMap::new();
     let mut idx = 0usize;
     for (_, fdef) in &defs.functions {
         collect_strings_from_stmts(&fdef.body, &mut strings, &mut idx);
     }
-    
+    // Phase 7: also scan struct method bodies
     for (_, sdef) in &defs.structs {
         for (_, mdef) in &sdef.methods {
             collect_strings_from_stmts(&mdef.body, &mut strings, &mut idx);
@@ -244,8 +277,8 @@ fn collect_strings_from_expr(e: &Expr, strings: &mut HashMap<String, String>, id
     }
 }
 
-
-
+// Phase 6: Generic monomorphization.
+// Parse "func(i64, str)" into ("func", ["i64", "str"])
 fn parse_generic_call_name(func: &str) -> Option<(&str, Vec<&str>)> {
     if let Some(paren_idx) = func.find('(') {
         let base = &func[..paren_idx];
@@ -291,7 +324,7 @@ fn mangled_name(base: &str, type_args: &[&str]) -> String {
     format!("{}.{}", base, type_args.join("."))
 }
 
-
+/// Scan all function bodies for generic calls and monomorphize them.
 fn monomorphize_all(defs: &Defs) -> (HashMap<String, String>, HashMap<String, FunctionDef>) {
     let mut mono_name_map: HashMap<String, String> = HashMap::new();
     let mut mono_fdefs: HashMap<String, FunctionDef> = HashMap::new();
@@ -366,7 +399,7 @@ fn collect_mono_from_expr(
 ) {
     match e {
         Expr::Call { func, args } => {
-            
+            // Check if this is a generic call like "max(i64)"
             if let Some((base, type_strs)) = parse_generic_call_name(func) {
                 if let Some(fdef) = defs.functions.get(base) {
                     if !fdef.type_params.is_empty() {
@@ -412,9 +445,9 @@ fn collect_mono_from_expr(
     }
 }
 
-
+/// 蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｪ縺ｿ縺ｪ縺・定義: struct / state / list / option / interface
 fn emit_aggregate_decls(out: &mut String, defs: &Defs) {
-    
+    // struct declarations with real field types (Phase 3)
     for (sname, sdef) in &defs.structs {
         let field_tys: Vec<String> = sdef
             .fields
@@ -423,7 +456,7 @@ fn emit_aggregate_decls(out: &mut String, defs: &Defs) {
             .collect();
         out.push_str(&format!("%{} = type {{ {} }}\n", sname, field_tys.join(", ")));
     }
-    
+    // state declarations as tagged unions (Phase 4)
     for sname in defs.states.keys() {
         out.push_str(&format!("%{} = type {{ i32, [4 x i64] }}\n", sname));
     }

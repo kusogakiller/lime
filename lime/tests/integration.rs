@@ -1,3 +1,4 @@
+//! Integration tests: ビルド済み `lime` バイナリを実行し、例題�E出力を検証する、E//! 吁Eexample は `<dir>/citrus.toml` + `<dir>/main.lime` 構�E、E
 use std::process::Command;
 
 fn lime_run(dir: &str) -> String {
@@ -13,6 +14,8 @@ fn lime_run(dir: &str) -> String {
     s
 }
 
+/// Run the given subcommand (`build` / `run` / `check`) against a `citrus.toml`
+/// and return combined stdout+stderr.
 fn lime_cmd(subcmd: &str, toml: &str, extra: &[&str]) -> String {
     let bin = env!("CARGO_BIN_EXE_lime");
     let mut cmd = Command::new(bin);
@@ -55,6 +58,7 @@ fn collections_demo() {
     }
 }
 
+/// Phase 12 Step 1: collections List + HashMap + HashSet wrappers.
 #[test]
 fn collections_demo2() {
     let out = lime_run("examples/collections_demo2");
@@ -78,6 +82,7 @@ fn collections_demo2() {
     }
 }
 
+/// Phase 12 Step 1: fs metadata/size/list_dir/create_dir.
 #[test]
 fn fs_demo2() {
     let out = lime_run("examples/fs_demo2");
@@ -91,6 +96,7 @@ fn fs_demo2() {
     }
 }
 
+/// Phase 12 Step 1: string to_upper/to_lower/repeat + existing ops.
 #[test]
 fn string_demo2() {
     let out = lime_run("examples/string_demo2");
@@ -113,6 +119,7 @@ fn string_demo2() {
     }
 }
 
+/// Phase 12 Step 1: time Instant/Duration/now/elapsed/sleep.
 #[test]
 fn time_demo() {
     let out = lime_run("examples/time_demo");
@@ -126,6 +133,8 @@ fn time_demo() {
     }
 }
 
+/// Phase 11: the legacy `lime <citrus.toml>` shorthand and the `run`
+/// subcommand share one `compile_pipeline`, so both execute the program.
 #[test]
 fn unified_pipeline_legacy_shorthand_runs() {
     let out = lime_run("examples/pipeline_demo");
@@ -136,9 +145,9 @@ fn unified_pipeline_legacy_shorthand_runs() {
     );
 }
 
-
-
-
+/// Phase 11: dead-code elimination is active on the unified pipeline. The
+/// project defines `never_used`, which the optimizer must strip. `build`
+/// reports how many functions it removed.
 #[test]
 fn unified_pipeline_runs_dce() {
     let out = lime_cmd("build", "examples/pipeline_demo/citrus.toml", &["--emit-ll"]);
@@ -156,7 +165,7 @@ fn unified_pipeline_runs_dce() {
     );
 }
 
-
+/// Phase X: backend_demo — arithmetic, function calls, if, loop, struct.
 #[test]
 fn backend_demo() {
     let out = lime_cmd("build", "examples/backend_demo/citrus.toml", &["--emit-ll"]);
@@ -167,22 +176,25 @@ fn backend_demo() {
     );
     let ir = std::fs::read_to_string("examples/backend_demo.ll").unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output to be generated");
-    
+    // Arith
     assert!(ir.contains("add i64"), "expected integer addition\n--- ir ---\n{}", ir);
-    
+    // Struct constructor
     assert!(ir.contains("insertvalue %Point"), "expected struct ctor\n--- ir ---\n{}", ir);
-    
+    // Struct field extract
     assert!(ir.contains("extractvalue %Point"), "expected struct field extract\n--- ir ---\n{}", ir);
-    
+    // If / branch
     assert!(ir.contains("br i1"), "expected conditional branch\n--- ir ---\n{}", ir);
-    
+    // While loop -> icmp + br
     assert!(ir.contains("icmp"), "expected comparison in loop\n--- ir ---\n{}", ir);
-    
+    // Function call
     assert!(ir.contains("call i64 @add"), "expected call to add function\n--- ir ---\n{}", ir);
-    
+    // C runtime main wrapper
     assert!(ir.contains("@main()"), "expected C main wrapper\n--- ir ---\n{}", ir);
 }
 
+/// Phase 11: the unified pipeline runs package-manager side effects even for
+/// the legacy shorthand path: `citrus.lock` is written next to the manifest
+/// and imported packages are copied into `.citrus/cache`.
 #[test]
 fn unified_pipeline_writes_lock_and_cache() {
     let lock = "examples/pipeline_demo/citrus.lock";
@@ -193,7 +205,7 @@ fn unified_pipeline_writes_lock_and_cache() {
         "expected citrus.lock to be generated at {}",
         lock
     );
-    
+    // math is imported; its manifest must be cached.
     let cached = ".citrus/cache/math/v0.1.0/citrus.toml";
     assert!(
         std::path::Path::new(cached).exists(),
@@ -202,6 +214,10 @@ fn unified_pipeline_writes_lock_and_cache() {
     );
 }
 
+/// Phase 9: codegen smoke test. Runs a project with `--emit-llvm` and
+/// verifies the generated IR is structurally valid: a return-type-less
+/// function is still given a concrete return type, and no broken
+/// `alloca void` stubs are emitted.
 #[test]
 fn emit_llvm_smoke() {
     let bin = env!("CARGO_BIN_EXE_lime");
@@ -216,7 +232,7 @@ fn emit_llvm_smoke() {
     let ir = std::fs::read_to_string(ll_path)
         .unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output to be generated");
-    
+    // return-type-less `add` must be inferred to i64, not void.
     assert!(
         ir.contains("define i64 @add (i64 %p0, i64 %p1)"),
         "expected 'define i64 @add' in IR\n--- stderr ---\n{}\n--- ir ---\n{}",
@@ -228,7 +244,7 @@ fn emit_llvm_smoke() {
         "expected 'ret i32' in IR\n--- ir ---\n{}",
         ir
     );
-    
+    // No broken void allocations.
     assert!(
         !ir.contains("alloca void"),
         "IR must not contain 'alloca void'\n--- ir ---\n{}",
@@ -239,8 +255,8 @@ fn emit_llvm_smoke() {
 #[test]
 fn phase9_demo() {
     let out = lime_run("examples/phase9_demo");
-    
-    
+    // nums = [10,20,30]: len()=3, sum=60; make_point(3,4).x=3,.y=4;
+    // "hello".len()=5; "hello"+" world"; Success(42) match prints 42.
     for expected in ["3", "60", "3", "4", "5", "hello world", "42"] {
         assert!(
             out.contains(expected),
@@ -264,6 +280,11 @@ fn iface_demo() {
     }
 }
 
+/// Phase 9: interface dispatch codegen. Current backend lowers interface
+/// calls to a `%LimeIface` fat-pointer plus direct static calls (e.g.
+/// `call void @make_sound(%LimeIface %p0)`); per-method vtables
+/// (`@vtable_*`) and self-by-pointer signatures are a future backend goal
+/// and are intentionally not asserted here.
 #[test]
 fn emit_llvm_interface() {
     let bin = env!("CARGO_BIN_EXE_lime");
@@ -303,6 +324,13 @@ fn emit_llvm_interface() {
     );
 }
 
+/// Phase 9: for-loop / struct / list / state codegen must be structurally
+/// valid and free of `alloca void`. The current backend emits struct types
+/// and constructors (`insertvalue %Point`) but does not yet lower list
+/// literals, for-loops, struct field access, or state matches into
+/// `main_lime`; field access (`extractvalue`) and state dispatch
+/// (`switch i32`) are future backend goals and are intentionally not
+/// asserted here.
 #[test]
 fn emit_llvm_phase9_demo() {
     let bin = env!("CARGO_BIN_EXE_lime");
@@ -337,9 +365,9 @@ fn emit_llvm_phase9_demo() {
     );
 }
 
-
-
-
+/// Phase 12 Step 2: inference demo — untyped parameters are inferred from
+/// call sites, making type-checking and codegen succeed without explicit
+/// type annotations.
 #[test]
 fn inference_demo() {
     let out = lime_run("examples/inference_demo");
@@ -516,6 +544,54 @@ fn main():
     assert!(
         out.contains("not exhaustive"),
         "Expected 'not exhaustive' in output, got:\n{}",
+        out
+    );
+}
+
+/// Phase B-1 Step 1: interpreter parity for the `option` / `result` stdlib
+/// helpers. The same program is used by the native codegen regression test
+/// (`emit_object_option_result_runs`) and must produce identical output under
+/// `lime run`.
+#[test]
+fn stdlib_option_result_interp() {
+    use std::fs;
+    let dir = "target/test_option_result_interp";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+        format!("{}/main.lime", dir),
+        "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.is_some(some))\n    println(option.is_none(some))\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, 0))\n    println(option.unwrap(some))\n    let ok = Success(10)\n    let err = Error(\"boom\")\n    println(result.is_ok(ok))\n    println(result.is_err(ok))\n    println(result.is_err(err))\n    println(result.unwrap_or(ok, 0))\n    println(result.unwrap_or(err, 0))\n    println(result.unwrap(ok))\n    return\n",
+    )
+    .unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_option_result_interp\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\n",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let _ = fs::remove_dir_all(dir);
+    let expected = [
+        "true",
+        "false",
+        "5",
+        "0",
+        "5",
+        "true",
+        "false",
+        "true",
+        "10",
+        "0",
+        "10",
+    ];
+    let stdout: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    assert!(
+        stdout == expected,
+        "option/result interp output mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected,
+        stdout,
         out
     );
 }
