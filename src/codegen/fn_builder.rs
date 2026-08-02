@@ -404,6 +404,23 @@ impl<'a> Cg<'a> {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!("  {} = xor i1 {}, true\n", tmp, self.bare_value(&v)));
                     Ok((tmp, Type::Bool))
+                } else if op == "-" {
+                    let (v, t) = self.codegen_expr(operand)?;
+                    let tmp = self.fresh_temp();
+                    match t {
+                        Type::Float => self.out.push_str(&format!(
+                            "  {} = fsub double 0.0, {}\n",
+                            tmp,
+                            self.bare_value(&v)
+                        )),
+                        Type::Int | Type::Long => self.out.push_str(&format!(
+                            "  {} = sub i64 0, {}\n",
+                            tmp,
+                            self.bare_value(&v)
+                        )),
+                        _ => return Err(format!("Phase 1: unary '-' not supported for {:?}", t)),
+                    }
+                    Ok((tmp, t))
                 } else {
                     Err(format!("Phase 1: unsupported unary operator '{}'", op))
                 }
@@ -612,9 +629,20 @@ impl<'a> Cg<'a> {
             }
             return Ok((String::new(), Type::Unit));
         }
+        // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
+        if let Some(result) = self.codegen_runtime_builtin(func, args)? {
+            return Ok(result);
+        }
         // Phase 3: struct constructor
         if let Some(sdef) = self.defs.structs.get(func) {
             return self.codegen_struct_ctor(func, sdef, args);
+        }
+        // Phase 12 Step 1: package-qualified struct constructor called by its
+        // bare name (e.g. `Instant(f)` resolves to `time.Instant`).
+        if let Some(resolved) = self.defs.resolve_type(func) {
+            if let Some(sdef) = self.defs.structs.get(&resolved) {
+                return self.codegen_struct_ctor(&resolved, sdef, args);
+            }
         }
         // Phase 4: state variant constructor (Success/Error or user state variant)
         if let Some(state_name) = self.defs.state_variants.get(func) {
@@ -656,9 +684,18 @@ impl<'a> Cg<'a> {
             }
         }
         // User function call
-        let fdef = self.defs.functions.get(func).ok_or_else(|| {
-            format!("undefined function '{}'", func)
-        })?;
+        let fdef = self
+            .defs
+            .functions
+            .get(func)
+            // Phase 12 Step 1: resolve a bare user-function name to its
+            // package-qualified key (e.g. a package function calling another).
+            .or_else(|| {
+                self.defs
+                    .resolve_function(func)
+                    .and_then(|resolved| self.defs.functions.get(&resolved))
+            })
+            .ok_or_else(|| format!("undefined function '{}'", func))?;
         let llvm_name = if func == "main" { "main_lime" } else { func };
         let mut call_args = Vec::new();
         for (arg, (_, ptype)) in args.iter().zip(&fdef.params) {
@@ -687,6 +724,329 @@ impl<'a> Cg<'a> {
                 tmp, ret_type.0, llvm_name, call_args_str
             ));
             Ok((tmp, ret_type.1))
+        }
+    }
+
+    /// Phase 12 Step 1: stdlib runtime builtin lowering.
+    ///
+    /// Lowers the bare runtime builtins that the stdlib packages wrap
+    /// (`string`/`math`/`time`/`fs`/`io`) to calls into the C runtime helpers
+    /// declared in src/codegen/mod.rs. Returns `Ok(None)` when `func` is not a
+    /// builtin handled here so the caller can continue to user-function lookup.
+    fn codegen_runtime_builtin(&mut self, func: &str, args: &[Expr]) -> Result<Option<(String, Type)>, String> {
+        // Evaluate an argument and format it for a call of the given type.
+        fn arg(cg: &mut Cg, e: &Expr, want: &Type) -> Result<String, String> {
+            let (v, t) = cg.codegen_expr(e)?;
+            if &t != want {
+                return Err(format!(
+                    "builtin argument type mismatch: expected {:?}, got {:?}",
+                    want, t
+                ));
+            }
+            Ok(cg.fmt_call_arg(&v, want))
+        }
+        // N string arguments -> i8* formatted list.
+        fn str_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
+            if exprs.len() != n {
+                return Err(format!("builtin expects {} string argument(s), got {}", n, exprs.len()));
+            }
+            exprs.iter().map(|e| arg(cg, e, &Type::String)).collect()
+        }
+        fn str_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            str_args(cg, std::slice::from_ref(e), 1).map(|v| v.into_iter().next().unwrap())
+        }
+        // N float arguments -> double formatted list.
+        fn f64_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
+            if exprs.len() != n {
+                return Err(format!("builtin expects {} float argument(s), got {}", n, exprs.len()));
+            }
+            exprs.iter().map(|e| arg(cg, e, &Type::Float)).collect()
+        }
+        fn f64_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            f64_args(cg, std::slice::from_ref(e), 1).map(|v| v.into_iter().next().unwrap())
+        }
+        fn i64_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            arg(cg, e, &Type::Int)
+        }
+
+        // Emit a call returning an i8* string.
+        fn call_str(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i8* @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            (tmp, Type::String)
+        }
+        // Emit a call returning an int (0/1) and convert it to an i1 bool.
+        fn call_bool(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            let flag = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i32 @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            cg.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", flag, tmp));
+            (flag, Type::Bool)
+        }
+        // Emit a call returning a double.
+        fn call_f64(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call double @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            (tmp, Type::Float)
+        }
+        // Emit a call returning an i64.
+        fn call_i64(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i64 @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            (tmp, Type::Int)
+        }
+        // Emit a call returning a %LimeList via sret (strings boxed as i64
+        // element slots, matching `split`/`fs_list_dir`).
+        fn call_list(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let slot = cg.fresh_temp();
+            let tmp = cg.fresh_temp();
+            cg.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+            cg.out.push_str(&format!(
+                "  call void @{}(ptr sret(%LimeList) {}, {})\n",
+                helper, slot, call_args.join(", ")
+            ));
+            cg.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+            (tmp, Type::List(Box::new(Type::String)))
+        }
+
+        match func {
+            // ---- string builtins ----
+            "len" => {
+                if args.len() != 1 {
+                    return Err("len() takes exactly 1 argument".to_string());
+                }
+                let (v, t) = self.codegen_expr(&args[0])?;
+                match t {
+                    Type::String => {
+                        let s = self.fmt_call_arg(&v, &Type::String);
+                        let tmp = self.fresh_temp();
+                        self.out.push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
+                        Ok(Some((tmp, Type::Int)))
+                    }
+                    Type::List(_) => {
+                        let tmp = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue %LimeList {}, 1\n",
+                            tmp,
+                            self.bare_value(&v)
+                        ));
+                        Ok(Some((tmp, Type::Int)))
+                    }
+                    other => Err(format!("builtin len() not supported for {:?}", other)),
+                }
+            }
+            "byte_len" => {
+                let s = str_arg(self, &args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "contains" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_contains", &a);
+                Ok(Some((v, t)))
+            }
+            "starts_with" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_starts_with", &a);
+                Ok(Some((v, t)))
+            }
+            "ends_with" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_ends_with", &a);
+                Ok(Some((v, t)))
+            }
+            "trim" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_trim", &[s]);
+                Ok(Some((v, t)))
+            }
+            "to_upper" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_to_upper", &[s]);
+                Ok(Some((v, t)))
+            }
+            "to_lower" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_to_lower", &[s]);
+                Ok(Some((v, t)))
+            }
+            "replace" => {
+                let a = str_args(self, args, 3)?;
+                let (v, t) = call_str(self, "runtime_str_replace", &a);
+                Ok(Some((v, t)))
+            }
+            "repeat" => {
+                let s = str_arg(self, &args[0])?;
+                let n = i64_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_str_repeat", &[s, n]);
+                Ok(Some((v, t)))
+            }
+            "slice" => {
+                let s = str_arg(self, &args[0])?;
+                let start = i64_arg(self, &args[1])?;
+                let end = i64_arg(self, &args[2])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_slice({}, {}, {})\n",
+                    tmp, s, start, end
+                ));
+                Ok(Some((tmp, Type::String)))
+            }
+            "split" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_list(self, "runtime_str_split", &a);
+                Ok(Some((v, t)))
+            }
+            // ---- math builtins ----
+            "abs" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_abs", &[x]);
+                Ok(Some((v, t)))
+            }
+            "sqrt" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_sqrt", &[x]);
+                Ok(Some((v, t)))
+            }
+            "min" => {
+                let a = f64_args(self, args, 2)?;
+                let (v, t) = call_f64(self, "runtime_math_min", &a);
+                Ok(Some((v, t)))
+            }
+            "max" => {
+                let a = f64_args(self, args, 2)?;
+                let (v, t) = call_f64(self, "runtime_math_max", &a);
+                Ok(Some((v, t)))
+            }
+            "clamp" => {
+                let a = f64_args(self, args, 3)?;
+                let (v, t) = call_f64(self, "runtime_math_clamp", &a);
+                Ok(Some((v, t)))
+            }
+            "pow" => {
+                let a = f64_args(self, args, 2)?;
+                let (v, t) = call_f64(self, "runtime_math_pow", &a);
+                Ok(Some((v, t)))
+            }
+            // ---- time builtins ----
+            "time_now" => {
+                let (v, t) = call_f64(self, "runtime_time_now", &[]);
+                Ok(Some((v, t)))
+            }
+            "time_sleep" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_time_sleep", &[x]);
+                Ok(Some((v, t)))
+            }
+            // ---- stdio builtin ----
+            "input" => {
+                if args.len() > 1 {
+                    return Err("input() takes at most 1 argument".to_string());
+                }
+                let prompt = match args.first() {
+                    Some(p) => str_arg(self, p)?,
+                    None => "i8* null".to_string(),
+                };
+                let (v, t) = call_str(self, "runtime_input", &[prompt]);
+                Ok(Some((v, t)))
+            }
+            // ---- filesystem builtins ----
+            "read_file" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_read_file", &[p]);
+                Ok(Some((v, t)))
+            }
+            "write_file" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_write_file", &a);
+                Ok(Some((v, t)))
+            }
+            "append_file" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_append_file", &a);
+                Ok(Some((v, t)))
+            }
+            "file_exists" | "fs_exists" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_file_exists", &[p]);
+                Ok(Some((v, t)))
+            }
+            "remove_file" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_remove_file", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_create_dir" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_fs_create_dir", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_size" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_fs_size", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_metadata" => {
+                if args.len() != 1 {
+                    return Err("fs_metadata() takes exactly 1 argument".to_string());
+                }
+                let p = str_arg(self, &args[0])?;
+                let size_slot = self.fresh_temp();
+                let isdir_slot = self.fresh_temp();
+                let isfile_slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca i64, align 8\n", size_slot));
+                self.out.push_str(&format!("  {} = alloca i8, align 1\n", isdir_slot));
+                self.out.push_str(&format!("  {} = alloca i8, align 1\n", isfile_slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_fs_metadata({}, ptr {}, ptr {}, ptr {})\n",
+                    p, size_slot, isdir_slot, isfile_slot
+                ));
+                let size = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load i64, ptr {}, align 8\n", size, size_slot));
+                let isdir_raw = self.fresh_temp();
+                let isdir = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load i8, ptr {}, align 1\n", isdir_raw, isdir_slot));
+                self.out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", isdir, isdir_raw));
+                let isfile_raw = self.fresh_temp();
+                let isfile = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load i8, ptr {}, align 1\n", isfile_raw, isfile_slot));
+                self.out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", isfile, isfile_raw));
+                let t1 = self.fresh_temp();
+                let t2 = self.fresh_temp();
+                let t3 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = insertvalue %fs.FileMetadata undef, i64 {}, 0\n",
+                    t1, size
+                ));
+                self.out.push_str(&format!(
+                    "  {} = insertvalue %fs.FileMetadata {}, i1 {}, 1\n",
+                    t2, t1, isdir
+                ));
+                self.out.push_str(&format!(
+                    "  {} = insertvalue %fs.FileMetadata {}, i1 {}, 2\n",
+                    t3, t2, isfile
+                ));
+                Ok(Some((t3, Type::Struct("fs.FileMetadata".to_string()))))
+            }
+            "fs_list_dir" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_fs_list_dir", &[p]);
+                Ok(Some((v, t)))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -1206,7 +1566,10 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_str_slice(i8* {}, {}, {})\n",
-                    tmp, obj, start_v, end_v
+                    tmp,
+                    obj,
+                    self.fmt_call_arg(&start_v, &Type::Int),
+                    self.fmt_call_arg(&end_v, &Type::Int)
                 ));
                 Ok((tmp, Type::String))
             }

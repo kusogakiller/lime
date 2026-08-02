@@ -3760,25 +3760,21 @@ pub fn compile_pipeline(
 
 /// Compile the embedded runtime.c and return the path to the resulting .obj file.
 fn compile_runtime_c() -> Result<String, String> {
+    use std::hash::{Hash, Hasher};
     let tmp_dir = std::env::temp_dir().join("lime_runtime");
     let _ = std::fs::create_dir_all(&tmp_dir);
 
     let c_path = tmp_dir.join("runtime.c");
     let h_path = tmp_dir.join("runtime.h");
-    let obj_path = tmp_dir.join("runtime.obj");
 
-    // Only recompile if source changed (check timestamp).
-    let need_compile = || -> bool {
-        if !obj_path.exists() { return true; }
-        let src_modified = std::fs::metadata(&c_path).and_then(|m| m.modified()).ok();
-        let obj_modified = std::fs::metadata(&obj_path).and_then(|m| m.modified()).ok();
-        match (src_modified, obj_modified) {
-            (Some(s), Some(o)) => s > o,
-            _ => true,
-        }
-    };
+    // Key the object file by a hash of the embedded source so that editing
+    // runtime.c never silently links a stale cached object (timestamp-based
+    // invalidation is unreliable on some platforms).
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    RUNTIME_C_SOURCE.hash(&mut hasher);
+    let obj_path = tmp_dir.join(format!("runtime-{:016x}.obj", hasher.finish()));
 
-    if need_compile() {
+    if !obj_path.exists() {
         std::fs::write(&c_path, RUNTIME_C_SOURCE)
             .map_err(|e| format!("failed to write runtime.c: {}", e))?;
         std::fs::write(&h_path, RUNTIME_H_SOURCE)
@@ -4455,7 +4451,7 @@ impl Defs {
     // Resolve a bare name (possibly package-qualified) to its full function
     // name, using the precomputed index. Returns None for unknown or
     // ambiguous names. This replaces the previous O(F) linear scan.
-    fn resolve_function(&self, name: &str) -> Option<String> {
+    pub(crate) fn resolve_function(&self, name: &str) -> Option<String> {
         if is_runtime_builtin(name) {
             return None;
         }
@@ -4472,7 +4468,7 @@ impl Defs {
 
     // Resolve a bare name to its full type name using the precomputed index.
     // Replaces the previous O(S+I+T) linear scan in `type_from_str`.
-    fn resolve_type(&self, name: &str) -> Option<String> {
+    pub(crate) fn resolve_type(&self, name: &str) -> Option<String> {
         if self.structs.contains_key(name) || self.states.contains_key(name) || self.interfaces.contains_key(name) {
             return Some(name.to_string());
         }
@@ -5542,7 +5538,7 @@ fn infer_type(
                 }
                 "index_of" => Ok(Type::Int),
                 "contains_item" => Ok(Type::Bool),
-                "abs" | "sqrt" | "pow" => {
+                "abs" | "sqrt" => {
                     if args.len() != 1 {
                         return Err(format!("{}() takes exactly 1 argument", func));
                     }
@@ -5551,6 +5547,18 @@ fn infer_type(
                         Ok(Type::Float)
                     } else {
                         Err(format!("{}() expects a float argument", func))
+                    }
+                }
+                "pow" => {
+                    if args.len() != 2 {
+                        return Err("pow() takes exactly 2 arguments".to_string());
+                    }
+                    let at1 = infer_type(&args[0], env, defs, constraints)?;
+                    let at2 = infer_type(&args[1], env, defs, constraints)?;
+                    if at1 == Type::Float && at2 == Type::Float {
+                        Ok(Type::Float)
+                    } else {
+                        Err("pow() expects float arguments".to_string())
                     }
                 }
                 "min" | "max" => {

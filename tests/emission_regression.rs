@@ -153,6 +153,130 @@ fn emit_object_list_add_set_runs() {
     );
 }
 
+/// Write a throwaway project that depends on the bundled stdlib packages.
+fn write_stdlib_project(dir: &str, source: &str) {
+    use std::fs;
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\n",
+    )
+    .unwrap();
+}
+
+/// Phase 12 Step 1: the runtime builtins wrapped by the stdlib packages must
+/// lower to C runtime helper calls, so a stdlib-using program compiles to a
+/// native executable that matches the interpreter output. Previously the
+/// package wrappers (`string.trim`, `math.sqrt`, `fs.read`, ...) were emitted
+/// as undefined-function stubs that `--emit-object` refused to build.
+#[test]
+fn emit_object_stdlib_builtins_lower_and_run() {
+    use std::fs;
+    let dir = "target/test_emit_stdlib_native";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(string.trim(\"  hi  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.to_lower(\"AbC\"))\n    println(string.replace(\"aaa\", \"a\", \"b\"))\n    println(string.len(\"hello\"))\n    println(string.byte_len(\"hello\"))\n    println(string.contains(\"hello\", \"ell\"))\n    println(string.starts_with(\"hello\", \"he\"))\n    println(string.ends_with(\"hello\", \"lo\"))\n    println(string.repeat(\"ab\", 3))\n    println(string.slice(\"hello\", 1, 3))\n    let parts = string.split(\"a,b,c\", \",\")\n    println(math.sqrt(16.0))\n    println(math.abs(-3.0))\n    println(math.max(1.0, 7.0))\n    println(math.min(1.0, 7.0))\n    println(math.clamp(5.0, 0.0, 2.0))\n    println(math.pow(2.0, 3.0))\n    println(time.now().secs > 0.0)\n    println(time.elapsed(time.now()).secs >= 0.0)\n    println(time.sleep(0.01))\n    io.println(\"io test\")\n    let entries = fs.list_dir(\"target\")\n    println(fs.write(\"target/test_stdlib_native_io.txt\", \"lime fs ok\"))\n    println(fs.read(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    println(fs.size(\"target/test_stdlib_native_io.txt\") == 10)\n    println(fs.metadata(\"target/test_stdlib_native_io.txt\").is_file)\n    println(fs.remove(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        !out.contains("codegen warning") && !out.contains("could not be fully lowered"),
+        "stdlib program must lower completely\n--- output ---\n{}",
+        out
+    );
+    for helper in [
+        "runtime_str_trim",
+        "runtime_str_to_upper",
+        "runtime_str_to_lower",
+        "runtime_str_replace",
+        "runtime_str_repeat",
+        "runtime_str_slice",
+        "runtime_str_split",
+        "runtime_str_contains",
+        "runtime_str_starts_with",
+        "runtime_str_ends_with",
+        "runtime_math_sqrt",
+        "runtime_math_abs",
+        "runtime_math_max",
+        "runtime_math_min",
+        "runtime_math_clamp",
+        "runtime_math_pow",
+        "runtime_time_now",
+        "runtime_time_sleep",
+        "runtime_read_file",
+        "runtime_write_file",
+        "runtime_file_exists",
+        "runtime_fs_size",
+        "runtime_fs_metadata",
+        "runtime_remove_file",
+        "runtime_fs_list_dir",
+    ] {
+        assert!(
+            ir.contains(&format!("@{}", helper)),
+            "IR must call {}\n--- ir ---\n{}",
+            helper,
+            ir
+        );
+    }
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    let expected = [
+        "hi",
+        "ABC",
+        "abc",
+        "bbb",
+        "5",
+        "5",
+        "true",
+        "true",
+        "true",
+        "ababab",
+        "el",
+        "4",
+        "3",
+        "7",
+        "1",
+        "2",
+        "8",
+        "true",
+        "true",
+        "true",
+        "io test",
+        "true",
+        "lime fs ok",
+        "true",
+        "true",
+        "true",
+        "true",
+        "false",
+    ];
+    assert!(
+        lines == expected,
+        "stdlib native output mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
 /// Regression: scalar `let` with a literal RHS must emit a valid store
 /// (`store i64 5, i64* %t`) instead of `store i64 i64 5, ...`, and a binop
 /// over a register and a literal must emit a bare operand (`add i64 %t, 1`).

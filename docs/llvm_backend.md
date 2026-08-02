@@ -291,6 +291,23 @@ LLVM では真の非同期ランタイム（ステートマシン）または **
 - 浮動小数点 / 整数演算は LLVM IR のネイティブ命令（`add`/`fadd` 等）。
 - 演算子の `resolved_operator`（Operator Interface）は、そのまま具象関数の `call` へ。
 
+### 9.1 Stdlib runtime builtin integration (Phase 12 Step 1)
+
+バンドル stdlib パッケージ（`string`/`math`/`time`/`fs`/`io`）のラッパー関数が
+ネイティブバックエンドでも動くよう、`is_runtime_builtin` の組込みを C ヘルパー呼び出し
+へ lowering する（`fn_builder.rs` の `codegen_runtime_builtin`）。
+
+- ラッパー関数（例: `string.trim`）は `defs.functions` に dotted 名でマージされており、
+  `Defs::resolve_function` / `Defs::resolve_type`（`pub(crate)`）のフォールバックで解決される。
+  バラの型名（`Instant(f)` など）は `resolve_type` で `time.Instant` に解決される。
+- `codegen_call` のディスパッチ順: ランタイム組込み → 構造体コンストラクタ →
+  状態コンストラクタ → モノモーフ関数 → ユーザー関数。
+- 対応表は `docs/runtime.md`「Stdlib builtin helpers」参照。文字列リストを返す
+  `split`/`fs_list_dir` は MSVC `sret` ABI で `%LimeList` を返す。
+- `compile_runtime_c()` は埋め込み `runtime.c` をその場で clang コンパイルし、
+  ソース内容のハッシュで `.obj` を命名する（編集時に stale cache がリンクされる
+  のを防ぐ）。
+
 ---
 
 ## 10. Phase 分割（段階的実装計画）

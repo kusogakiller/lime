@@ -45,6 +45,41 @@ char* runtime_str_slice(char* s, int64_t start, int64_t end);
 char* runtime_str_concat(char* a, char* b);
 LimeList runtime_str_chars(char* s);
 LimeList runtime_str_bytes(char* s);
+int runtime_str_contains(char* s, char* sub);
+int runtime_str_starts_with(char* s, char* prefix);
+int runtime_str_ends_with(char* s, char* suffix);
+char* runtime_str_trim(char* s);
+char* runtime_str_replace(char* s, char* from, char* to);
+LimeList runtime_str_split(char* s, char* sep);
+char* runtime_str_to_upper(char* s);
+char* runtime_str_to_lower(char* s);
+char* runtime_str_repeat(char* s, int64_t times);
+
+// -- Math --
+double runtime_math_abs(double x);
+double runtime_math_sqrt(double x);
+double runtime_math_min(double a, double b);
+double runtime_math_max(double a, double b);
+double runtime_math_clamp(double x, double lo, double hi);
+double runtime_math_pow(double a, double b);
+
+// -- Time --
+double runtime_time_now(void);
+int runtime_time_sleep(double secs);
+
+// -- stdio --
+char* runtime_input(char* prompt);
+
+// -- Filesystem --
+char* runtime_read_file(char* path);
+int runtime_write_file(char* path, char* content);
+int runtime_append_file(char* path, char* content);
+int runtime_file_exists(char* path);
+int runtime_remove_file(char* path);
+int runtime_fs_create_dir(char* path);
+int64_t runtime_fs_size(char* path);
+void runtime_fs_metadata(char* path, int64_t* size, int8_t* is_dir, int8_t* is_file);
+LimeList runtime_fs_list_dir(char* path);
 
 // -- List operations --
 LimeList runtime_list_empty(void);

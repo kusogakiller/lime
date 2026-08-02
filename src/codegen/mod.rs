@@ -56,6 +56,35 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare void @runtime_list_add(ptr sret(%LimeList), ptr, i64)\n");
     out.push_str("declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)\n\n");
 
+    // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
+    out.push_str("declare i32 @runtime_str_contains(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_str_starts_with(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_str_ends_with(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_str_trim(i8*)\n");
+    out.push_str("declare i8* @runtime_str_replace(i8*, i8*, i8*)\n");
+    out.push_str("declare void @runtime_str_split(ptr sret(%LimeList), ptr, ptr)\n");
+    out.push_str("declare i8* @runtime_str_to_upper(i8*)\n");
+    out.push_str("declare i8* @runtime_str_to_lower(i8*)\n");
+    out.push_str("declare i8* @runtime_str_repeat(i8*, i64)\n");
+    out.push_str("declare double @runtime_math_abs(double)\n");
+    out.push_str("declare double @runtime_math_sqrt(double)\n");
+    out.push_str("declare double @runtime_math_min(double, double)\n");
+    out.push_str("declare double @runtime_math_max(double, double)\n");
+    out.push_str("declare double @runtime_math_clamp(double, double, double)\n");
+    out.push_str("declare double @runtime_math_pow(double, double)\n");
+    out.push_str("declare double @runtime_time_now()\n");
+    out.push_str("declare i32 @runtime_time_sleep(double)\n");
+    out.push_str("declare i8* @runtime_input(i8*)\n");
+    out.push_str("declare i8* @runtime_read_file(i8*)\n");
+    out.push_str("declare i32 @runtime_write_file(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_append_file(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_file_exists(i8*)\n");
+    out.push_str("declare i32 @runtime_remove_file(i8*)\n");
+    out.push_str("declare i32 @runtime_fs_create_dir(i8*)\n");
+    out.push_str("declare i64 @runtime_fs_size(i8*)\n");
+    out.push_str("declare void @runtime_fs_metadata(i8*, ptr, ptr, ptr)\n");
+    out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n\n");
+
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.str.int_nl = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
