@@ -153,6 +153,97 @@ fn emit_object_list_add_set_runs() {
     );
 }
 
+/// Phase B-1 Step 1: `Option(T)` / `Result(T, E)` helpers from the stdlib
+/// packages (`option.unwrap_or`, `option.is_some`, `option.is_none`,
+/// `option.unwrap`, `result.unwrap_or`, `result.is_ok`, `result.is_err`,
+/// `result.unwrap`) must type-check, monomorphize, and lower to native code
+/// that matches the interpreter. The monomorphized helpers must be emitted
+/// under their mangled names (`@option.unwrap.int`) and every match arm must
+/// terminate its block correctly (a match whose arms all `return` previously
+/// left an empty, unterminated merge block that clang rejected).
+#[test]
+fn emit_object_option_result_runs() {
+    use std::fs;
+    let dir = "target/test_emit_option_result";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.is_some(some))\n    println(option.is_none(some))\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, 0))\n    println(option.unwrap(some))\n    let ok = Success(10)\n    let err = Error(\"boom\")\n    println(result.is_ok(ok))\n    println(result.is_err(ok))\n    println(result.is_err(err))\n    println(result.unwrap_or(ok, 0))\n    println(result.unwrap_or(err, 0))\n    println(result.unwrap(ok))\n    return\n",
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+    assert!(
+        !out.contains("codegen warning") && !out.contains("could not be fully lowered"),
+        "option/result program must lower completely\n--- output ---\n{}",
+        out
+    );
+    for helper in [
+        "option.unwrap_or.int",
+        "option.is_some.int",
+        "option.is_none.int",
+        "option.unwrap.int",
+        "result.unwrap_or.int",
+        "result.is_ok.int",
+        "result.is_err",
+        "result.unwrap.int",
+    ] {
+        assert!(
+            ir.lines().any(|l| l.contains(&format!("@{}", helper))
+                || l.contains(&format!("@{}.", helper))),
+            "IR must emit a mangled helper for {}\n--- ir ---\n{}",
+            helper,
+            ir
+        );
+    }
+    assert!(
+        ir.contains("call i64 @option.unwrap.int") || ir.contains("call i1 @option.is_some.int"),
+        "main must call the mangled option helpers\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        !ir.contains("@option.is_some("),
+        "unmangled helper name must not remain\n--- ir ---\n{}",
+        ir
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    let expected = [
+        "true",
+        "false",
+        "5",
+        "0",
+        "5",
+        "true",
+        "false",
+        "true",
+        "10",
+        "0",
+        "10",
+    ];
+    assert!(
+        lines == expected,
+        "option/result native output mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
 /// Write a throwaway project that depends on the bundled stdlib packages.
 fn write_stdlib_project(dir: &str, source: &str) {
     use std::fs;
@@ -161,7 +252,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
     fs::write(format!("{}/main.lime", dir), source).unwrap();
     fs::write(
         format!("{}/citrus.toml", dir),
-        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\n",
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\n",
     )
     .unwrap();
 }

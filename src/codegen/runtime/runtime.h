@@ -40,6 +40,11 @@ void runtime_panic(char* msg);
 // -- Print --
 void runtime_print(char* s);
 
+// -- str() conversion helpers (Phase B-1) --
+char* runtime_str_from_i64(int64_t v);
+char* runtime_str_from_f64(double v);
+char* runtime_str_from_bool(int8_t v);
+
 // -- String operations --
 char* runtime_str_slice(char* s, int64_t start, int64_t end);
 char* runtime_str_concat(char* a, char* b);

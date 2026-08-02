@@ -115,6 +115,31 @@ static char* runtime_str_copy(const char* s) {
     return r;
 }
 
+// -- str() conversion helpers (Phase B-1) --
+// Back the `str(...)` builtin for the primitive types in native codegen,
+// mirroring `Value::to_string()` in the interpreter.
+
+char* runtime_str_from_i64(int64_t v) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)v);
+    return runtime_str_copy(buf);
+}
+
+char* runtime_str_from_f64(double v) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.6f", v);
+    // Trim trailing zeros (but keep at least one digit after the point).
+    size_t n = strlen(buf);
+    while (n > 0 && buf[n - 1] == '0') n--;
+    if (n > 0 && buf[n - 1] == '.') n--;
+    buf[n] = '\0';
+    return runtime_str_copy(buf);
+}
+
+char* runtime_str_from_bool(int8_t v) {
+    return runtime_str_copy(v ? "true" : "false");
+}
+
 int runtime_str_contains(char* s, char* sub) {
     if (s == NULL) s = "";
     if (sub == NULL) sub = "";

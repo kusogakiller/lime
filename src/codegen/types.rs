@@ -10,16 +10,24 @@ use crate::Type;
 /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・ %Name 縺ｯ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
 /// (struct/state/list/option/interface 縺ｯ縺ｮ縺ｿ縺ｪ縺・繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ mod.rs 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・)
 pub fn llvm_type_name(ty: &Type) -> String {
+    // Aggregates are keyed by their *base* name (generic args are stripped):
+    // `%Option` / `%Result`, never `%Result(int, unknown)`.
+    fn base(name: &str) -> String {
+        match name.find('(') {
+            Some(i) => name[..i].to_string(),
+            None => name.to_string(),
+        }
+    }
     match ty {
         Type::Int => "i64".to_string(),
         Type::Long => "i64".to_string(),
         Type::Float => "double".to_string(),
         Type::Bool => "i1".to_string(),
         Type::String => "i8*".to_string(), // Phase 0: fat pointer 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
-        Type::Struct(name) => format!("%{}", name),
-        Type::State(name) => format!("%{}", name),
+        Type::Struct(name) => format!("%{}", base(name)),
+        Type::State(name) => format!("%{}", base(name)),
         Type::List(_) => "%LimeList".to_string(),
-        Type::Option(_) => "%LimeOption".to_string(),
+        Type::Option(_) => "%Option".to_string(),
         Type::Interface(_, _) => "%LimeIface".to_string(),
         Type::Array(_) => "i8*".to_string(), // Phase 0: placeholder
         Type::Slice(_) => "i8*".to_string(), // Phase 0: placeholder

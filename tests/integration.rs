@@ -548,6 +548,54 @@ fn main():
     );
 }
 
+/// Phase B-1 Step 1: interpreter parity for the `option` / `result` stdlib
+/// helpers. The same program is used by the native codegen regression test
+/// (`emit_object_option_result_runs`) and must produce identical output under
+/// `lime run`.
+#[test]
+fn stdlib_option_result_interp() {
+    use std::fs;
+    let dir = "target/test_option_result_interp";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+        format!("{}/main.lime", dir),
+        "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.is_some(some))\n    println(option.is_none(some))\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, 0))\n    println(option.unwrap(some))\n    let ok = Success(10)\n    let err = Error(\"boom\")\n    println(result.is_ok(ok))\n    println(result.is_err(ok))\n    println(result.is_err(err))\n    println(result.unwrap_or(ok, 0))\n    println(result.unwrap_or(err, 0))\n    println(result.unwrap(ok))\n    return\n",
+    )
+    .unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_option_result_interp\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\n",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let _ = fs::remove_dir_all(dir);
+    let expected = [
+        "true",
+        "false",
+        "5",
+        "0",
+        "5",
+        "true",
+        "false",
+        "true",
+        "10",
+        "0",
+        "10",
+    ];
+    let stdout: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    assert!(
+        stdout == expected,
+        "option/result interp output mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected,
+        stdout,
+        out
+    );
+}
+
 #[test]
 fn phase10_9_indexing_slicing() {
     let out = lime_run("examples/phase10_9_demo");

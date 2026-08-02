@@ -3464,9 +3464,46 @@ fn scan_return_types_env(
                     _ => {}
                 }
             }
-            Stmt::Match { arms, .. } => {
-                for (_, arm_body) in arms {
-                    scan_return_types_env(arm_body, defs, env_vars, env_cons, ret_type);
+            Stmt::Match { expr, arms } => {
+                // Bind pattern variables like the type checker does so return
+                // statements can infer types from match payloads (e.g. the
+                // `value` in `Some(value): return value` inside `unwrap`).
+                let m_ty = infer_type(expr, env_vars, defs, env_cons).unwrap_or(Type::Unknown);
+                let (state_name, variants) = if let Type::State(sn) = &m_ty {
+                    let base = struct_base(sn);
+                    (sn.clone(), defs.states.get(&base).cloned().unwrap_or_default())
+                } else if let Type::Option(inner) = &m_ty {
+                    let sn = format!("Option({})", type_to_string(inner));
+                    (sn, vec!["Some".to_string(), "None".to_string()])
+                } else {
+                    (String::new(), Vec::new())
+                };
+                if variants.is_empty() {
+                    for (_, arm_body) in arms {
+                        scan_return_types_env(arm_body, defs, env_vars, env_cons, ret_type);
+                    }
+                } else {
+                    for (pattern, arm_body) in arms {
+                        let mut arm_env = env_vars.clone();
+                        if let Pattern::Variant { name, bindings } = pattern {
+                            let pname = if name.is_empty() {
+                                "Some".to_string()
+                            } else {
+                                name.clone()
+                            };
+                            let fields = defs.variant_fields.get(&pname);
+                            for (i, b) in bindings.iter().enumerate() {
+                                if b != "Ignore" {
+                                    let ty = fields
+                                        .and_then(|f| f.get(i))
+                                        .map(|(_, ft)| resolve_field_type(&state_name, ft, defs))
+                                        .unwrap_or(Type::Unknown);
+                                    arm_env.insert(b.clone(), ty);
+                                }
+                            }
+                        }
+                        scan_return_types_env(arm_body, defs, &mut arm_env, env_cons, ret_type);
+                    }
                 }
             }
             Stmt::While { body, .. } => {
@@ -4961,7 +4998,16 @@ fn type_eq(a: &Type, b: &Type) -> bool {
         (Type::Struct(a), Type::Struct(b)) => struct_base_eq(a, b),
         (Type::State(a), Type::State(b)) => struct_base_eq(a, b),
         (Type::Option(inner), Type::State(name)) | (Type::State(name), Type::Option(inner)) => {
-            struct_base(name) == "Option" && format!("Option({})", type_to_string(inner)) == *name
+            // An `Option(T)` parameter (or `Some(x)` constructor producing a
+            // `State("Option(int)")`) must match any `Option<...>` state.
+            // When the Option side still carries a type variable (e.g. the
+            // un-substituted `T` of a generic helper) it is a wildcard.
+            if matches!(inner.as_ref(), Type::Var(_) | Type::Unknown) {
+                struct_base(name) == "Option"
+            } else {
+                struct_base(name) == "Option"
+                    && format!("Option({})", type_to_string(inner)) == *name
+            }
         }
         _ => a == b,
     }
@@ -6194,6 +6240,13 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         check_expr(a, env, defs)?;
                     }
                     Ok(Type::Unit)
+                }
+                "panic" => {
+                    if args.len() != 1 {
+                        return Err("Type error: panic() takes exactly 1 argument".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
                 }
                 "len" => {
                     if args.len() != 1 {
@@ -8591,6 +8644,23 @@ fn collect_var_bindings(
             }
             Ok(())
         }
+        // Mixed representation: `Some(x)` produces `State("Option(int)")` while
+        // a generic helper parameter is written `Option(T)`. Unify the two by
+        // recursing on the state's concrete inner type.
+        (Type::State(name), Type::Option(pat_inner)) | (Type::Option(pat_inner), Type::State(name)) => {
+            if struct_base(name) == "Option" {
+                let concrete_args = generic_args_of(name);
+                if let Some(con_inner) = concrete_args.first() {
+                    return collect_var_bindings(
+                        &type_from_str(con_inner, defs),
+                        pat_inner,
+                        type_map,
+                        defs,
+                    );
+                }
+            }
+            Ok(())
+        }
         // Exact match - no bindings
         _ => Ok(()),
     }
@@ -8835,9 +8905,12 @@ fn collect_mono_from_stmts(
 /// Update Expr::Call.func in an expression tree using the call_updates mapping.
 fn update_call_in_expr(e: &mut Expr, call_updates: &HashMap<String, String>) {
     match e {
-        Expr::Call { func, .. } => {
+        Expr::Call { func, args } => {
             if let Some(new_name) = call_updates.get(func.as_str()) {
                 *func = new_name.clone();
+            }
+            for a in args {
+                update_call_in_expr(a, call_updates);
             }
         }
         Expr::BinOp { left, right, .. } => {
@@ -9297,7 +9370,7 @@ fn is_runtime_builtin(name: &str) -> bool {
     matches!(
         name,
         "and" | "or" | "not" | "print" | "println" | "len" | "StringBuilder" | "int" | "float"
-            | "str" | "Some" | "None" | "push" | "pop" | "first" | "last" | "index_of"
+            | "str" | "panic" | "Some" | "None" | "push" | "pop" | "first" | "last" | "index_of"
             | "contains_item" | "contains" | "starts_with" | "ends_with" | "trim" | "replace"
             | "split" | "slice" | "byte_len" | "reverse" | "remove_at" | "to_upper" | "to_lower"
             | "repeat" | "time_now" | "time_sleep" | "read_file" | "write_file" | "append_file"
@@ -9473,6 +9546,13 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         println!("{}", val.to_string());
                     }
                     Ok(Value::Int(0))
+                }
+                "panic" => {
+                    if args.len() != 1 {
+                        return Err("panic() takes exactly 1 argument".to_string());
+                    }
+                    let msg = eval_expr(&args[0], env, defs)?;
+                    Err(format!("Lime runtime panic: {}", msg.to_string()))
                 }
                 "len" => {
                     if args.len() != 1 {

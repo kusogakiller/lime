@@ -76,6 +76,22 @@ impl<'a> Cg<'a> {
         format!("L{}", b)
     }
 
+    /// Whether the last emitted line already terminates the current block
+    /// (ret / br / switch / unreachable), so we don't append instructions or
+    /// duplicate terminators after it.
+    fn block_terminated(&self) -> bool {
+        let trimmed = self.out.trim_end();
+        let last = trimmed
+            .rsplit('\n')
+            .next()
+            .unwrap_or("")
+            .trim();
+        last.starts_with("ret ")
+            || last.starts_with("br ")
+            || last.starts_with("switch ")
+            || last.starts_with("unreachable")
+    }
+
     /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ define 縺ｾ縺ｧ繧｢蜷阪→縺ｮ縺ｪ縺ｿ縺ｪ縺・
     fn codegen_function(&mut self, name: &str, fdef: &FunctionDef) -> String {
         // 忣削蜈ｰ縺ｯ Lime main 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ main_lime 縺ｾ縺ｧ繧｢蜷阪→
@@ -199,7 +215,7 @@ impl<'a> Cg<'a> {
         if let Err(e) = self.codegen_stmts(&fdef.body) {
             self.warnings.push(format!("{}: {}", name, e));
         }
-        if !self.terminated {
+        if !self.block_terminated() {
             if ret_ty == "void" {
                 self.out.push_str("  ret void\n");
             } else {
@@ -628,6 +644,68 @@ impl<'a> Cg<'a> {
                 self.codegen_print(arg, add_nl)?;
             }
             return Ok((String::new(), Type::Unit));
+        }
+        // Builtin panic: print the message to stderr and abort the program.
+        if func == "panic" {
+            if args.len() != 1 {
+                return Err("panic() takes exactly 1 argument".to_string());
+            }
+            let (v, t) = self.codegen_expr(&args[0])?;
+            if t != Type::String {
+                return Err(format!(
+                    "panic() argument must be a string, got {:?}",
+                    t
+                ));
+            }
+            self.out.push_str(&format!(
+                "  call void @runtime_panic({})\n",
+                self.fmt_call_arg(&v, &Type::String)
+            ));
+            return Ok((String::new(), Type::Unit));
+        }
+        // Builtin str(): converts a value to its string form. For String
+        // arguments this is an identity; for an `unknown`-typed value (e.g. an
+        // `Error(e)` payload whose concrete type was never pinned, which is a
+        // string at runtime) it is a pass-through. Int/float/bool require a
+        // runtime conversion helper.
+        if func == "str" {
+            if args.len() != 1 {
+                return Err("str() takes exactly 1 argument".to_string());
+            }
+            let (v, t) = self.codegen_expr(&args[0])?;
+            match t {
+                Type::String | Type::Unknown => {
+                    return Ok((v, Type::String));
+                }
+                Type::Int => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_i64({})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Int)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
+                Type::Float => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_f64({})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Float)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
+                Type::Bool => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_bool({})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Bool)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
+                _ => return Err(format!(
+                    "str() cannot convert {:?} to a string in codegen",
+                    t
+                )),
+            }
         }
         // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
         if let Some(result) = self.codegen_runtime_builtin(func, args)? {
@@ -1296,12 +1374,22 @@ impl<'a> Cg<'a> {
     /// Phase 4: match codegen (switch on tag + extract payload + bind)
     fn codegen_match(&mut self, expr: &Expr, arms: &[(Pattern, Vec<Stmt>)]) -> Result<(), String> {
         let (val, ty) = self.codegen_expr(expr)?;
+        // `Option(T)` is represented as the `Option` tagged-union state at the
+        // LLVM level (see emit_aggregate_decls), so normalize the dual type
+        // form before looking up the state's variants.
+        let ty = match ty {
+            Type::Option(inner) => Type::State(format!("Option({})", crate::type_to_string(&inner))),
+            other => other,
+        };
         match ty {
             Type::State(ref state_name) => {
-                let variants = self.defs.states.get(state_name).ok_or_else(|| {
-                    format!("unknown state '{}'", state_name)
+                // Generic states are registered under their base name
+                // (e.g. `Option` for `Option(int)`); look up by base.
+                let base = crate::struct_base(state_name);
+                let variants = self.defs.states.get(&base).ok_or_else(|| {
+                    format!("unknown state '{}'", base)
                 })?;
-                let llvm_state = format!("%{}", state_name);
+                let llvm_state = format!("%{}", base);
 
                 let tag = self.fresh_temp();
                 self.out.push_str(&format!(
@@ -1359,11 +1447,18 @@ impl<'a> Cg<'a> {
                     }
 
                     self.codegen_stmts(body)?;
-                    self.out.push_str(&format!("  br label %{}\n", merge_b));
+                    // If the arm already returned (block terminated), a trailing
+                    // `br` would be an instruction after a terminator.
+                    if !self.block_terminated() {
+                        self.out.push_str(&format!("  br label %{}\n", merge_b));
+                    }
                 }
 
                 self.out.push_str(&format!("{}:\n", merge_b));
                 self.current_block = merge_b;
+                // If the match is the final statement of a function and every
+                // arm terminated, the merge block is empty; the function-end
+                // ret (or an enclosing `br`) terminates it. Nothing to emit here.
                 Ok(())
             }
             _ => Err(format!(

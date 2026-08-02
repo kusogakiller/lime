@@ -45,7 +45,8 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
     out.push_str("declare void @runtime_print(i8*)\n");
     // Printf for print/println builtin lowering (Phase 2)
-    out.push_str("declare i32 @printf(i8*, ...)\n\n");
+    out.push_str("declare i32 @printf(i8*, ...)\n");
+    out.push_str("declare void @runtime_panic(i8*)\n\n");
 
     // Phase 5: String/List runtime function declarations
     out.push_str("declare i64 @strlen(i8*)\n");
@@ -66,6 +67,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_to_upper(i8*)\n");
     out.push_str("declare i8* @runtime_str_to_lower(i8*)\n");
     out.push_str("declare i8* @runtime_str_repeat(i8*, i64)\n");
+    out.push_str("declare i8* @runtime_str_from_i64(i64)\n");
+    out.push_str("declare i8* @runtime_str_from_f64(double)\n");
+    out.push_str("declare i8* @runtime_str_from_bool(i1)\n");
     out.push_str("declare double @runtime_math_abs(double)\n");
     out.push_str("declare double @runtime_math_sqrt(double)\n");
     out.push_str("declare double @runtime_math_min(double, double)\n");
