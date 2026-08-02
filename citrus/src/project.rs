@@ -17,6 +17,8 @@ version = "0.1.0"
 
 [files]
 main = "src/main.lime"
+
+[dependencies]
 "#,
         name
     );

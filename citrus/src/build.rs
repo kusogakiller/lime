@@ -101,6 +101,8 @@ pub fn build(profile: Profile) -> Result<BuildResult, String> {
     let cfg = load_manifest(&project_root)?;
     let project_name = cfg.name.clone();
 
+    super::pkg::ensure_deps(&project_root)?;
+
     let target = target_dir(&project_root, profile);
 
     let obj_dir = target.join("obj");

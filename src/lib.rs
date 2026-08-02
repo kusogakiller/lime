@@ -2390,9 +2390,10 @@ fn parse_with_locs(
 // A project is described by a `citrus.toml` manifest:
 //   [package] name / version
 //   [files]   alias = "path/to/file.lime"
-//   [import]  pkg.path = "version"
+//   [import]  pkg.path = "version"          (legacy; same semantics as deps)
+//   [dependencies] pkg = "version"          (canonical form; merged into imports)
 // `lime <dir>/citrus.toml` loads every [files] module, tokenizes + parses it
-// into a single `Project`, resolves [import] dependencies from the local
+// into a single `Project`, resolves [import]/[dependencies] from the local
 // package registry (`packages/<pkg>/<version>/citrus.toml`), and merges the
 // imported package's definitions into the program `Defs` under their dotted
 // names (e.g. `std.string.contains`).
@@ -2469,7 +2470,7 @@ pub fn parse_citrus_toml(path: &str) -> Result<CitrusToml, String> {
                 "files" => {
                     files.insert(key, val);
                 }
-                "import" => {
+                "import" | "dependencies" => {
                     imports.insert(key, val);
                 }
                 _ => {}
@@ -4196,7 +4197,7 @@ fn walk_warnings(
 
 /// Phase 10 (P2): write a `citrus.lock` capturing the resolved dependency
 /// graph. Deterministic (sorted) so it is diff-friendly and reproducible.
-fn write_lock_file(
+pub fn write_lock_file(
     base_dir: &str,
     cfg: &CitrusToml,
     edges: &[(String, String)],
@@ -4235,6 +4236,22 @@ fn write_lock_file(
 
     let lock_path = format!("{}/citrus.lock", base_dir);
     fs::write(&lock_path, out).map_err(|e| format!("{}: {}", lock_path, e))
+}
+
+/// Package-manager helper: resolve the full dependency graph for `cfg` from
+/// `registry_root` and (re)write the project's `citrus.lock`. Used by the
+/// citrus `install` / `update` commands so the lock is refreshed even when no
+/// compile happens. Returns the resolved edge list on success.
+pub fn resolve_and_write_lock(
+    base_dir: &str,
+    cfg: &CitrusToml,
+    registry_root: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let resolver = ImportResolver::new(cfg);
+    resolver.validate_imports(registry_root)?;
+    let edges = resolver.build_dependency_graph(registry_root)?;
+    write_lock_file(base_dir, cfg, &edges)?;
+    Ok(edges)
 }
 
 /// Phase 10 (P2): package cache foundation. Copies each resolved package's

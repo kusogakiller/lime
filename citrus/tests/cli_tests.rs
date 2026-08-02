@@ -360,3 +360,174 @@ main = "src/app.lime"
 
     fs::remove_dir_all(tmp).unwrap();
 }
+
+#[test]
+fn test_add_dependency() {
+    let tmp = Path::new("/tmp/citrus_test_add");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    create_valid_project(tmp, "add_test");
+    let project_dir = tmp.join("add_test");
+
+    let (code, stdout, stderr) = run_citrus(&["add", "string"], &project_dir);
+    assert_eq!(code, 0, "citrus add failed: stderr={}", stderr);
+    assert!(stdout.contains("string"), "expected string in output: {}", stdout);
+
+    let toml = fs::read_to_string(project_dir.join("citrus.toml")).unwrap();
+    assert!(toml.contains("[dependencies]"), "citrus.toml missing [dependencies]: {}", toml);
+    assert!(toml.contains("string = \"v0.1.0\""), "citrus.toml missing string dep: {}", toml);
+
+    let pkg_dir = project_dir.join("packages").join("string").join("v0.1.0");
+    assert!(pkg_dir.join("citrus.toml").exists(), "package citrus.toml not materialized");
+    assert!(pkg_dir.join("src").join("string.lime").exists(), "package source not materialized");
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_remove_dependency() {
+    let tmp = Path::new("/tmp/citrus_test_remove");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    create_valid_project(tmp, "remove_test");
+    let project_dir = tmp.join("remove_test");
+
+    let (code, _, stderr) = run_citrus(&["add", "math"], &project_dir);
+    assert_eq!(code, 0, "citrus add failed: stderr={}", stderr);
+
+    let (code, stdout, stderr) = run_citrus(&["remove", "math"], &project_dir);
+    assert_eq!(code, 0, "citrus remove failed: stderr={}", stderr);
+    assert!(stdout.contains("Removed math"), "expected Removed output: {}", stdout);
+
+    let toml = fs::read_to_string(project_dir.join("citrus.toml")).unwrap();
+    assert!(!toml.contains("math"), "math should be removed from citrus.toml: {}", toml);
+
+    let (code, _, stderr) = run_citrus(&["remove", "math"], &project_dir);
+    assert_ne!(code, 0, "removing a non-dependency should fail");
+    assert!(stderr.contains("not a declared dependency"), "expected error: {}", stderr);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_add_unknown_package_fails() {
+    let tmp = Path::new("/tmp/citrus_test_add_unknown");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    create_valid_project(tmp, "unknown_test");
+    let project_dir = tmp.join("unknown_test");
+
+    let (code, _, stderr) = run_citrus(&["add", "does_not_exist"], &project_dir);
+    assert_ne!(code, 0, "adding an unknown package should fail");
+    assert!(stderr.contains("not found"), "expected not found error: {}", stderr);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_install_generates_lock() {
+    let tmp = Path::new("/tmp/citrus_test_install");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    create_valid_project(tmp, "install_test");
+    let project_dir = tmp.join("install_test");
+
+    let (code, stdout, stderr) = run_citrus(&["add", "string"], &project_dir);
+    assert_eq!(code, 0, "citrus add failed: stderr={}", stderr);
+
+    let lock = project_dir.join("citrus.lock");
+    assert!(lock.exists(), "citrus.lock not generated");
+    let lock_text = fs::read_to_string(&lock).unwrap();
+    assert!(lock_text.contains("string"), "lock missing string package: {}", lock_text);
+    assert!(lock_text.contains("[[package]]"), "lock missing [[package]] sections: {}", lock_text);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_build_with_dependency() {
+    let tmp = Path::new("/tmp/citrus_test_build_dep");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let project_dir = tmp.join("build_dep");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::create_dir_all(project_dir.join("src")).unwrap();
+    let toml = r#"[package]
+name = "build_dep"
+version = "0.1.0"
+
+[files]
+main = "src/main.lime"
+
+[dependencies]
+string = "v0.1.0"
+"#;
+    fs::write(project_dir.join("citrus.toml"), toml).unwrap();
+    fs::write(
+        project_dir.join("src").join("main.lime"),
+        "fn main():\n    println(\"hello\")\n",
+    )
+    .unwrap();
+
+    let (code, stdout, stderr) = run_citrus(&["build", "--release"], &project_dir);
+    assert_eq!(code, 0, "citrus build with dependency failed: stderr={}", stderr);
+    assert!(stdout.contains("Finished"), "expected build to finish: {}", stdout);
+
+    let pkg_dir = project_dir.join("packages").join("string").join("v0.1.0");
+    assert!(pkg_dir.join("citrus.toml").exists(), "dependency not auto-materialized on build");
+    assert!(project_dir.join("citrus.lock").exists(), "citrus.lock not generated on build");
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_build_is_reproducible() {
+    let tmp = Path::new("/tmp/citrus_test_reproducible");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let project_dir = tmp.join("repro");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::create_dir_all(project_dir.join("src")).unwrap();
+    let toml = r#"[package]
+name = "repro"
+version = "0.1.0"
+
+[files]
+main = "src/main.lime"
+
+[dependencies]
+string = "v0.1.0"
+"#;
+    fs::write(project_dir.join("citrus.toml"), toml).unwrap();
+    fs::write(project_dir.join("src").join("main.lime"), "fn main():\n    println(\"hi\")\n").unwrap();
+
+    let (code, _, stderr) = run_citrus(&["build", "--release"], &project_dir);
+    assert_eq!(code, 0, "first build failed: stderr={}", stderr);
+    let first_lock = fs::read_to_string(project_dir.join("citrus.lock")).unwrap();
+
+    let (code, _, stderr) = run_citrus(&["build", "--release"], &project_dir);
+    assert_eq!(code, 0, "second build failed: stderr={}", stderr);
+    let second_lock = fs::read_to_string(project_dir.join("citrus.lock")).unwrap();
+
+    assert_eq!(first_lock, second_lock, "citrus.lock should be deterministic");
+
+    fs::remove_dir_all(tmp).unwrap();
+}

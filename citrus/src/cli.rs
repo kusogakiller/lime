@@ -41,6 +41,20 @@ pub enum Command {
     },
     /// Format project source files
     Fmt,
+    /// Add a package dependency
+    Add {
+        /// Package name (e.g. `string`)
+        name: String,
+    },
+    /// Remove a package dependency
+    Remove {
+        /// Package name
+        name: String,
+    },
+    /// Install all dependencies and regenerate the lock file
+    Install,
+    /// Re-resolve dependencies and refresh the lock file
+    Update,
 }
 
 pub fn parse() -> Command {

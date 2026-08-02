@@ -3,6 +3,7 @@ mod project;
 mod build;
 mod test_cmd;
 mod fmt;
+mod pkg;
 
 fn main() {
     let command = cli::parse();
@@ -15,6 +16,10 @@ fn main() {
         cli::Command::Run { release, args } => build::run(release, &args),
         cli::Command::Test { release } => test_cmd::run(release),
         cli::Command::Fmt => fmt::run(),
+        cli::Command::Add { name } => pkg::add(&name),
+        cli::Command::Remove { name } => pkg::remove(&name),
+        cli::Command::Install => pkg::install(),
+        cli::Command::Update => pkg::update(),
     };
     if let Err(e) = result {
         eprintln!("error: {}", e);
