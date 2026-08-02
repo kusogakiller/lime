@@ -1,0 +1,11 @@
+fn noop(long: x):
+    return x
+
+fn main(long: argc):
+    let n = 100000000L
+    let mut sum = argc
+    let mut i = 0L
+    while i < n:
+        sum = noop(sum) + sum / (i + 1L)
+        i = i + 1L
+    println("sum = ", sum)

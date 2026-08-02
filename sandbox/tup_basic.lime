@@ -1,0 +1,7 @@
+fn main():
+    let t = (1, "hi")
+    match t:
+        (a, b):
+            println(a)
+            println(b)
+    println("ok")

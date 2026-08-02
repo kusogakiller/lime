@@ -1,0 +1,23 @@
+fn fib_recursive(long: n):
+    if n <= 1L:
+        return n
+    return fib_recursive(n - 1L) + fib_recursive(n - 2L)
+
+fn fib_iterative(long: n):
+    if n <= 1L:
+        return n
+    let mut a = 0L
+    let mut b = 1L
+    let mut i = 2L
+    while i <= n:
+        let tmp = a + b
+        a = b
+        b = tmp
+        i = i + 1L
+    return b
+
+fn main():
+    let r = fib_recursive(30L)
+    println("recursive fib(30) = ", r)
+    let r2 = fib_iterative(100000L)
+    println("iterative fib(100000) = ", r2)

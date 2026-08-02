@@ -1,0 +1,685 @@
+{
+    "timestamp":  "2026-07-20",
+    "benchmarks":  [
+                       {
+                           "path":  "benchmarks/programs/package_heavy/citrus.toml",
+                           "wall":  {
+                                        "n":  30,
+                                        "median_ms":  37.88,
+                                        "stddev_ms":  5.44,
+                                        "min_ms":  32.83,
+                                        "mean_ms":  39.53,
+                                        "max_ms":  58.98
+                                    },
+                           "name":  "package_heavy",
+                           "stages":  [
+                                          {
+                                              "median_us":  754.5,
+                                              "stddev_us":  226.76,
+                                              "stage":  "Lexer",
+                                              "note":  "tokenize",
+                                              "mean_us":  848.6,
+                                              "min_us":  719,
+                                              "max_us":  1882
+                                          },
+                                          {
+                                              "median_us":  655.5,
+                                              "stddev_us":  85.43,
+                                              "stage":  "Parser",
+                                              "note":  "parse",
+                                              "mean_us":  685.6,
+                                              "min_us":  587,
+                                              "max_us":  866
+                                          },
+                                          {
+                                              "median_us":  3804,
+                                              "stddev_us":  1199.55,
+                                              "stage":  "Package Resolver",
+                                              "note":  "pkg_parse + dep_graph",
+                                              "mean_us":  4283.6,
+                                              "min_us":  3504,
+                                              "max_us":  8305
+                                          },
+                                          {
+                                              "median_us":  8953,
+                                              "stddev_us":  2103.39,
+                                              "stage":  "Import Resolver",
+                                              "note":  "import_resolve + apply_to_defs",
+                                              "mean_us":  9923.23,
+                                              "min_us":  8248,
+                                              "max_us":  17079
+                                          },
+                                          {
+                                              "median_us":  526,
+                                              "stddev_us":  69.94,
+                                              "stage":  "Type Checker",
+                                              "note":  "type_check_located + operator/interface passes",
+                                              "mean_us":  541.5,
+                                              "min_us":  450,
+                                              "max_us":  703
+                                          },
+                                          {
+                                              "median_us":  542.5,
+                                              "stddev_us":  101.93,
+                                              "stage":  "Monomorphization",
+                                              "note":  "monomorphize_all",
+                                              "mean_us":  577.77,
+                                              "min_us":  507,
+                                              "max_us":  937
+                                          },
+                                          {
+                                              "median_us":  902.5,
+                                              "stddev_us":  138.38,
+                                              "stage":  "LLVM IR Generation",
+                                              "note":  "codegen_ll (textual IR emit)",
+                                              "mean_us":  936.77,
+                                              "min_us":  807,
+                                              "max_us":  1574
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "LLVM Optimization",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Object Generation",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Link",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          }
+                                      ]
+                       },
+                       {
+                           "path":  "benchmarks/programs/large/citrus.toml",
+                           "wall":  {
+                                        "n":  30,
+                                        "median_ms":  25.4,
+                                        "stddev_ms":  3.38,
+                                        "min_ms":  21.81,
+                                        "mean_ms":  26.54,
+                                        "max_ms":  35.9
+                                    },
+                           "name":  "large",
+                           "stages":  [
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Lexer",
+                                              "note":  "tokenize",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Parser",
+                                              "note":  "parse",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  2,
+                                              "stddev_us":  11.48,
+                                              "stage":  "Package Resolver",
+                                              "note":  "pkg_parse + dep_graph",
+                                              "mean_us":  4.17,
+                                              "min_us":  2,
+                                              "max_us":  66
+                                          },
+                                          {
+                                              "median_us":  130,
+                                              "stddev_us":  49.92,
+                                              "stage":  "Import Resolver",
+                                              "note":  "import_resolve + apply_to_defs",
+                                              "mean_us":  149.43,
+                                              "min_us":  125,
+                                              "max_us":  372
+                                          },
+                                          {
+                                              "median_us":  18,
+                                              "stddev_us":  4.69,
+                                              "stage":  "Type Checker",
+                                              "note":  "type_check_located + operator/interface passes",
+                                              "mean_us":  19.17,
+                                              "min_us":  14,
+                                              "max_us":  36
+                                          },
+                                          {
+                                              "median_us":  5,
+                                              "stddev_us":  1.75,
+                                              "stage":  "Monomorphization",
+                                              "note":  "monomorphize_all",
+                                              "mean_us":  5.13,
+                                              "min_us":  4,
+                                              "max_us":  13
+                                          },
+                                          {
+                                              "median_us":  299,
+                                              "stddev_us":  143.65,
+                                              "stage":  "LLVM IR Generation",
+                                              "note":  "codegen_ll (textual IR emit)",
+                                              "mean_us":  343.43,
+                                              "min_us":  251,
+                                              "max_us":  953
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "LLVM Optimization",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Object Generation",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Link",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          }
+                                      ]
+                       },
+                       {
+                           "path":  "benchmarks/programs/medium/citrus.toml",
+                           "wall":  {
+                                        "n":  30,
+                                        "median_ms":  26.84,
+                                        "stddev_ms":  3.4,
+                                        "min_ms":  21.57,
+                                        "mean_ms":  27.32,
+                                        "max_ms":  38.88
+                                    },
+                           "name":  "medium",
+                           "stages":  [
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Lexer",
+                                              "note":  "tokenize",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Parser",
+                                              "note":  "parse",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  2,
+                                              "stddev_us":  0.36,
+                                              "stage":  "Package Resolver",
+                                              "note":  "pkg_parse + dep_graph",
+                                              "mean_us":  2.07,
+                                              "min_us":  2,
+                                              "max_us":  4
+                                          },
+                                          {
+                                              "median_us":  132.5,
+                                              "stddev_us":  11.71,
+                                              "stage":  "Import Resolver",
+                                              "note":  "import_resolve + apply_to_defs",
+                                              "mean_us":  136.3,
+                                              "min_us":  123,
+                                              "max_us":  179
+                                          },
+                                          {
+                                              "median_us":  17,
+                                              "stddev_us":  5.58,
+                                              "stage":  "Type Checker",
+                                              "note":  "type_check_located + operator/interface passes",
+                                              "mean_us":  19.03,
+                                              "min_us":  15,
+                                              "max_us":  40
+                                          },
+                                          {
+                                              "median_us":  5,
+                                              "stddev_us":  1.18,
+                                              "stage":  "Monomorphization",
+                                              "note":  "monomorphize_all",
+                                              "mean_us":  4.93,
+                                              "min_us":  4,
+                                              "max_us":  9
+                                          },
+                                          {
+                                              "median_us":  286,
+                                              "stddev_us":  67.77,
+                                              "stage":  "LLVM IR Generation",
+                                              "note":  "codegen_ll (textual IR emit)",
+                                              "mean_us":  307.4,
+                                              "min_us":  242,
+                                              "max_us":  535
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "LLVM Optimization",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Object Generation",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Link",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          }
+                                      ]
+                       },
+                       {
+                           "path":  "benchmarks/programs/generic_heavy/citrus.toml",
+                           "wall":  {
+                                        "n":  30,
+                                        "median_ms":  27.62,
+                                        "stddev_ms":  4.24,
+                                        "min_ms":  22.33,
+                                        "mean_ms":  28.29,
+                                        "max_ms":  38.11
+                                    },
+                           "name":  "generic_heavy",
+                           "stages":  [
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Lexer",
+                                              "note":  "tokenize",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Parser",
+                                              "note":  "parse",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  2,
+                                              "stddev_us":  0.54,
+                                              "stage":  "Package Resolver",
+                                              "note":  "pkg_parse + dep_graph",
+                                              "mean_us":  2.1,
+                                              "min_us":  2,
+                                              "max_us":  5
+                                          },
+                                          {
+                                              "median_us":  133,
+                                              "stddev_us":  71.31,
+                                              "stage":  "Import Resolver",
+                                              "note":  "import_resolve + apply_to_defs",
+                                              "mean_us":  152.67,
+                                              "min_us":  127,
+                                              "max_us":  524
+                                          },
+                                          {
+                                              "median_us":  18,
+                                              "stddev_us":  3.73,
+                                              "stage":  "Type Checker",
+                                              "note":  "type_check_located + operator/interface passes",
+                                              "mean_us":  18.8,
+                                              "min_us":  16,
+                                              "max_us":  36
+                                          },
+                                          {
+                                              "median_us":  5,
+                                              "stddev_us":  0.73,
+                                              "stage":  "Monomorphization",
+                                              "note":  "monomorphize_all",
+                                              "mean_us":  4.73,
+                                              "min_us":  4,
+                                              "max_us":  7
+                                          },
+                                          {
+                                              "median_us":  304,
+                                              "stddev_us":  512.65,
+                                              "stage":  "LLVM IR Generation",
+                                              "note":  "codegen_ll (textual IR emit)",
+                                              "mean_us":  478.03,
+                                              "min_us":  264,
+                                              "max_us":  2699
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "LLVM Optimization",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Object Generation",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Link",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          }
+                                      ]
+                       },
+                       {
+                           "path":  "benchmarks/programs/monomorphization_heavy/citrus.toml",
+                           "wall":  {
+                                        "n":  30,
+                                        "median_ms":  26.07,
+                                        "stddev_ms":  11.52,
+                                        "min_ms":  21.88,
+                                        "mean_ms":  29.44,
+                                        "max_ms":  75.6
+                                    },
+                           "name":  "monomorphization_heavy",
+                           "stages":  [
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Lexer",
+                                              "note":  "tokenize",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Parser",
+                                              "note":  "parse",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  2,
+                                              "stddev_us":  0.45,
+                                              "stage":  "Package Resolver",
+                                              "note":  "pkg_parse + dep_graph",
+                                              "mean_us":  2.17,
+                                              "min_us":  2,
+                                              "max_us":  4
+                                          },
+                                          {
+                                              "median_us":  134,
+                                              "stddev_us":  50.55,
+                                              "stage":  "Import Resolver",
+                                              "note":  "import_resolve + apply_to_defs",
+                                              "mean_us":  152.7,
+                                              "min_us":  123,
+                                              "max_us":  366
+                                          },
+                                          {
+                                              "median_us":  17,
+                                              "stddev_us":  4.5,
+                                              "stage":  "Type Checker",
+                                              "note":  "type_check_located + operator/interface passes",
+                                              "mean_us":  18.87,
+                                              "min_us":  15,
+                                              "max_us":  39
+                                          },
+                                          {
+                                              "median_us":  5,
+                                              "stddev_us":  0.53,
+                                              "stage":  "Monomorphization",
+                                              "note":  "monomorphize_all",
+                                              "mean_us":  4.7,
+                                              "min_us":  4,
+                                              "max_us":  6
+                                          },
+                                          {
+                                              "median_us":  308.5,
+                                              "stddev_us":  95.86,
+                                              "stage":  "LLVM IR Generation",
+                                              "note":  "codegen_ll (textual IR emit)",
+                                              "mean_us":  330.47,
+                                              "min_us":  249,
+                                              "max_us":  718
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "LLVM Optimization",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Object Generation",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Link",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          }
+                                      ]
+                       },
+                       {
+                           "path":  "benchmarks/programs/small/citrus.toml",
+                           "wall":  {
+                                        "n":  30,
+                                        "median_ms":  25.77,
+                                        "stddev_ms":  3.85,
+                                        "min_ms":  22.24,
+                                        "mean_ms":  27.09,
+                                        "max_ms":  42.28
+                                    },
+                           "name":  "small",
+                           "stages":  [
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Lexer",
+                                              "note":  "tokenize",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Parser",
+                                              "note":  "parse",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  2,
+                                              "stddev_us":  0.25,
+                                              "stage":  "Package Resolver",
+                                              "note":  "pkg_parse + dep_graph",
+                                              "mean_us":  2.07,
+                                              "min_us":  2,
+                                              "max_us":  3
+                                          },
+                                          {
+                                              "median_us":  135.5,
+                                              "stddev_us":  59.93,
+                                              "stage":  "Import Resolver",
+                                              "note":  "import_resolve + apply_to_defs",
+                                              "mean_us":  158.2,
+                                              "min_us":  127,
+                                              "max_us":  416
+                                          },
+                                          {
+                                              "median_us":  17,
+                                              "stddev_us":  5.31,
+                                              "stage":  "Type Checker",
+                                              "note":  "type_check_located + operator/interface passes",
+                                              "mean_us":  19.13,
+                                              "min_us":  16,
+                                              "max_us":  41
+                                          },
+                                          {
+                                              "median_us":  5,
+                                              "stddev_us":  0.96,
+                                              "stage":  "Monomorphization",
+                                              "note":  "monomorphize_all",
+                                              "mean_us":  4.93,
+                                              "min_us":  4,
+                                              "max_us":  8
+                                          },
+                                          {
+                                              "median_us":  298.5,
+                                              "stddev_us":  47.69,
+                                              "stage":  "LLVM IR Generation",
+                                              "note":  "codegen_ll (textual IR emit)",
+                                              "mean_us":  314.9,
+                                              "min_us":  249,
+                                              "max_us":  432
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "LLVM Optimization",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Object Generation",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          },
+                                          {
+                                              "median_us":  null,
+                                              "stddev_us":  null,
+                                              "stage":  "Link",
+                                              "note":  "N/A - not implemented in this build",
+                                              "mean_us":  null,
+                                              "min_us":  null,
+                                              "max_us":  null
+                                          }
+                                      ]
+                       }
+                   ],
+    "runs":  30,
+    "compare":  {
+                    "per_benchmark":  [
+                                          {
+                                              "cur_median_ms":  37.88,
+                                              "status":  "IMPROVED",
+                                              "name":  "package_heavy",
+                                              "delta_pct":  -2.04,
+                                              "prev_median_ms":  38.67
+                                          },
+                                          {
+                                              "cur_median_ms":  25.4,
+                                              "status":  "IMPROVED",
+                                              "name":  "large",
+                                              "delta_pct":  -1.51,
+                                              "prev_median_ms":  25.79
+                                          },
+                                          {
+                                              "cur_median_ms":  26.84,
+                                              "status":  "SAME",
+                                              "name":  "medium",
+                                              "delta_pct":  -0.59,
+                                              "prev_median_ms":  27
+                                          },
+                                          {
+                                              "cur_median_ms":  27.62,
+                                              "status":  "SAME",
+                                              "name":  "generic_heavy",
+                                              "delta_pct":  4.03,
+                                              "prev_median_ms":  26.55
+                                          },
+                                          {
+                                              "cur_median_ms":  26.07,
+                                              "status":  "IMPROVED",
+                                              "name":  "monomorphization_heavy",
+                                              "delta_pct":  -3.52,
+                                              "prev_median_ms":  27.02
+                                          },
+                                          {
+                                              "cur_median_ms":  25.77,
+                                              "status":  "SAME",
+                                              "name":  "small",
+                                              "delta_pct":  0.08,
+                                              "prev_median_ms":  25.75
+                                          }
+                                      ],
+                    "overall_prev_median_ms":  170.78,
+                    "overall_delta_pct":  -0.70,
+                    "overall_cur_median_ms":  169.58,
+                    "regression_flag":  false,
+                    "previous_file":  "2026-07-20-01a050e-191803.json"
+                },
+    "lime_version":  "debug",
+    "rustc":  "rustc 1.96.1 (31fca3adb 2026-06-26)",
+    "commit":  "01a050e",
+    "warmup":  5
+}

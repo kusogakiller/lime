@@ -1,0 +1,2 @@
+fn fb():
+    return 2

@@ -1,0 +1,6 @@
+[package]
+name = "result"
+version = "v0.1.0"
+
+[files]
+result = "src/result.lime"

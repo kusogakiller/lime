@@ -1,0 +1,6 @@
+[package]
+name = "bench_loop"
+version = "0.1.0"
+
+[files]
+main = "src/main.lime"

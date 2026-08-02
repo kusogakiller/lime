@@ -1,0 +1,17 @@
+struct Point:
+    long: x
+    long: y
+    long: z
+
+fn make_point(long: x, long: y, long: z):
+    return Point(x, y, z)
+
+fn main(long: argc):
+    let n = 5000000L
+    let mut sum = argc
+    let mut i = 0L
+    while i < n:
+        let p = make_point(i, i * 2L, i * 3L)
+        sum = sum + p.x + p.y + p.z + sum / (i + 1L)
+        i = i + 1L
+    println("sum = ", sum)

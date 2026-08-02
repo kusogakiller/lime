@@ -1,0 +1,26 @@
+// std.math: 数学ユーティリティ
+// ランタイム組込み（abs/min/max/clamp/sqrt/pow）をラップする。
+
+// 絶対値
+fn abs(float: x):
+    return abs(x)
+
+// 最小値
+fn min(float: a, float: b):
+    return min(a, b)
+
+// 最大値
+fn max(float: a, float: b):
+    return max(a, b)
+
+// クランプ（lo <= x <= hi に収める）
+fn clamp(float: x, float: lo, float: hi):
+    return clamp(x, lo, hi)
+
+// 平方根
+fn sqrt(float: x):
+    return sqrt(x)
+
+// 累乗
+fn pow(float: a, float: b):
+    return pow(a, b)

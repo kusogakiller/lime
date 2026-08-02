@@ -1,0 +1,8 @@
+fn main(long: argc):
+    let n = 50000000L
+    let mut sum = argc
+    let mut i = 0L
+    while i < n:
+        sum = sum + i * 3L - 1L + sum / (i + 1L)
+        i = i + 1L
+    println("sum = ", sum)

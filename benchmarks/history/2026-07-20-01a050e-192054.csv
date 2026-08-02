@@ -1,0 +1,67 @@
+benchmark,metric,mean,median,min,max,stddev,unit
+package_heavy,wall,38.46,35.7,31.32,67.38,7.37,ms
+package_heavy,stage:Lexer,795.53,746.5,713,1211,126.54,us
+package_heavy,stage:Parser,691.17,637,593,1141,134.74,us
+package_heavy,stage:Package Resolver,4366.7,3865.5,3566,8671,1249.56,us
+package_heavy,stage:Import Resolver,10037.93,8892,8243,19095,2533.21,us
+package_heavy,stage:Type Checker,518.07,478.5,436,878,107.48,us
+package_heavy,stage:Monomorphization,550.97,529,502,909,76.83,us
+package_heavy,stage:LLVM IR Generation,903.57,868,804,1203,100.11,us
+package_heavy,stage:LLVM Optimization,NA,NA,NA,NA,NA,us
+package_heavy,stage:Object Generation,NA,NA,NA,NA,NA,us
+package_heavy,stage:Link,NA,NA,NA,NA,NA,us
+large,wall,25.57,24.52,22.34,33.93,3,ms
+large,stage:Lexer,NA,NA,NA,NA,NA,us
+large,stage:Parser,NA,NA,NA,NA,NA,us
+large,stage:Package Resolver,2.13,2,2,4,0.43,us
+large,stage:Import Resolver,147.8,129.5,121,389,53.53,us
+large,stage:Type Checker,18.7,17,14,41,5.27,us
+large,stage:Monomorphization,7.27,4,4,90,15.39,us
+large,stage:LLVM IR Generation,328.7,283.5,248,1097,161.86,us
+large,stage:LLVM Optimization,NA,NA,NA,NA,NA,us
+large,stage:Object Generation,NA,NA,NA,NA,NA,us
+large,stage:Link,NA,NA,NA,NA,NA,us
+medium,wall,25.35,24.83,22.18,30.49,1.86,ms
+medium,stage:Lexer,NA,NA,NA,NA,NA,us
+medium,stage:Parser,NA,NA,NA,NA,NA,us
+medium,stage:Package Resolver,2,2,2,2,0,us
+medium,stage:Import Resolver,190.13,129,124,1414,243.37,us
+medium,stage:Type Checker,20.03,17,15,84,12.12,us
+medium,stage:Monomorphization,4.6,4,4,14,1.8,us
+medium,stage:LLVM IR Generation,313.13,293,258,782,92.25,us
+medium,stage:LLVM Optimization,NA,NA,NA,NA,NA,us
+medium,stage:Object Generation,NA,NA,NA,NA,NA,us
+medium,stage:Link,NA,NA,NA,NA,NA,us
+generic_heavy,wall,26.74,25.24,22.1,56.36,6.03,ms
+generic_heavy,stage:Lexer,NA,NA,NA,NA,NA,us
+generic_heavy,stage:Parser,NA,NA,NA,NA,NA,us
+generic_heavy,stage:Package Resolver,2.07,2,2,3,0.25,us
+generic_heavy,stage:Import Resolver,134.87,128.5,124,209,17.73,us
+generic_heavy,stage:Type Checker,18.3,17,14,35,4.56,us
+generic_heavy,stage:Monomorphization,4.83,4,4,19,2.68,us
+generic_heavy,stage:LLVM IR Generation,327.6,299.5,251,931,120.81,us
+generic_heavy,stage:LLVM Optimization,NA,NA,NA,NA,NA,us
+generic_heavy,stage:Object Generation,NA,NA,NA,NA,NA,us
+generic_heavy,stage:Link,NA,NA,NA,NA,NA,us
+monomorphization_heavy,wall,25.33,24.78,22.3,31.23,2.23,ms
+monomorphization_heavy,stage:Lexer,NA,NA,NA,NA,NA,us
+monomorphization_heavy,stage:Parser,NA,NA,NA,NA,NA,us
+monomorphization_heavy,stage:Package Resolver,2.23,2,2,9,1.26,us
+monomorphization_heavy,stage:Import Resolver,149.43,128,121,629,89.76,us
+monomorphization_heavy,stage:Type Checker,28.93,17,14,356,60.89,us
+monomorphization_heavy,stage:Monomorphization,4.93,4,4,22,3.24,us
+monomorphization_heavy,stage:LLVM IR Generation,317.73,286,252,568,73.05,us
+monomorphization_heavy,stage:LLVM Optimization,NA,NA,NA,NA,NA,us
+monomorphization_heavy,stage:Object Generation,NA,NA,NA,NA,NA,us
+monomorphization_heavy,stage:Link,NA,NA,NA,NA,NA,us
+small,wall,26.28,24.82,22.34,45.69,5.01,ms
+small,stage:Lexer,NA,NA,NA,NA,NA,us
+small,stage:Parser,NA,NA,NA,NA,NA,us
+small,stage:Package Resolver,2.03,2,2,3,0.18,us
+small,stage:Import Resolver,146.2,130.5,122,396,54.27,us
+small,stage:Type Checker,18.97,17,14,31,5.15,us
+small,stage:Monomorphization,5.43,4,4,29,4.48,us
+small,stage:LLVM IR Generation,291.67,283,253,349,27.12,us
+small,stage:LLVM Optimization,NA,NA,NA,NA,NA,us
+small,stage:Object Generation,NA,NA,NA,NA,NA,us
+small,stage:Link,NA,NA,NA,NA,NA,us

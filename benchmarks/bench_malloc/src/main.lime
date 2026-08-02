@@ -1,0 +1,26 @@
+fn main():
+    let N = 100000
+    let start = time_now()
+    let mut List(int): lst = []
+    let mut i: int = 0
+    while i < N:
+        lst = push(lst, i)
+        i = i + 1
+    let end = time_now()
+    println("list length = ", len(lst))
+    println("list push time: ", end - start, " sec")
+
+    let start2 = time_now()
+    let mut sum: int = 0
+    let mut j: int = 0
+    while j < N:
+        sum = sum + at(lst, j)
+        j = j + 1
+    let end2 = time_now()
+    println("sum = ", sum)
+    println("list traversal time: ", end2 - start2, " sec")
+
+fn at(List(int): lst, int: idx):
+    if idx < 0 or idx >= len(lst):
+        return -1
+    return first(lst)

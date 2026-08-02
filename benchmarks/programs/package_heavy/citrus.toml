@@ -1,0 +1,10 @@
+[package]
+name = "package_heavy"
+version = "v0.1.0"
+
+[import]
+collections = "v0.1.0"
+time = "v0.1.0"
+fs = "v0.1.0"
+string = "v0.1.0"
+math = "v0.1.0"
