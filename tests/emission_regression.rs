@@ -241,6 +241,53 @@ fn emit_object_option_result_runs() {
         expected,
         lines,
         String::from_utf8_lossy(&run.stderr)
+);
+}
+
+/// Phase B-1 Step 1 (nested): generic helpers applied to *nested*
+/// generic states (`Option(Option(int))`) must mangle their type
+/// arguments into valid LLVM identifiers (`Option_28int_29` for
+/// `Option(int)`). The old unmangled form containing parentheses
+/// and commas (`@option.unwrap.Option(`) must not appear. The
+/// interpreter must produce identical output.
+#[test]
+fn emit_object_nested_generic_mangling() {
+    use std::fs;
+    let dir = "target/test_emit_nested_mangling";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let nested = Some(Some(5))\n    println(option.unwrap(option.unwrap(nested)))\n    println(option.unwrap_or(option.unwrap(nested), 0))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let stdout: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    assert!(
+        stdout == ["5", "5"],
+        "nested option interp output mismatch\nexpected: [\"5\", \"5\"]\ngot: {:?}\n--- full output ---\n{}",
+        stdout,
+        out
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+
+    for symbol in ["option.unwrap.Option_28int_29", "option.unwrap_or.int"] {
+        assert!(
+            ir.lines().any(|l| l.contains(&format!("@{}", symbol))),
+            "IR must contain mangled helper {}\n--- ir ---\n{}",
+            symbol,
+            ir
+        );
+    }
+    assert!(
+        !ir.contains("@option.unwrap.Option("),
+        "unmangled nested Option name must not remain\n--- ir ---\n{}",
+        ir
     );
 }
 

@@ -321,7 +321,12 @@ fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: 
 }
 
 fn mangled_name(base: &str, type_args: &[&str]) -> String {
-    format!("{}.{}", base, type_args.join("."))
+    let mut s = base.to_string();
+    for a in type_args {
+        s.push('.');
+        s.push_str(&crate::mangle_type_arg(a));
+    }
+    s
 }
 
 /// Scan all function bodies for generic calls and monomorphize them.

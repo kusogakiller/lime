@@ -8404,8 +8404,31 @@ fn analyze_block(
 
 // ===== Phase 6: Generic Monomorphization =====
 
+/// Encode a single concrete type argument for embedding in a mangled function
+/// name. Alphanumeric bytes pass through unchanged (keeping flat names like
+/// `option.unwrap.int` stable); every other byte becomes `_XX` (uppercase hex),
+/// so nested generic states (`Option(int)`, `Result(int, str)`,
+/// `collections.HashMap`) map to valid LLVM identifier segments and can never
+/// be confused with the `.` argument separator.
+fn mangle_type_arg(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    for b in t.bytes() {
+        if b.is_ascii_alphanumeric() {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("_{:02X}", b));
+        }
+    }
+    out
+}
+
 fn mangled_name(base: &str, type_args: &[String]) -> String {
-    format!("{}.{}", base, type_args.join("."))
+    let mut s = base.to_string();
+    for a in type_args {
+        s.push('.');
+        s.push_str(&mangle_type_arg(a));
+    }
+    s
 }
 
 /// Parse "func(Type1, Type2)" into ("func", ["Type1", "Type2"])
