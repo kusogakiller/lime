@@ -45,23 +45,60 @@ pub struct BuildResult {
     pub warnings: Vec<String>,
 }
 
-pub fn manifest_dir() -> Result<PathBuf, String> {
+pub fn find_project_root() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("cannot get current directory: {}", e))?;
-    let manifest = cwd.join("citrus.toml");
-    if manifest.exists() {
-        Ok(cwd)
-    } else {
-        Err("citrus.toml not found in current directory".to_string())
+    let mut dir = cwd.as_path();
+    loop {
+        let manifest = dir.join("citrus.toml");
+        if manifest.exists() {
+            return Ok(dir.to_path_buf());
+        }
+        dir = match dir.parent() {
+            Some(parent) => parent,
+            None => {
+                return Err(format!(
+                    "citrus.toml not found in '{}' or any parent directory",
+                    cwd.display()
+                ));
+            }
+        };
     }
+}
+
+pub fn manifest_dir() -> Result<PathBuf, String> {
+    find_project_root()
 }
 
 fn target_dir(project_root: &Path, profile: Profile) -> PathBuf {
     project_root.join("target").join(profile.dir_name())
 }
 
+pub fn discover_project() -> Result<PathBuf, String> {
+    find_project_root()
+}
+
+pub fn load_manifest(project_root: &Path) -> Result<lime::CitrusToml, String> {
+    let toml_path = project_root.join("citrus.toml");
+    let toml_str = toml_path.to_string_lossy();
+    let cfg = parse_citrus_toml(&toml_str)?;
+    if cfg.name.is_empty() {
+        return Err(format!("{}: [package].name is required", toml_path.display()));
+    }
+    if cfg.version.is_empty() {
+        return Err(format!("{}: [package].version is required", toml_path.display()));
+    }
+    if !cfg.files.contains_key("main") {
+        return Err(format!(
+            "{}: [files] main is required (e.g. main = \"src/main.lime\")",
+            toml_path.display()
+        ));
+    }
+    Ok(cfg)
+}
+
 pub fn build(profile: Profile) -> Result<BuildResult, String> {
-    let project_root = manifest_dir()?;
-    let cfg = parse_citrus_toml(&project_root.join("citrus.toml").to_string_lossy())?;
+    let project_root = discover_project()?;
+    let cfg = load_manifest(&project_root)?;
     let project_name = cfg.name.clone();
 
     let target = target_dir(&project_root, profile);
@@ -81,28 +118,24 @@ pub fn build(profile: Profile) -> Result<BuildResult, String> {
         verbose: false,
     };
 
-    // Change to project root so compile_pipeline writes output.* there.
     std::env::set_current_dir(&project_root)
         .map_err(|e| format!("failed to chdir to project root: {}", e))?;
     let report = compile_pipeline("citrus.toml", CompileMode::Build, &opts)?;
 
     let out_base = project_root.join("output");
 
-    // Move .ll -> target/<profile>/ir/
     let ll_src = out_base.with_extension("ll");
     if ll_src.exists() {
         let ll_dst = ir_dir.join(format!("{}.ll", project_name));
         let _ = fs::rename(&ll_src, &ll_dst);
     }
 
-    // Move .opt.ll -> target/<profile>/ir/
     let opt_ll_src = project_root.join("output.opt.ll");
     if opt_ll_src.exists() {
         let opt_ll_dst = ir_dir.join(format!("{}.opt.ll", project_name));
         let _ = fs::rename(&opt_ll_src, &opt_ll_dst);
     }
 
-    // Move .obj -> target/<profile>/obj/
     let obj_ext = if cfg!(target_os = "windows") { "obj" } else { "o" };
     let obj_src = out_base.with_extension(obj_ext);
     let mut objects = Vec::new();
@@ -112,7 +145,6 @@ pub fn build(profile: Profile) -> Result<BuildResult, String> {
         objects.push(obj_dst);
     }
 
-    // Move .exe -> target/<profile>/app.exe
     let exe_ext = "exe";
     let exe_src = out_base.with_extension(exe_ext);
     let mut executable = PathBuf::new();
@@ -138,7 +170,7 @@ pub fn build(profile: Profile) -> Result<BuildResult, String> {
     })
 }
 
-pub fn run(release: bool) -> Result<(), String> {
+pub fn run(release: bool, args: &[String]) -> Result<(), String> {
     let profile = if release { Profile::Release } else { Profile::Debug };
     let result = build(profile)?;
 
@@ -149,9 +181,13 @@ pub fn run(release: bool) -> Result<(), String> {
         ));
     }
 
-    let project_root = manifest_dir()?;
-    let status = Command::new(&result.executable)
-        .current_dir(&project_root)
+    let project_root = find_project_root()?;
+    let mut cmd = Command::new(&result.executable);
+    cmd.current_dir(&project_root);
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let status = cmd
         .status()
         .map_err(|e| format!("failed to run executable: {}", e))?;
 

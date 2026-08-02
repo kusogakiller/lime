@@ -4,7 +4,7 @@ use std::process::Command;
 
 fn citrus_bin() -> String {
     std::env::var("CITRUS_BIN")
-        .unwrap_or_else(|_| "target/release/citrus".to_string())
+        .unwrap_or_else(|_| env!("CARGO_BIN_EXE_citrus").to_string())
 }
 
 fn run_citrus(args: &[&str], cwd: &Path) -> (i32, String, String) {
@@ -16,6 +16,27 @@ fn run_citrus(args: &[&str], cwd: &Path) -> (i32, String, String) {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     (output.status.code().unwrap_or(1), stdout, stderr)
+}
+
+fn create_valid_project(base: &Path, name: &str) {
+    let project_dir = base.join(name);
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::create_dir_all(project_dir.join("src")).unwrap();
+    let toml = r#"[package]
+name = "test_project"
+version = "0.1.0"
+
+[files]
+main = "src/main.lime"
+
+[import]
+"#;
+    fs::write(project_dir.join("citrus.toml"), toml).unwrap();
+    fs::write(
+        project_dir.join("src").join("main.lime"),
+        "fn main():\n    println(\"Hello, Lime!\")\n",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -105,6 +126,23 @@ fn test_build_missing_citrus_toml() {
 }
 
 #[test]
+fn test_build_from_subdirectory() {
+    let tmp = Path::new("/tmp/citrus_test_build_subdir");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    create_valid_project(tmp, "subdir_test");
+
+    let subdir = tmp.join("subdir_test").join("src");
+    let (code, stderr, _) = run_citrus(&["build"], &subdir);
+    assert_eq!(code, 0, "citrus build from subdirectory failed: stderr={}", stderr);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
 fn test_run_builds_and_executes() {
     let tmp = Path::new("/tmp/citrus_test_run");
     if tmp.exists() {
@@ -127,6 +165,38 @@ main = "src/main.lime"
 
     let (code, stdout, stderr) = run_citrus(&["run"], tmp);
     assert_eq!(code, 0, "citrus run failed: stderr={}", stderr);
+    assert!(stdout.contains("Hello, Lime!"), "expected Hello, Lime! in output, got: {}", stdout);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_run_with_arguments() {
+    let tmp = Path::new("/tmp/citrus_test_run_args");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let toml = r#"[package]
+name = "run_args_test"
+version = "v0.1.0"
+
+[files]
+main = "src/main.lime"
+
+[import]
+"#;
+    fs::write(tmp.join("citrus.toml"), toml).unwrap();
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(
+        tmp.join("src").join("main.lime"),
+        "fn main():\n    println(\"Hello, Lime!\")\n",
+    )
+    .unwrap();
+
+    let (code, stdout, stderr) = run_citrus(&["run", "--", "arg1", "arg2"], tmp);
+    assert_eq!(code, 0, "citrus run with args failed: stderr={}", stderr);
     assert!(stdout.contains("Hello, Lime!"), "expected Hello, Lime! in output, got: {}", stdout);
 
     fs::remove_dir_all(tmp).unwrap();
@@ -180,6 +250,113 @@ main = "src/main.lime"
     let (code, _, stderr) = run_citrus(&["test"], tmp);
     assert_ne!(code, 0, "citrus test should fail without Cargo.toml");
     assert!(stderr.contains("Cargo.toml"), "expected Cargo.toml error message");
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_build_invalid_toml_missing_name() {
+    let tmp = Path::new("/tmp/citrus_test_invalid_toml_name");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let toml = r#"[package]
+version = "0.1.0"
+
+[files]
+main = "src/main.lime"
+
+[import]
+"#;
+    fs::write(tmp.join("citrus.toml"), toml).unwrap();
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src").join("main.lime"), "fn main():\n    println(\"Hello\")\n").unwrap();
+
+    let (code, _, stderr) = run_citrus(&["build"], tmp);
+    assert_ne!(code, 0, "citrus build should fail with missing package name");
+    assert!(stderr.contains("name"), "expected error about missing name: {}", stderr);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_build_invalid_toml_missing_version() {
+    let tmp = Path::new("/tmp/citrus_test_invalid_toml_version");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let toml = r#"[package]
+name = "version_test"
+
+[files]
+main = "src/main.lime"
+
+[import]
+"#;
+    fs::write(tmp.join("citrus.toml"), toml).unwrap();
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src").join("main.lime"), "fn main():\n    println(\"Hello\")\n").unwrap();
+
+    let (code, _, stderr) = run_citrus(&["build"], tmp);
+    assert_ne!(code, 0, "citrus build should fail with missing package version");
+    assert!(stderr.contains("version"), "expected error about missing version: {}", stderr);
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_build_missing_src_main_lime() {
+    let tmp = Path::new("/tmp/citrus_test_missing_main");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let toml = r#"[package]
+name = "missing_main_test"
+version = "0.1.0"
+
+[files]
+main = "src/main.lime"
+
+[import]
+"#;
+    fs::write(tmp.join("citrus.toml"), toml).unwrap();
+    fs::create_dir_all(tmp.join("src")).unwrap();
+
+    let (code, _, _) = run_citrus(&["build"], tmp);
+    assert_ne!(code, 0, "citrus build should fail with missing src/main.lime");
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
+fn test_build_custom_main_file() {
+    let tmp = Path::new("/tmp/citrus_test_custom_main");
+    if tmp.exists() {
+        fs::remove_dir_all(tmp).unwrap();
+    }
+    fs::create_dir_all(tmp).unwrap();
+
+    let toml = r#"[package]
+name = "custom_main_test"
+version = "0.1.0"
+
+[files]
+main = "src/app.lime"
+
+[import]
+"#;
+    fs::write(tmp.join("citrus.toml"), toml).unwrap();
+    fs::create_dir_all(tmp.join("src")).unwrap();
+    fs::write(tmp.join("src").join("app.lime"), "fn main():\n    println(\"Custom main\")\n").unwrap();
+
+    let (code, stderr, _) = run_citrus(&["build"], tmp);
+    assert_eq!(code, 0, "citrus build with custom main file failed: stderr={}", stderr);
 
     fs::remove_dir_all(tmp).unwrap();
 }

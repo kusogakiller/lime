@@ -1,6 +1,5 @@
 mod cli;
 mod project;
-mod manifest;
 mod build;
 mod test_cmd;
 mod fmt;
@@ -13,7 +12,7 @@ fn main() {
             let profile = if release { build::Profile::Release } else { build::Profile::Debug };
             build::build(profile).map(|_| ())
         }
-        cli::Command::Run { release } => build::run(release),
+        cli::Command::Run { release, args } => build::run(release, &args),
         cli::Command::Test { release } => test_cmd::run(release),
         cli::Command::Fmt => fmt::run(),
     };

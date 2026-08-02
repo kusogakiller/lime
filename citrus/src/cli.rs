@@ -29,6 +29,9 @@ pub enum Command {
         /// Build in release mode before running
         #[arg(long)]
         release: bool,
+        /// Program arguments to forward to the executable
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Discover and run tests
     Test {
