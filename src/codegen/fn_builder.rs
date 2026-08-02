@@ -701,6 +701,74 @@ impl<'a> Cg<'a> {
                     ));
                     return Ok((tmp, Type::String));
                 }
+                Type::Option(_) => {
+                    // Option(T) is %Option = { i32, [4 x i64] }.
+                    // Tag (field 0): 0=None, 1=Some. Payload (field 1, [0]): i64.
+                    let tmp_tag = self.fresh_temp();
+                    let tmp_payload = self.fresh_temp();
+                    let tmp_result = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = extractvalue %Option {}, 0\n",
+                        tmp_tag, v
+                    ));
+                    self.out.push_str(&format!(
+                        "  {} = extractvalue %Option {}, 1, 0\n",
+                        tmp_payload, v
+                    ));
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_str_from_option(i64 {}, i32 {})\n",
+                        tmp_result, tmp_payload, tmp_tag
+                    ));
+                    return Ok((tmp_result, Type::String));
+                }
+                Type::State(ref state_name) => {
+                    let base = crate::struct_base(state_name);
+                    let llvm_ty = format!("%{}", base);
+                    if base == "Option" {
+                        // Option(T) is %Option = { i32, [4 x i64] }.
+                        // Tag (field 0): 0=None, 1=Some. Payload (field 1, [0]): i64.
+                        let tmp_tag = self.fresh_temp();
+                        let tmp_payload = self.fresh_temp();
+                        let tmp_result = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 0\n",
+                            tmp_tag, llvm_ty, v
+                        ));
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1, 0\n",
+                            tmp_payload, llvm_ty, v
+                        ));
+                        self.out.push_str(&format!(
+                            "  {} = call i8* @runtime_str_from_option(i64 {}, i32 {})\n",
+                            tmp_result, tmp_payload, tmp_tag
+                        ));
+                        return Ok((tmp_result, Type::String));
+                    }
+                    if base == "Result" {
+                        // Result(T, E) is %Result = { i32, [4 x i64] }.
+                        // Tag (field 0): 0=Success, 1=Error. Payload (field 1, [0]): i64.
+                        let tmp_tag = self.fresh_temp();
+                        let tmp_payload = self.fresh_temp();
+                        let tmp_result = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 0\n",
+                            tmp_tag, llvm_ty, v
+                        ));
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1, 0\n",
+                            tmp_payload, llvm_ty, v
+                        ));
+                        self.out.push_str(&format!(
+                            "  {} = call i8* @runtime_str_from_result(i64 {}, i32 {})\n",
+                            tmp_result, tmp_payload, tmp_tag
+                        ));
+                        return Ok((tmp_result, Type::String));
+                    }
+                    return Err(format!(
+                        "str() cannot convert {:?} to a string in codegen",
+                        t
+                    ));
+                }
                 _ => return Err(format!(
                     "str() cannot convert {:?} to a string in codegen",
                     t

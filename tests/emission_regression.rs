@@ -244,6 +244,61 @@ fn emit_object_option_result_runs() {
 );
 }
 
+/// Phase B-1 Step 3: str() on Option and Result must produce display
+/// strings matching the interpreter ("Some(5)", "None", "Success(10)",
+/// "Error(42)") in both native and interpreter paths.
+#[test]
+fn emit_object_str_option_result() {
+    use std::fs;
+    let dir = "target/test_emit_str_option_result";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let some = Some(5)\n    let none = None\n    let ok = Success(10)\n    let err = Error(42)\n    println(str(some))\n    println(str(none))\n    println(str(ok))\n    println(str(err))\n    return\n",
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    let expected = [
+        "Some(5)",
+        "None",
+        "Success(10)",
+        "Error(42)",
+    ];
+    assert!(
+        lines == expected,
+        "str(option/result) native output mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    // Interpreter parity check
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let stdout: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    assert!(
+        stdout == expected,
+        "str(option/result) interpreter output mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected,
+        stdout,
+        out
+    );
+}
+
 /// Phase B-1 Step 1 (nested): generic helpers applied to *nested*
 /// generic states (`Option(Option(int))`) must mangle their type
 /// arguments into valid LLVM identifiers (`Option_28int_29` for

@@ -320,6 +320,27 @@ double runtime_math_floor(double x) { return floor(x); }
 double runtime_math_ceil(double x) { return ceil(x); }
 double runtime_math_round(double x) { return round(x); }
 
+// -- String helpers for Option/Result display --
+// Tag values: Option{0=Some, 1=None}, Result{0=Success, 1=Error}
+char* runtime_str_from_option(int64_t payload, int tag) {
+    static char buf[64];
+    if (tag == 1) {
+        return "None";
+    }
+    snprintf(buf, sizeof(buf), "Some(%lld)", (long long)payload);
+    return buf;
+}
+
+char* runtime_str_from_result(int64_t payload, int tag) {
+    static char buf[64];
+    if (tag == 0) {
+        snprintf(buf, sizeof(buf), "Success(%lld)", (long long)payload);
+    } else {
+        snprintf(buf, sizeof(buf), "Error(%lld)", (long long)payload);
+    }
+    return buf;
+}
+
 // -- Time --
 double runtime_time_now(void) {
 #ifdef _WIN32
