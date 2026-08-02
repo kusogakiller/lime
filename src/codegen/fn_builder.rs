@@ -1019,6 +1019,21 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_f64(self, "runtime_math_pow", &a);
                 Ok(Some((v, t)))
             }
+            "floor" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_floor", &[x]);
+                Ok(Some((v, t)))
+            }
+            "ceil" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_ceil", &[x]);
+                Ok(Some((v, t)))
+            }
+            "round" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_round", &[x]);
+                Ok(Some((v, t)))
+            }
             // ---- time builtins ----
             "time_now" => {
                 let (v, t) = call_f64(self, "runtime_time_now", &[]);

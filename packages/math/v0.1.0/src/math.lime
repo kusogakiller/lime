@@ -1,5 +1,5 @@
 // std.math: 数学ユーティリティ
-// ランタイム組込み（abs/min/max/clamp/sqrt/pow）をラップする。
+// ランタイム組込み（abs/min/max/clamp/sqrt/pow/floor/ceil/round）をラップする。
 
 // 絶対値
 fn abs(float: x):
@@ -24,3 +24,15 @@ fn sqrt(float: x):
 // 累乗
 fn pow(float: a, float: b):
     return pow(a, b)
+
+// 床関数（切り捨て）
+fn floor(float: x):
+    return floor(x)
+
+// 天井関数（切り上げ）
+fn ceil(float: x):
+    return ceil(x)
+
+// 四捨五入
+fn round(float: x):
+    return round(x)

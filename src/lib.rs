@@ -5584,7 +5584,7 @@ fn infer_type(
                 }
                 "index_of" => Ok(Type::Int),
                 "contains_item" => Ok(Type::Bool),
-                "abs" | "sqrt" => {
+                "sqrt" | "abs" | "floor" | "ceil" | "round" => {
                     if args.len() != 1 {
                         return Err(format!("{}() takes exactly 1 argument", func));
                     }
@@ -5771,6 +5771,9 @@ fn infer_type(
                 Type::Float => match method.as_str() {
                     "abs" => Ok(Type::Float),
                     "sqrt" => Ok(Type::Float),
+                    "floor" => Ok(Type::Float),
+                    "ceil" => Ok(Type::Float),
+                    "round" => Ok(Type::Float),
                     _ => Ok(Type::Unknown),
                 },
                 _ => Ok(Type::Unknown),
@@ -6297,7 +6300,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
         // Math builtins (sqrt/abs/min/max/clamp/pow) 遯ｶ繝ｻhandled here so they
         // don't shadow themselves via `resolve_pkg_name` inside package bodies.
-        "sqrt" | "abs" => {
+        "sqrt" | "abs" | "floor" | "ceil" | "round" => {
             if args.len() != 1 {
                 return Err(format!("Type error: {}() takes exactly 1 argument", func));
             }
@@ -6964,6 +6967,24 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     "sqrt" => {
                         if !args.is_empty() {
                             return Err("Type error: Float.sqrt() takes no arguments".to_string());
+                        }
+                        Ok(Type::Float)
+                    }
+                    "floor" => {
+                        if !args.is_empty() {
+                            return Err("Type error: Float.floor() takes no arguments".to_string());
+                        }
+                        Ok(Type::Float)
+                    }
+                    "ceil" => {
+                        if !args.is_empty() {
+                            return Err("Type error: Float.ceil() takes no arguments".to_string());
+                        }
+                        Ok(Type::Float)
+                    }
+                    "round" => {
+                        if !args.is_empty() {
+                            return Err("Type error: Float.round() takes no arguments".to_string());
                         }
                         Ok(Type::Float)
                     }
@@ -9252,6 +9273,24 @@ fn eval_float_method(v: f64, method: &str, args: &[Value]) -> Result<Value, Stri
             }
             Ok(Value::Float(v.sqrt()))
         }
+        "floor" => {
+            if !args.is_empty() {
+                return Err("floor() takes no arguments".to_string());
+            }
+            Ok(Value::Float(v.floor()))
+        }
+        "ceil" => {
+            if !args.is_empty() {
+                return Err("ceil() takes no arguments".to_string());
+            }
+            Ok(Value::Float(v.ceil()))
+        }
+        "round" => {
+            if !args.is_empty() {
+                return Err("round() takes no arguments".to_string());
+            }
+            Ok(Value::Float(v.round()))
+        }
         other => Err(format!("Unknown Float method: {}", other)),
     }
 }
@@ -9399,7 +9438,7 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "repeat" | "time_now" | "time_sleep" | "read_file" | "write_file" | "append_file"
             | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
             | "fs_list_dir" | "fs_create_dir" | "input"
-            | "abs" | "sqrt" | "min" | "max" | "clamp" | "pow"
+            | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
     )
 }
 
@@ -9934,6 +9973,30 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Ok(Value::Float(f.abs()))
             } else {
                 Err("abs() expects a float".to_string())
+            }
+        }
+        "floor" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.floor()))
+            } else {
+                Err("floor() expects a float".to_string())
+            }
+        }
+        "ceil" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.ceil()))
+            } else {
+                Err("ceil() expects a float".to_string())
+            }
+        }
+        "round" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.round()))
+            } else {
+                Err("round() expects a float".to_string())
             }
         }
         "min" => {

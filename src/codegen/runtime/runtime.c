@@ -316,6 +316,9 @@ double runtime_math_clamp(double x, double lo, double hi) {
     return v > hi ? hi : v;
 }
 double runtime_math_pow(double a, double b) { return pow(a, b); }
+double runtime_math_floor(double x) { return floor(x); }
+double runtime_math_ceil(double x) { return ceil(x); }
+double runtime_math_round(double x) { return round(x); }
 
 // -- Time --
 double runtime_time_now(void) {

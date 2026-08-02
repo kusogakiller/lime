@@ -76,6 +76,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare double @runtime_math_max(double, double)\n");
     out.push_str("declare double @runtime_math_clamp(double, double, double)\n");
     out.push_str("declare double @runtime_math_pow(double, double)\n");
+    out.push_str("declare double @runtime_math_floor(double)\n");
+    out.push_str("declare double @runtime_math_ceil(double)\n");
+    out.push_str("declare double @runtime_math_round(double)\n");
     out.push_str("declare double @runtime_time_now()\n");
     out.push_str("declare i32 @runtime_time_sleep(double)\n");
     out.push_str("declare i8* @runtime_input(i8*)\n");
