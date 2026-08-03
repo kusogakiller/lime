@@ -703,7 +703,7 @@ impl<'a> Cg<'a> {
                 }
                 Type::Option(_) => {
                     // Option(T) is %Option = { i32, [4 x i64] }.
-                    // Tag (field 0): 0=None, 1=Some. Payload (field 1, [0]): i64.
+                    // Tag (field 0): 0=Some, 1=None. Payload (field 1, [0]): i64.
                     let tmp_tag = self.fresh_temp();
                     let tmp_payload = self.fresh_temp();
                     let tmp_result = self.fresh_temp();
@@ -726,7 +726,7 @@ impl<'a> Cg<'a> {
                     let llvm_ty = format!("%{}", base);
                     if base == "Option" {
                         // Option(T) is %Option = { i32, [4 x i64] }.
-                        // Tag (field 0): 0=None, 1=Some. Payload (field 1, [0]): i64.
+                        // Tag (field 0): 0=Some, 1=None. Payload (field 1, [0]): i64.
                         let tmp_tag = self.fresh_temp();
                         let tmp_payload = self.fresh_temp();
                         let tmp_result = self.fresh_temp();

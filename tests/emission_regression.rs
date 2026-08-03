@@ -523,6 +523,138 @@ fn emit_object_display_println_option_result() {
     );
 }
 
+/// Phase B-1.5: unwrap() on None/Error panics at runtime. We test this by
+/// calling unwrap on a Some/Success first (to confirm happy path), then
+/// triggering the panic via panic("msg"). Because `option.unwrap(None)` fails
+/// at type inference (None is polymorphic), we test the panic infrastructure
+/// via `panic("msg")` directly, and verify unwrap_or returns fallback without
+/// panicking for both None and Error.
+#[test]
+fn emit_object_unwrap_panic_and_fallback() {
+    use std::fs;
+    let dir = "target/test_unwrap_panic";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(option.unwrap_or(None, 99))\n    println(result.unwrap_or(Error(42), 77))\n    println(option.unwrap(Some(5)))\n    println(result.unwrap(Success(10)))\n    println(\"before_panic\")\n    panic(\"test_panic_message\")\n    println(\"after_panic\")\n    return\n",
+    );
+
+    // Interpreter: the first five lines succeed, then panic aborts.
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    // First five lines must succeed.
+    assert!(
+        interp.len() >= 5
+            && interp[0] == "99"
+            && interp[1] == "77"
+            && interp[2] == "5"
+            && interp[3] == "10"
+            && interp[4] == "before_panic",
+        "unwrap_or/unwrap happy paths must succeed in interpreter\ngot: {:?}\n--- full output ---\n{}",
+        interp,
+        out
+    );
+    // Panic message must appear, and "after_panic" must NOT appear.
+    let full = interp.join("\n");
+    assert!(
+        full.contains("Lime runtime panic") && full.contains("test_panic_message"),
+        "interpreter must show panic message\ngot: {:?}\n--- full output ---\n{}",
+        interp,
+        out
+    );
+    assert!(
+        !full.contains("after_panic"),
+        "interpreter must abort on panic (after_panic should not appear)\ngot: {:?}",
+        interp
+    );
+
+    // Native: same program, verify happy paths work and panic aborts.
+    // Note: abort() doesn't flush stdout buffers, so we only check stderr
+    // for the panic message and verify the binary was built successfully.
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "unwrap panic test native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_stderr = String::from_utf8_lossy(&run.stderr);
+    // The native process must have aborted with a panic message on stderr.
+    assert!(
+        native_stderr.contains("Lime runtime panic") && native_stderr.contains("test_panic_message"),
+        "native must show panic message\n--- stderr ---\n{}",
+        native_stderr
+    );
+    // "after_panic" must NOT appear in stdout (abort prevents flushing).
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        !stdout_lossy.contains("after_panic"),
+        "native must abort on panic (after_panic should not appear)\n--- stdout ---\n{}",
+        stdout_lossy
+    );
+}
+
+/// Phase B-1.5: unwrap_or() must produce identical output in interpreter and
+/// native mode for both Option and Result. This verifies interpreter/native
+/// parity for the safe unwrap path.
+#[test]
+fn emit_object_unwrap_or_parity() {
+    use std::fs;
+    let dir = "target/test_unwrap_or_parity";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(option.unwrap_or(Some(1), 0))\n    println(option.unwrap_or(None, 0))\n    println(result.unwrap_or(Success(2), 0))\n    println(result.unwrap_or(Error(3), 0))\n    println(option.unwrap(Some(4)))\n    println(result.unwrap(Success(5)))\n    return\n",
+    );
+
+    let expected = ["1", "0", "2", "0", "4", "5"];
+
+    // Interpreter
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    assert_eq!(
+        interp, expected,
+        "unwrap_or parity (interpreter) mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected, interp, out
+    );
+
+    // Native
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "unwrap_or parity native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "unwrap_or parity (native) mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native must produce identical output for unwrap_or parity"
+    );
+}
+
 /// Phase B-1.4: a single program that exercises all eight bundled stdlib
 /// packages in both the interpreter and native executable. The two must
 /// produce identical output. This is the broadest surface-area smoke test
