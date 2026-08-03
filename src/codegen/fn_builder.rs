@@ -42,6 +42,8 @@ struct Cg<'a> {
     terminated: bool,
     warnings: Vec<String>,
     fn_ret_ty: String,
+    pending_fns: Vec<String>,
+    anon_count: usize,
 }
 
 impl<'a> Cg<'a> {
@@ -61,6 +63,8 @@ impl<'a> Cg<'a> {
             terminated: false,
             warnings: Vec::new(),
             fn_ret_ty: "void".to_string(),
+            pending_fns: Vec::new(),
+            anon_count: 0,
         }
     }
 
@@ -224,7 +228,12 @@ impl<'a> Cg<'a> {
             }
         }
         self.out.push_str("}\n");
-        format!("{}{}", head, self.out)
+        let mut result = String::new();
+        for pf in &self.pending_fns {
+            result.push_str(pf);
+        }
+        result.push_str(&format!("{}{}", head, self.out));
+        result
     }
 
     /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・
@@ -395,23 +404,132 @@ impl<'a> Cg<'a> {
             }
             Expr::BoolLit(b) => Ok((format!("i1 {}", if *b { "true" } else { "false" }), Type::Bool)),
             Expr::Ident(n) => {
-                let ptr = self
-                    .named
-                    .get(n)
-                    .cloned()
-                    .ok_or_else(|| format!("undefined variable '{}'", n))?;
-                let ty = self
-                    .env
-                    .get(n)
-                    .cloned()
-                    .ok_or_else(|| format!("undefined variable '{}'", n))?;
-                let llty = llvm_type_name(&ty);
-                let tmp = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = load {}, {}* {}, align {}\n",
-                    tmp, llty, llty, ptr, align_of(&ty)
-                ));
-                Ok((tmp, ty))
+                // Check if it's a local variable first
+                if let Some(ptr) = self.named.get(n).cloned() {
+                    let ty = self
+                        .env
+                        .get(n)
+                        .cloned()
+                        .ok_or_else(|| format!("undefined variable '{}'", n))?;
+                    let llty = llvm_type_name(&ty);
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = load {}, {}* {}, align {}\n",
+                        tmp, llty, llty, ptr, align_of(&ty)
+                    ));
+                    // If the variable holds a function value (closure), it's already loaded
+                    // as %LimeClosure* — return it directly with the Fn type.
+                    if matches!(ty, Type::Fn(_, _)) {
+                        return Ok((tmp, ty));
+                    }
+                    return Ok((tmp, ty));
+                }
+                // Phase B-2.2: named function reference -> generate wrapper + wrap in closure
+                if let Some(fdef) = self.defs.functions.get(n) {
+                    let param_types: Vec<Type> = fdef.params.iter()
+                        .map(|(_, t)| type_from_str(t, self.defs))
+                        .collect();
+                    let ret = match &fdef.return_type {
+                        Some(rt) => type_from_str(rt, self.defs),
+                        None => Type::Unit,
+                    };
+                    let llvm_name = if n == "main" { "main_lime" } else { n };
+
+                    // Generate a wrapper: define i64 @wrap_<name>(i8* %env, i8* %packed) { ... }
+                    let wrapper_name = format!("wrap_{}", n);
+                    let ll_ret = llvm_type_name(&ret);
+                    let mut wrapper_ir = String::new();
+                    wrapper_ir.push_str(&format!(
+                        "\n; Closure wrapper for {}\ndefine {} @{}(i8* %env, i8* %packed) {{\n",
+                        n, ll_ret, wrapper_name
+                    ));
+                    wrapper_ir.push_str("L0:\n");
+
+                    // Unpack each argument from the packed struct
+                    let mut unpacked_args = Vec::new();
+                    for (i, (_, ptype_str)) in fdef.params.iter().enumerate() {
+                        let pty = type_from_str(ptype_str, self.defs);
+                        let llpty = llvm_type_name(&pty);
+                        let offset = (i as i64) * 8;
+                        let raw_ptr = format!("%uptr_{}", i);
+                        wrapper_ir.push_str(&format!(
+                            "  {} = getelementptr i8, i8* %packed, i64 {}\n",
+                            raw_ptr, offset
+                        ));
+                        let ptr_i64 = format!("%uptr_i64_{}", i);
+                        wrapper_ir.push_str(&format!(
+                            "  {} = bitcast i8* {} to i64*\n",
+                            ptr_i64, raw_ptr
+                        ));
+                        let loaded_i64 = format!("%uloaded_{}", i);
+                        wrapper_ir.push_str(&format!(
+                            "  {} = load i64, i64* {}, align 8\n",
+                            loaded_i64, ptr_i64
+                        ));
+                        // Convert i64 to the actual parameter type
+                        let converted = format!("%uconv_{}", i);
+                        match pty {
+                            Type::Int | Type::Long => {
+                                wrapper_ir.push_str(&format!(
+                                    "  {} = add i64 {}, 0\n",
+                                    converted, loaded_i64
+                                ));
+                            }
+                            Type::Float => {
+                                wrapper_ir.push_str(&format!(
+                                    "  {} = bitcast i64 {} to double\n",
+                                    converted, loaded_i64
+                                ));
+                            }
+                            Type::Bool => {
+                                wrapper_ir.push_str(&format!(
+                                    "  {} = trunc i64 {} to i1\n",
+                                    converted, loaded_i64
+                                ));
+                            }
+                            _ => {
+                                wrapper_ir.push_str(&format!(
+                                    "  {} = inttoptr i64 {} to {}\n",
+                                    converted, loaded_i64, llpty
+                                ));
+                            }
+                        }
+                        unpacked_args.push(format!("{} {}", llpty, converted));
+                    }
+
+                    // Call the real function
+                    let args_str = unpacked_args.join(", ");
+                    if ll_ret == "void" {
+                        wrapper_ir.push_str(&format!(
+                            "  call void @{}({})\n",
+                            llvm_name, args_str
+                        ));
+                        wrapper_ir.push_str("  ret void\n");
+                    } else {
+                        wrapper_ir.push_str(&format!(
+                            "  %cret = call {} @{}({})\n",
+                            ll_ret, llvm_name, args_str
+                        ));
+                        wrapper_ir.push_str(&format!("  ret {} %cret\n", ll_ret));
+                    }
+                    wrapper_ir.push_str("}\n");
+                    self.pending_fns.push(wrapper_ir);
+
+                    // Create closure wrapping the wrapper function
+                    let wrapper_ty = format!("{} (i8*, i8*)", ll_ret);
+                    let fn_ptr_cast = self.fresh_temp();
+                    let closure = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = bitcast {}* @{} to i8*\n",
+                        fn_ptr_cast, wrapper_ty, wrapper_name
+                    ));
+                    self.out.push_str(&format!(
+                        "  {} = call %LimeClosure* @runtime_make_fn_ref(i8* {})\n",
+                        closure, fn_ptr_cast
+                    ));
+                    return Ok((closure, Type::Fn(param_types, Box::new(ret))));
+                }
+                Err(format!("undefined variable '{}'", n))
             }
             Expr::BinOp { left, op, right, resolved_operator } => self.codegen_binop(left, op, right, resolved_operator),
             Expr::UnOp { op, operand } => {
@@ -447,8 +565,122 @@ impl<'a> Cg<'a> {
             Expr::MethodCall { object, method, args } => self.codegen_method_call(object, method, args),
             Expr::Array(items) => self.codegen_array_lit(items),
             Expr::Await(inner) => self.codegen_expr(inner),
+            Expr::FnDef { params, body } => self.codegen_anon_fn(params, body),
             _ => Err("Phase 5: unsupported expression in codegen".to_string()),
         }
+    }
+
+    /// Codegen for anonymous function definitions (fn (int: a, int: b) { ... }).
+    /// Generates a standalone LLVM function: `define i64 @anon_N(i8* %env, i8* %packed_args)`
+    /// that unpacks arguments from the packed struct, executes the body, and returns.
+    /// Returns a %LimeClosure* wrapping { fn_ptr, env_ptr=NULL }.
+    fn codegen_anon_fn(
+        &mut self,
+        params: &[(String, String)],
+        body: &[Stmt],
+    ) -> Result<(String, Type), String> {
+        let name = format!("anon_{}", self.anon_count);
+        self.anon_count += 1;
+
+        // Parse parameter types
+        let param_types: Vec<Type> = params.iter()
+            .map(|(_, t)| type_from_str(t, self.defs))
+            .collect();
+
+        // Return type: infer from body (first return statement), default to i64
+        let ret_type_str = "i64".to_string(); // MVP: all functions return i64
+
+        // Build function head: define i64 @anon_N(i8* %env, i8* %packed_args) {
+        let mut ir = String::new();
+        ir.push_str(&format!(
+            "\n; Anonymous function\ndefine {} @{}(i8* %env, i8* %packed_args) {{\n",
+            ret_type_str, name
+        ));
+
+        // Entry block
+        ir.push_str("L0:\n");
+
+        // Unpack arguments from the packed struct
+        let mut child = Cg::new(self.defs, self.memory, self.string_literals, self.mono_name_map, self.mono_fdefs);
+        // Reuse the name as a temp namespace; reset temp counter
+        let mut named: HashMap<String, String> = HashMap::new();
+        let mut env_types: HashMap<String, Type> = HashMap::new();
+
+        for (i, (pname, ptype_str)) in params.iter().enumerate() {
+            let pty = type_from_str(ptype_str, self.defs);
+            let llty = llvm_type_name(&pty);
+
+            // GEP into packed_args to get i64* for this arg
+            let raw_ptr = format!("%unpack_{}", i);
+            let offset = (i as i64) * 8;
+            ir.push_str(&format!(
+                "  {} = getelementptr i8, i8* %packed_args, i64 {}\n",
+                raw_ptr, offset
+            ));
+            let ptr_i64 = format!("%ptr_{}", i);
+            ir.push_str(&format!(
+                "  {} = bitcast i8* {} to {}*\n",
+                ptr_i64, raw_ptr, llty
+            ));
+            let loaded = format!("%arg_{}", i);
+            ir.push_str(&format!(
+                "  {} = load {}, {}* {}, align 8\n",
+                loaded, llty, llty, ptr_i64
+            ));
+
+            // alloca + store for the body to reference
+            let alloca_ptr = format!("%al_{}", i);
+            ir.push_str(&format!(
+                "  {} = alloca {}, align 8\n",
+                alloca_ptr, llty
+            ));
+            ir.push_str(&format!(
+                "  store {} {}, {}* {}, align 8\n",
+                llty, loaded, llty, alloca_ptr
+            ));
+            named.insert(pname.clone(), alloca_ptr);
+            env_types.insert(pname.clone(), pty);
+        }
+
+        // Codegen the body using a child Cg, injecting unpacked args
+        child.out.clear(); // empty; we build body separately
+        child.named = named;
+        child.env = env_types;
+        child.current_block = "L0".to_string();
+        child.block = 1;
+        child.temp = 0;
+
+        // Codegen statements
+        for s in body {
+            if let Err(e) = child.codegen_stmt(s) {
+                child.warnings.push(format!("{}: {}", name, e));
+            }
+        }
+        // Add default return if not terminated
+        if !child.block_terminated() {
+            child.out.push_str(&format!("  ret {} 0\n", ret_type_str));
+        }
+        ir.push_str(&child.out);
+        ir.push_str("}\n");
+
+        self.pending_fns.push(ir);
+
+        // Return: %LimeClosure* @runtime_make_fn_ref(@anon_N as i8*)
+        // Function type: i64 (i8*, i8*)*
+        let fn_ptr_cast2 = self.fresh_temp();
+        let closure = self.fresh_temp();
+        self.out.push_str(&format!(
+            "  {} = bitcast i64 (i8*, i8*)* @{} to i8*\n",
+            fn_ptr_cast2, name
+        ));
+        self.out.push_str(&format!(
+            "  {} = call %LimeClosure* @runtime_make_fn_ref(i8* {})\n",
+            closure, fn_ptr_cast2
+        ));
+        Ok((closure, Type::Fn(
+            param_types,
+            Box::new(Type::Int), // MVP: assume i64 return
+        )))
     }
 
     fn codegen_binop(
@@ -794,6 +1026,12 @@ impl<'a> Cg<'a> {
         if let Some(state_name) = self.defs.state_variants.get(func) {
             return self.codegen_state_ctor(state_name, func, args);
         }
+        // Phase B-2.2: function value call (variable holds a closure or fn ref)
+        if let Some(ty) = self.env.get(func).cloned() {
+            if let Type::Fn(param_types, ret) = ty {
+                return self.codegen_closure_call(func, args, &param_types, &ret);
+            }
+        }
         // Phase 6: monomorphized generic function call
         if let Some(mangled) = self.mono_name_map.get(func) {
             let mono_fdef = self.mono_fdefs.get(mangled).ok_or_else(|| {
@@ -870,6 +1108,145 @@ impl<'a> Cg<'a> {
                 tmp, ret_type.0, llvm_name, call_args_str
             ));
             Ok((tmp, ret_type.1))
+        }
+    }
+
+    /// Phase B-2.2: call through a closure / function value.
+    /// The closure stores a function pointer with signature (i8* %env, i8* %packed) -> Ret.
+    /// This method loads the closure, packs arguments, and calls through the function pointer.
+    fn codegen_closure_call(
+        &mut self,
+        func: &str,
+        args: &[Expr],
+        _param_types: &[Type],
+        ret: &Type,
+    ) -> Result<(String, Type), String> {
+        // Load the %LimeClosure* from the variable's alloca
+        let closure_ptr = self.named.get(func).cloned().ok_or_else(|| {
+            format!("undefined variable '{}'", func)
+        })?;
+        let closure_loaded = self.fresh_temp();
+        self.out.push_str(&format!(
+            "  {} = load %LimeClosure*, %LimeClosure** {}, align 8\n",
+            closure_loaded, closure_ptr
+        ));
+
+        // Extract fn_ptr (field 0) and env_ptr (field 1)
+        let fn_ptr_gep = self.fresh_temp();
+        let fn_ptr_tmp = self.fresh_temp();
+        let env_ptr_gep = self.fresh_temp();
+        let env_ptr_tmp = self.fresh_temp();
+        self.out.push_str(&format!(
+            "  {} = getelementptr inbounds %LimeClosure, %LimeClosure* {}, i32 0, i32 0\n",
+            fn_ptr_gep, closure_loaded
+        ));
+        self.out.push_str(&format!(
+            "  {} = load i8*, i8** {}\n",
+            fn_ptr_tmp, fn_ptr_gep
+        ));
+        self.out.push_str(&format!(
+            "  {} = getelementptr inbounds %LimeClosure, %LimeClosure* {}, i32 0, i32 1\n",
+            env_ptr_gep, closure_loaded
+        ));
+        self.out.push_str(&format!(
+            "  {} = load i8*, i8** {}\n",
+            env_ptr_tmp, env_ptr_gep
+        ));
+
+        // Evaluate arguments and pack into heap-allocated i64 array
+        let mut arg_vals: Vec<(String, Type)> = Vec::new();
+        for a in args {
+            arg_vals.push(self.codegen_expr(a)?);
+        }
+
+        let packed_ptr = if arg_vals.is_empty() {
+            "i8* null".to_string()
+        } else {
+            let struct_size = arg_vals.len() as i64 * 8;
+            let raw_alloc = self.fresh_temp();
+            self.out.push_str(&format!(
+                "  {} = call i8* @runtime_alloc(i64 {}, i64 8)\n",
+                raw_alloc, struct_size
+            ));
+            for (i, (v, t)) in arg_vals.iter().enumerate() {
+                let bare = self.bare_value(v).to_string();
+                let offset = (i as i64) * 8;
+                let elem_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr i8, i8* {}, i64 {}\n",
+                    elem_ptr, raw_alloc, offset
+                ));
+                let ptr_i64 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = bitcast i8* {} to i64*\n",
+                    ptr_i64, elem_ptr
+                ));
+                match t {
+                    Type::Int | Type::Long => {
+                        self.out.push_str(&format!(
+                            "  store i64 {}, i64* {}, align 8\n",
+                            bare, ptr_i64
+                        ));
+                    }
+                    Type::Float => {
+                        let raw = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = bitcast double {} to i64\n",
+                            raw, bare
+                        ));
+                        self.out.push_str(&format!(
+                            "  store i64 {}, i64* {}, align 8\n",
+                            raw, ptr_i64
+                        ));
+                    }
+                    Type::Bool => {
+                        let ext = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = zext i1 {} to i64\n",
+                            ext, bare
+                        ));
+                        self.out.push_str(&format!(
+                            "  store i64 {}, i64* {}, align 8\n",
+                            ext, ptr_i64
+                        ));
+                    }
+                    _ => {
+                        let bc = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = ptrtoint i8* {} to i64\n",
+                            bc, bare
+                        ));
+                        self.out.push_str(&format!(
+                            "  store i64 {}, i64* {}, align 8\n",
+                            bc, ptr_i64
+                        ));
+                    }
+                }
+            }
+            raw_alloc
+        };
+
+        // Cast fn_ptr to the wrapper type and call: Ret (i8*, i8*)
+        let ll_ret = llvm_type_name(ret);
+        let wrapper_ty = format!("{} (i8*, i8*)", ll_ret);
+        let wrapper_cast = self.fresh_temp();
+        self.out.push_str(&format!(
+            "  {} = bitcast i8* {} to {}*\n",
+            wrapper_cast, fn_ptr_tmp, wrapper_ty
+        ));
+        let tmp = self.fresh_temp();
+        if ll_ret == "void" {
+            self.out.push_str(&format!(
+                "  call {} (i8*, i8*) {}(i8* {}, i8* {})\n",
+                ll_ret, wrapper_cast, env_ptr_tmp, packed_ptr
+            ));
+            Ok((String::new(), Type::Unit))
+        } else {
+            self.out.push_str(&format!(
+                "  {} = call {} (i8*, i8*) {}(i8* {}, i8* {})\n",
+                tmp, ll_ret, wrapper_cast, env_ptr_tmp, packed_ptr
+            ));
+            Ok((tmp, ret.clone()))
         }
     }
 
@@ -1951,6 +2328,7 @@ fn expr_supported(e: &Expr) -> bool {
         // Phase 5: array/list literals
         Expr::Array(items) => items.iter().all(|a| expr_supported(a)),
         Expr::Await(inner) => expr_supported(inner),
+        Expr::FnDef { params: _, body } => body_supported(body),
         _ => false,
     }
 }

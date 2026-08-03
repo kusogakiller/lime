@@ -32,6 +32,7 @@ pub fn llvm_type_name(ty: &Type) -> String {
         Type::Array(_) => "i8*".to_string(), // Phase 0: placeholder
         Type::Slice(_) => "i8*".to_string(), // Phase 0: placeholder
         Type::Tuple(_) => "i64".to_string(), // Phase 0: placeholder
+        Type::Fn(_, _) => "i8*".to_string(), // function values are opaque pointers
         Type::Unit => "void".to_string(),
         Type::Unknown => "i64".to_string(), // Phase 0: placeholder
         Type::Var(_) => "i64".to_string(), // Phase 0: monomorphization 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
@@ -63,6 +64,7 @@ pub fn align_of(ty: &Type) -> usize {
         Type::Array(_) => 8,
         Type::Slice(_) => 8,
         Type::Tuple(_) => 8,
+        Type::Fn(_, _) => 8,
         Type::Struct(_) => 8,
         Type::State(_) => 8,
         Type::Interface(_, _) => 8,

@@ -708,3 +708,43 @@ LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem) {
     }
     return list;
 }
+
+// -- Closure / function values (Phase B-2.2) --
+
+// Create a closure wrapping a function pointer and an environment pointer.
+LimeClosure* runtime_make_closure(void* fn_ptr, void* env_ptr) {
+    LimeClosure* c = (LimeClosure*)malloc(sizeof(LimeClosure));
+    if (c == NULL) {
+        runtime_panic("runtime_make_closure: out of memory");
+    }
+    c->fn_ptr = fn_ptr;
+    c->env_ptr = env_ptr;
+    return c;
+}
+
+// Call a closure's function with packed arguments, returning i64.
+// The function signature is: int64_t fn(i8* env, i8* packed_args)
+typedef int64_t (*ClosureFnI64)(void*, void*);
+int64_t runtime_call_closure_i64(LimeClosure* closure, void* packed_args) {
+    if (closure == NULL) {
+        runtime_panic("runtime_call_closure_i64: null closure");
+    }
+    ClosureFnI64 fn = (ClosureFnI64)closure->fn_ptr;
+    return fn(closure->env_ptr, packed_args);
+}
+
+// Call a closure's function with packed arguments, returning i8* (ptr).
+// The function signature is: i8* fn(i8* env, i8* packed_args)
+typedef void* (*ClosureFnPtr)(void*, void*);
+void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args) {
+    if (closure == NULL) {
+        runtime_panic("runtime_call_closure_ptr: null closure");
+    }
+    ClosureFnPtr fn = (ClosureFnPtr)closure->fn_ptr;
+    return fn(closure->env_ptr, packed_args);
+}
+
+// Wrap a plain function pointer (no environment) into a closure.
+LimeClosure* runtime_make_fn_ref(void* fn_ptr) {
+    return runtime_make_closure(fn_ptr, NULL);
+}

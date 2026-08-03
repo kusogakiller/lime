@@ -39,7 +39,8 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     // (LLVM rejects forward-referenced struct types in function signatures).
     out.push_str("%LimeList = type { i8*, i64, i64 }\n");
     out.push_str("%LimeOption = type { i1, i8* }\n");
-    out.push_str("%LimeIface = type { i8*, i8* }\n\n");
+    out.push_str("%LimeIface = type { i8*, i8* }\n");
+    out.push_str("%LimeClosure = type { i8*, i8* }\n\n");
 
     // Runtime declarations
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
@@ -92,7 +93,13 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i32 @runtime_fs_create_dir(i8*)\n");
     out.push_str("declare i64 @runtime_fs_size(i8*)\n");
     out.push_str("declare void @runtime_fs_metadata(i8*, ptr, ptr, ptr)\n");
-    out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n\n");
+    out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n");
+
+    // Phase B-2.2: closure / function-value runtime helpers
+    out.push_str("declare %LimeClosure* @runtime_make_closure(i8*, i8*)\n");
+    out.push_str("declare i64 @runtime_call_closure_i64(%LimeClosure*, i8*)\n");
+    out.push_str("declare i8* @runtime_call_closure_ptr(%LimeClosure*, i8*)\n");
+    out.push_str("declare %LimeClosure* @runtime_make_fn_ref(i8*)\n\n");
 
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");

@@ -32,6 +32,13 @@ typedef struct {
     void* vtable; // interface vtable
 } LimeIface;
 
+// Phase B-2.2: Closure / function values
+// { fn_ptr, env_ptr }  — matches LLVM %LimeClosure = type { i8*, i8* }
+typedef struct {
+    void* fn_ptr;   // pointer to the function
+    void* env_ptr;  // captured environment (NULL for plain fn refs)
+} LimeClosure;
+
 // -- Allocation / control flow --
 void* runtime_alloc(int64_t size, int64_t align);
 void runtime_free(void* p);
@@ -90,5 +97,11 @@ LimeList runtime_fs_list_dir(char* path);
 LimeList runtime_list_empty(void);
 LimeList runtime_list_add(LimeList list, int64_t elem);
 LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem);
+
+// -- Closure / function values (Phase B-2.2) --
+LimeClosure* runtime_make_closure(void* fn_ptr, void* env_ptr);
+int64_t runtime_call_closure_i64(LimeClosure* closure, void* packed_args);
+void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args);
+LimeClosure* runtime_make_fn_ref(void* fn_ptr);
 
 #endif // LIME_RUNTIME_H
