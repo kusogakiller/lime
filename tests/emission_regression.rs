@@ -523,6 +523,127 @@ fn emit_object_display_println_option_result() {
     );
 }
 
+/// Phase B-1.4: a single program that exercises all eight bundled stdlib
+/// packages in both the interpreter and native executable. The two must
+/// produce identical output. This is the broadest surface-area smoke test
+/// for the stdlib.
+#[test]
+fn emit_object_stdlib_all_packages_smoke() {
+    use std::fs;
+    let dir = "target/test_stdlib_all_packages";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    // string\n    println(string.len(\"hello\"))\n    println(string.trim(\"  x  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.contains(\"hello\", \"ell\"))\n    // math\n    println(math.abs(-3.0))\n    println(math.sqrt(9.0))\n    println(math.floor(2.7))\n    println(math.ceil(2.3))\n    println(math.round(2.5))\n    // option\n    let o = Some(42)\n    println(option.is_some(o))\n    println(option.unwrap_or(o, 0))\n    // result\n    let r = Success(99)\n    println(result.is_ok(r))\n    println(result.unwrap_or(r, 0))\n    // time\n    println(time.now().secs >= 0.0)\n    // io\n    io.println(\"io_ok\")\n    // fs\n    println(fs.write(\"target/test_smoke_io.txt\", \"hi\"))\n    println(fs.read(\"target/test_smoke_io.txt\"))\n    println(fs.exists(\"target/test_smoke_io.txt\"))\n    println(fs.remove(\"target/test_smoke_io.txt\"))\n    return\n",
+    );
+
+    // Interpreter
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    let expected = [
+        "5",       // string.len
+        "x",       // string.trim
+        "ABC",     // string.to_upper
+        "true",    // string.contains
+        "3",       // math.abs
+        "3",       // math.sqrt
+        "2",       // math.floor
+        "3",       // math.ceil
+        "3",       // math.round
+        "true",    // option.is_some
+        "42",      // option.unwrap_or
+        "true",    // result.is_ok
+        "99",      // result.unwrap_or
+        "true",    // time.now().secs >= 0.0
+        "io_ok",   // io.println
+        "true",    // fs.write
+        "hi",      // fs.read
+        "true",    // fs.exists
+        "true",    // fs.remove
+    ];
+    assert_eq!(
+        interp, expected,
+        "stdlib smoke test (interpreter) mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected, interp, out
+    );
+
+    // Native
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "stdlib smoke test native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "stdlib smoke test (native) mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native must produce identical output for stdlib smoke test"
+    );
+}
+
+/// Phase B-1.4: repeated builds of the same stdlib-using program must produce
+/// identical IR (build reproducibility). This catches non-deterministic symbol
+/// generation or ordering issues in the codegen.
+#[test]
+fn emit_object_stdlib_build_reproducibility() {
+    use std::fs;
+    let src = "fn main():\n    println(math.sqrt(16.0))\n    println(option.unwrap_or(Some(1), 0))\n    println(option.unwrap_or(None, -1))\n    return\n";
+
+    let dir1 = "target/test_stdlib_repro1";
+    write_stdlib_project(dir1, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir1), &["--emit-ll"]);
+    let ir1 = fs::read_to_string(format!("{}.ll", dir1)).unwrap_or_default();
+
+    let dir2 = "target/test_stdlib_repro2";
+    write_stdlib_project(dir2, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir2), &["--emit-ll"]);
+    let ir2 = fs::read_to_string(format!("{}.ll", dir2)).unwrap_or_default();
+
+    assert!(!ir1.is_empty(), "first build must emit IR");
+    assert!(!ir2.is_empty(), "second build must emit IR");
+
+    // Collect sorted define symbols from each build.
+    let syms = |ir: &str| -> Vec<String> {
+        let mut v: Vec<String> = ir
+            .lines()
+            .filter(|l| l.contains("define "))
+            .map(|l| {
+                l.split_whitespace()
+                    .skip(2)
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        v.sort();
+        v
+    };
+    let a = syms(&ir1);
+    let b = syms(&ir2);
+    assert_eq!(
+        a, b,
+        "stdlib build reproducibility failed — symbols differ between identical builds\nir1: {:?}\nir2: {:?}",
+        a, b
+    );
+}
+
 /// Write a throwaway project that depends on the bundled stdlib packages.
 fn write_stdlib_project(dir: &str, source: &str) {
     use std::fs;
