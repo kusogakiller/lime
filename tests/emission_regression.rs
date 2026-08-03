@@ -404,6 +404,125 @@ fn emit_object_repeated_build_is_symbol_stable() {
     );
 }
 
+/// Phase B-1.3: math.floor, math.ceil, math.round must produce identical
+/// output in the interpreter and the native executable, including negative
+/// numbers and half-values. round() uses round-half-away-from-zero semantics
+/// (2.5 -> 3, -2.5 -> -3), matching both C `round()` and Rust `f64::round()`.
+#[test]
+fn emit_object_math_floor_ceil_round_negatives() {
+    use std::fs;
+    let dir = "target/test_emit_math_negatives";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(math.floor(1.8))\n    println(math.floor(-1.8))\n    println(math.ceil(1.2))\n    println(math.ceil(-1.2))\n    println(math.round(1.5))\n    println(math.round(-1.5))\n    println(math.round(2.5))\n    println(math.round(-2.5))\n    println(math.round(0.5))\n    println(math.round(-0.5))\n    println(math.round(1.4))\n    println(math.round(-1.6))\n    return\n",
+    );
+
+    // Interpreter run
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    let expected = [
+        "1", "-2", "2", "-1", "2", "-2", "3", "-3", "1", "-1", "1", "-2",
+    ];
+    assert_eq!(
+        interp, expected,
+        "interpreter floor/ceil/round mismatch\nexpected: {:?}\ngot: {:?}",
+        expected, interp
+    );
+
+    // Native run
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "native floor/ceil/round mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native output must match for math.floor/ceil/round"
+    );
+}
+
+/// Phase B-1.3: println must handle Option/Result/State values via the str()
+/// fallback in native codegen (auto-converting to string before printf).
+/// Integer payloads display correctly. Float/string payloads in Option/Result
+/// are a known architectural limitation (the Option struct stores all payloads
+/// as i64; string pointers and float bits are not reinterpreted at runtime).
+#[test]
+fn emit_object_display_println_option_result() {
+    use std::fs;
+    let dir = "target/test_display_println_state";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(Some(1))\n    println(None)\n    println(Success(42))\n    println(Error(7))\n    println(str(Some(5)))\n    println(str(Success(10)))\n    println(str(Error(42)))\n    return\n",
+    );
+
+    // Interpreter run
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning:"))
+        .collect();
+    let expected = [
+        "Some(1)",
+        "None",
+        "Success(42)",
+        "Error(7)",
+        "Some(5)",
+        "Success(10)",
+        "Error(42)",
+    ];
+    assert_eq!(
+        interp, expected,
+        "interpreter display mismatch\nexpected: {:?}\ngot: {:?}",
+        expected, interp
+    );
+
+    // Native run
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "native display mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native output must match for println(Option/Result)"
+    );
+}
+
 /// Write a throwaway project that depends on the bundled stdlib packages.
 fn write_stdlib_project(dir: &str, source: &str) {
     use std::fs;

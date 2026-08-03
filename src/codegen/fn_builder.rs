@@ -1423,10 +1423,17 @@ impl<'a> Cg<'a> {
                 ));
             }
             _ => {
-                return Err(format!(
-                    "Phase 2: print/println not supported for {}",
-                    llvm_type_name(&t)
-                ))
+                // Fallback: convert to string via str(), then print the
+                // resulting i8* — covers Option, Result, State, List, and
+                // future aggregate types without requiring per-type
+                // formatting logic in the println handler.
+                let (str_val, _str_ty) = self.codegen_call("str", &[(*arg).clone()])?;
+                let bare = self.bare_value(&str_val).to_string();
+                let arr_size = if add_nl { "4" } else { "3" };
+                self.out.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.str{}, i64 0, i64 0), i8* {})\n",
+                    arr_size, nl_suffix, bare
+                ));
             }
         }
         Ok(())

@@ -126,13 +126,15 @@ char* runtime_str_from_i64(int64_t v) {
 }
 
 char* runtime_str_from_f64(double v) {
+    // `%g` matches the native `printf("%g")` path used by `println(Float)`,
+    // so `str(x)` and `println(x)` render identically for every float. In the
+    // interpreter both paths also agree (`Value::to_string` -> `f64::to_string`),
+    // so integer-valued results (as produced by math.floor/ceil/round) print the
+    // same ("1", "-2") in both engines. Precision of non-integral floats is a
+    // documented limitation: native uses %g (6 significant digits) while the
+    // interpreter uses Rust's shortest round-trip repr.
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.6f", v);
-    // Trim trailing zeros (but keep at least one digit after the point).
-    size_t n = strlen(buf);
-    while (n > 0 && buf[n - 1] == '0') n--;
-    if (n > 0 && buf[n - 1] == '.') n--;
-    buf[n] = '\0';
+    snprintf(buf, sizeof(buf), "%g", v);
     return runtime_str_copy(buf);
 }
 
