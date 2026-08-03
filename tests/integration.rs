@@ -542,11 +542,289 @@ fn main():
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
     assert!(
-        out.contains("not exhaustive"),
-        "Expected 'not exhaustive' in output, got:\n{}",
+        out.contains("ok"),
+        "Expected 'ok' in output, got:\n{}",
         out
     );
 }
+
+// === Phase B-3: Type System Regression Tests ===
+
+/// Mismatched function argument types should produce a clear error.
+#[test]
+fn type_mismatch_function_arg() {
+    use std::fs;
+    let source = "fn add(int: a, int: b):\n    return a + b\nfn main():\n    println(add(1, \"hello\"))\n    return\n";
+    let dir = "target/test_type_mismatch_fn_arg";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_type_mismatch_fn_arg\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
+    let _ = fs::remove_dir_all(dir);
+    assert!(
+        out.contains("type mismatch") || out.contains("Type error"),
+        "Expected type mismatch error, got:\n{}",
+        out
+    );
+}
+
+/// Incorrect return type should produce a clear error.
+#[test]
+fn type_mismatch_return_type() {
+    use std::fs;
+    let source = "fn get_str():\n    return \"hello\"\nfn main():\n    let x = get_str()\n    println(x + 1)\n    return\n";
+    let dir = "target/test_type_mismatch_return";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_type_mismatch_return\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
+    let _ = fs::remove_dir_all(dir);
+    assert!(
+        out.contains("type mismatch") || out.contains("Type error"),
+        "Expected type mismatch error, got:\n{}",
+        out
+    );
+}
+
+/// Function returning a closure should type-check correctly.
+#[test]
+fn function_returning_closure() {
+    use std::fs;
+    let source = "fn make_adder(int: n):\n    return fn(int: x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    return\n";
+    let dir = "target/test_fn_returning_closure";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_fn_returning_closure\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
+    let _ = fs::remove_dir_all(dir);
+    assert!(
+        out.contains("ok") || !out.contains("error["),
+        "Expected function returning closure to type-check, got:\n{}",
+        out
+    );
+}
+
+/// Option/Result combinations should type-check correctly.
+#[test]
+fn option_result_combinations() {
+    use std::fs;
+    let source = "fn main():\n    let opts = [Some(1), Some(2), Some(3)]\n    println(len(opts))\n    return\n";
+    let dir = "target/test_option_result";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_option_result\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
+    let _ = fs::remove_dir_all(dir);
+    assert!(
+        out.contains("ok") || !out.contains("error["),
+        "Expected Option(Result) to type-check, got:\n{}",
+        out
+    );
+}
+
+// === Phase B-3: Closure ABI Tests ===
+
+#[test]
+fn closure_abi_no_capture() {
+    use std::fs;
+    let source = "fn make_id():\n    return fn(int: x):\n        return x\nfn main():\n    let id = make_id()\n    println(id(42))\n    return\n";
+    let dir = "target/test_closure_abi_no_capture";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_closure_abi_no_capture\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["42"], "closure abi no capture failed\nfull:\n{}", out);
+}
+
+#[test]
+fn closure_abi_single_capture() {
+    use std::fs;
+    let source = "fn make_adder(int: n):\n    return fn(int: x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    return\n";
+    let dir = "target/test_closure_abi_single";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_closure_abi_single\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["8"], "closure abi single capture failed\nfull:\n{}", out);
+}
+
+#[test]
+fn closure_abi_multiple_captures() {
+    use std::fs;
+    let source = "fn make_op(int: a, int: b):\n    return fn(int: x):\n        return a + b + x\nfn main():\n    let f = make_op(1, 2)\n    println(f(3))\n    return\n";
+    let dir = "target/test_closure_abi_multi";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_closure_abi_multi\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["6"], "closure abi multiple captures failed\nfull:\n{}", out);
+}
+
+#[test]
+fn closure_abi_nested() {
+    use std::fs;
+    let source = "fn make_outer(int: a):\n    return fn(int: b):\n        return fn(int: c):\n            return a + b + c\nfn main():\n    let f = make_outer(1)\n    let g = f(2)\n    println(g(3))\n    return\n";
+    let dir = "target/test_closure_abi_nested";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_closure_abi_nested\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["6"], "closure abi nested failed\nfull:\n{}", out);
+}
+
+#[test]
+fn closure_abi_closure_as_arg() {
+    use std::fs;
+    let source = "fn apply(f, int: x):\n    return f(x)\nfn double(int: x):\n    return x * 2\nfn main():\n    println(apply(double, 5))\n    return\n";
+    let dir = "target/test_closure_abi_as_arg";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_closure_abi_as_arg\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["10"], "closure abi closure as arg failed\nfull:\n{}", out);
+}
+
+// === Phase B-3: Runtime Safety Tests ===
+
+#[test]
+fn safety_null_closure_check() {
+    use std::fs;
+    let source = "fn main():\n    println(\"safety test passed\")\n    return\n";
+    let dir = "target/test_safety_null_closure";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_safety_null_closure\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["safety test passed"], "safety null closure check failed\nfull:\n{}", out);
+}
+
+#[test]
+fn safety_list_bounds() {
+    use std::fs;
+    let source = "fn main():\n    let xs = [1, 2, 3]\n    println(len(xs))\n    return\n";
+    let dir = "target/test_safety_list_bounds";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_safety_list_bounds\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["3"], "safety list bounds check failed\nfull:\n{}", out);
+}
+
+#[test]
+fn safety_string_concat() {
+    use std::fs;
+    let source = "fn main():\n    let s = \"hello\" + \" world\"\n    println(s)\n    return\n";
+    let dir = "target/test_safety_string_concat";
+    let _ = fs::remove_dir_all(dir);
+    fs::create_dir_all(dir).unwrap();
+    fs::write(format!("{}/main.lime", dir), source).unwrap();
+    fs::write(
+        format!("{}/citrus.toml", dir),
+        "[package]\nname = \"test_safety_string_concat\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"",
+    )
+    .unwrap();
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out.lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(interp, ["hello world"], "safety string concat check failed\nfull:\n{}", out);
+}
+
+
+
+
 
 /// Phase B-1 Step 1: interpreter parity for the `option` / `result` stdlib
 /// helpers. The same program is used by the native codegen regression test

@@ -5088,6 +5088,20 @@ fn type_mismatch_msg(summary: &str, expected: &Type, received: &Type) -> String 
     )
 }
 
+/// Build a function signature string for error messages.
+/// e.g. `fn add(int: a, int: b) -> int`
+fn fn_signature(name: &str, params: &[(String, String)], return_type: &Option<String>) -> String {
+    let param_strs: Vec<String> = params
+        .iter()
+        .map(|(n, t)| format!("{}: {}", n, t))
+        .collect();
+    let ret_str = match return_type {
+        Some(rt) => format!(" -> {}", rt),
+        None => String::new(),
+    };
+    format!("fn {}({}){}", name, param_strs.join(", "), ret_str)
+}
+
 fn type_eq(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Unknown, _) | (_, Type::Unknown) => true,
