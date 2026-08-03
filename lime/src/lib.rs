@@ -660,6 +660,10 @@ enum Expr {
         index: usize,
     },
     Await(Box<Expr>),
+    FnDef {
+        params: Vec<(String, String)>,
+        body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -2286,6 +2290,44 @@ impl Parser {
             Token::False => {
                 self.advance();
                 Ok(Expr::BoolLit(false))
+            }
+            Token::Fn => {
+                self.advance(); // consume 'fn'
+                self.expect(Token::LParen)?;
+                let mut params = Vec::new();
+                while self.current() != &Token::RParen {
+                    // If current is Ident and next is ) or , -> untyped param name
+                    if let Token::Ident(name) = self.current().clone() {
+                        let next = self.peek().clone();
+                        if next == Token::RParen || next == Token::Comma {
+                            self.advance();
+                            params.push((name, "_".to_string()));
+                            if self.current() == &Token::Comma {
+                                self.advance();
+                            }
+                            continue;
+                        }
+                    }
+                    let param_type = self.parse_type(&mut Vec::new())?;
+                    if self.current() == &Token::Colon {
+                        self.advance();
+                        let param_name = match self.current() {
+                            Token::Ident(n) => n.clone(),
+                            _ => return Err("Expected parameter name in anonymous function".to_string()),
+                        };
+                        self.advance();
+                        params.push((param_name, param_type));
+                    } else {
+                        params.push(("_".to_string(), param_type));
+                    }
+                    if self.current() == &Token::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect(Token::RParen)?;
+                self.expect(Token::Colon)?;
+                let body = self.parse_block()?;
+                Ok(Expr::FnDef { params, body })
             }
             Token::Ident(name) => {
                 self.advance();
@@ -3977,6 +4019,14 @@ fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<Strin
             out.insert(func.clone());
             for a in args { collect_called_names_expr(a, out); }
         }
+        Expr::Ident(name) => {
+            // Phase B-2.2: function names used as values (e.g. `let f = add`)
+            // are also roots for DCE reachability.
+            out.insert(name.clone());
+        }
+        Expr::FnDef { body, .. } => {
+            for s in body { collect_called_names_stmt(s, out); }
+        }
         Expr::MethodCall { object, args, .. } => {
             collect_called_names_expr(object, out);
             for a in args { collect_called_names_expr(a, out); }
@@ -4349,7 +4399,7 @@ pub fn format_lime_source(source: &str) -> String {
 }
 
 // ===== Simple Interpreter =====
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 enum Value {
     Int(i64),
     Float(f64),
@@ -4375,6 +4425,12 @@ enum Value {
         args: Vec<Value>,
     },
     Tuple(Vec<Value>),
+    FuncRef(String),
+    Closure {
+        params: Vec<(String, String)>,
+        body: Vec<Stmt>,
+        env: HashMap<String, Value>,
+    },
 }
 
 // 鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｦ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬮ｯ讖ｸ・ｽ・ｳ髯樊ｺ假ｽ代・・ｽ繝ｻ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｯ・ｮ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｰ繝ｻ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ
@@ -4698,6 +4754,25 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
     }
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Array(a), Value::Array(b)) => a == b,
+            (Value::Slice(a), Value::Slice(b)) => a == b,
+            (Value::Option(a), Value::Option(b)) => a == b,
+            (Value::State { name: an, values: av }, Value::State { name: bn, values: bv }) => an == bn && av == bv,
+            (Value::Struct { name: an, fields: af }, Value::Struct { name: bn, fields: bf }) => an == bn && af == bf,
+            (Value::Tuple(a), Value::Tuple(b)) => a == b,
+            (Value::FuncRef(a), Value::FuncRef(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
 impl Value {
     fn to_string(&self) -> String {
         match self {
@@ -4728,6 +4803,16 @@ impl Value {
             }
             Value::Struct { name, .. } => format!("{}(...)", name),
             Value::Future { func, .. } => format!("<future {}>", func),
+            Value::FuncRef(name) => format!("<fn {}>", name),
+            Value::Closure { params, .. } => {
+                let parts: Vec<String> = params.iter()
+                    .map(|(n, t)| {
+                        if t == "_" { n.clone() }
+                        else { format!("{}: {}", t, n) }
+                    })
+                    .collect();
+                format!("<fn({})>", parts.join(", "))
+            }
             Value::Tuple(elems) => {
                 let strs: Vec<String> = elems.iter().map(|v| v.to_string()).collect();
                 format!("({})", strs.join(", "))
@@ -4755,6 +4840,7 @@ enum Type {
     Slice(Box<Type>),
     Option(Box<Type>),
     Tuple(Vec<Type>),
+    Fn(Vec<Type>, Box<Type>),
     Unit,
     Unknown,
     Var(String),
@@ -4815,6 +4901,20 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
     if let Some(inner) = s.strip_prefix("List(") {
         if let Some(inner) = inner.strip_suffix(')') {
             return Type::List(Box::new(type_from_str(inner, defs)));
+        }
+    }
+    // fn(params) -> ret type
+    if let Some(rest) = s.strip_prefix("fn(") {
+        if let Some(arrow_pos) = rest.find(") -> ") {
+            let params_str = &rest[..arrow_pos];
+            let ret_str = &rest[arrow_pos + 5..];
+            let param_types: Vec<Type> = if params_str.trim().is_empty() {
+                Vec::new()
+            } else {
+                params_str.split(',').map(|p| type_from_str(p.trim(), defs)).collect()
+            };
+            let ret_type = type_from_str(ret_str, defs);
+            return Type::Fn(param_types, Box::new(ret_type));
         }
     }
     // Tuple types: (int, str)
@@ -4967,6 +5067,10 @@ fn type_to_string(ty: &Type) -> String {
         Type::Tuple(elems) => {
             let strs: Vec<String> = elems.iter().map(type_to_string).collect();
             format!("({})", strs.join(", "))
+        }
+        Type::Fn(params, ret) => {
+            let param_strs: Vec<String> = params.iter().map(type_to_string).collect();
+            format!("fn({}) -> {}", param_strs.join(", "), type_to_string(ret))
         }
     }
 }
@@ -5584,7 +5688,7 @@ fn infer_type(
                 }
                 "index_of" => Ok(Type::Int),
                 "contains_item" => Ok(Type::Bool),
-                "abs" | "sqrt" => {
+                "sqrt" | "abs" | "floor" | "ceil" | "round" => {
                     if args.len() != 1 {
                         return Err(format!("{}() takes exactly 1 argument", func));
                     }
@@ -5771,6 +5875,9 @@ fn infer_type(
                 Type::Float => match method.as_str() {
                     "abs" => Ok(Type::Float),
                     "sqrt" => Ok(Type::Float),
+                    "floor" => Ok(Type::Float),
+                    "ceil" => Ok(Type::Float),
+                    "round" => Ok(Type::Float),
                     _ => Ok(Type::Unknown),
                 },
                 _ => Ok(Type::Unknown),
@@ -5837,6 +5944,20 @@ fn infer_type(
                 }
             }
             Ok(Type::Unknown)
+        }
+        Expr::FnDef { params, body } => {
+            let param_types: Vec<Type> = params.iter()
+                .map(|(_, t)| type_from_str(t, defs))
+                .collect();
+            let mut env_vars = env.clone();
+            for (pname, ptype) in params {
+                env_vars.insert(pname.clone(), type_from_str(ptype, defs));
+            }
+            let env_cons: HashMap<String, Vec<String>> = HashMap::new();
+            let mut ret_type: Option<Type> = None;
+            scan_return_types_env(body, defs, &mut env_vars, &env_cons, &mut ret_type);
+            let ret = ret_type.unwrap_or(Type::Unit);
+            Ok(Type::Fn(param_types, Box::new(ret)))
         }
         _ => Ok(Type::Unknown),
     }
@@ -6115,6 +6236,15 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 Ok(t.clone())
             } else if let Some(state_name) = defs.state_variants.get(name) {
                 Ok(Type::State(state_name.clone()))
+            } else if let Some(fdef) = defs.functions.get(name) {
+                let param_types: Vec<Type> = fdef.params.iter()
+                    .map(|(_, t)| type_from_str(t, defs))
+                    .collect();
+                let ret = match &fdef.return_type {
+                    Some(rt) => type_from_str(rt, defs),
+                    None => Type::Unit,
+                };
+                Ok(Type::Fn(param_types, Box::new(ret)))
             } else {
                 Err(format!("Type error: undefined variable '{}'", name))
             }
@@ -6297,7 +6427,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
         // Math builtins (sqrt/abs/min/max/clamp/pow) 遯ｶ繝ｻhandled here so they
         // don't shadow themselves via `resolve_pkg_name` inside package bodies.
-        "sqrt" | "abs" => {
+        "sqrt" | "abs" | "floor" | "ceil" | "round" => {
             if args.len() != 1 {
                 return Err(format!("Type error: {}() takes exactly 1 argument", func));
             }
@@ -6345,6 +6475,23 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
         }
         other => {
+                    // Function reference in env (e.g. `let f = add; f(3, 4)`)
+                    if let Some(t) = env.vars.get(other) {
+                        match t {
+                            Type::Fn(param_types, ret) => {
+                                for a in args {
+                                    check_expr(a, env, defs)?;
+                                }
+                                return Ok((**ret).clone());
+                            }
+                            _ => {
+                                for a in args {
+                                    check_expr(a, env, defs)?;
+                                }
+                                return Ok(Type::Unknown);
+                            }
+                        }
+                    }
                     // Struct / State 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｳ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓溘・荳ｻ・ｸ・ｷ繝ｻ・ｹ繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴取ｨ費ｽｺ繧托ｽｾ蜿悶渚繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ Base(Arg) 鬩幢ｽ｢繝ｻ・ｧ驛｢・ｧ隰・∞・ｽ・ｽ繝ｻ・ｿ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驍ｵ・ｲ陞ｳ螟ｲ・ｽ・ｾ繝ｻ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬮｣魃会ｽｽ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ
                     let base = match other.find('(') {
                         Some(i) => &other[..i],
@@ -6967,6 +7114,24 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         Ok(Type::Float)
                     }
+                    "floor" => {
+                        if !args.is_empty() {
+                            return Err("Type error: Float.floor() takes no arguments".to_string());
+                        }
+                        Ok(Type::Float)
+                    }
+                    "ceil" => {
+                        if !args.is_empty() {
+                            return Err("Type error: Float.ceil() takes no arguments".to_string());
+                        }
+                        Ok(Type::Float)
+                    }
+                    "round" => {
+                        if !args.is_empty() {
+                            return Err("Type error: Float.round() takes no arguments".to_string());
+                        }
+                        Ok(Type::Float)
+                    }
                     other => Err(format!(
                         "Type error: unknown method '{}' on Float",
                         other
@@ -7034,6 +7199,21 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
         }
 
+        Expr::FnDef { params, body } => {
+            let param_types: Vec<Type> = params.iter()
+                .map(|(_, t)| type_from_str(t, defs))
+                .collect();
+            // Infer return type from body
+            let mut env_vars: HashMap<String, Type> = HashMap::new();
+            for (pname, ptype) in params {
+                env_vars.insert(pname.clone(), type_from_str(ptype, defs));
+            }
+            let env_cons: HashMap<String, Vec<String>> = HashMap::new();
+            let mut ret_type: Option<Type> = None;
+            scan_return_types_env(body, defs, &mut env_vars, &env_cons, &mut ret_type);
+            let ret = ret_type.unwrap_or(Type::Unit);
+            Ok(Type::Fn(param_types, Box::new(ret)))
+        }
         Expr::Await(inner) => {
             // await 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・ｷ鬯ｮ・ｮ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｡鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮驍・・・ｭ・ｫ陞滄鯛浮郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ髯晢ｽｲ繝ｻ・ｨ驍ｵ・ｺ鬯倩ｲｻ・ｽ・ｹ隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驕ｶ髮・｣ｰ・､繝ｻ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮驍・・・ｭ・ｫ陞滄鯛浮郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ髯晢ｽｲ繝ｻ・ｨ驍ｵ・ｺ鬯倩ｲｻ・ｽ・ｹ隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
             // (lime 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬮ｯ・ｷ繝ｻ・ｷ髣比ｼ夲ｽｽ・｣驕ｯ・ｶ繝ｻ・ｳ)鬩搾ｽｵ繝ｻ・ｲ驕ｶ荵怜款繝ｻ・ｽ繝ｻ・ｽ鬩穂ｻ｣繝ｻCountry.鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
@@ -8404,8 +8584,40 @@ fn analyze_block(
 
 // ===== Phase 6: Generic Monomorphization =====
 
-fn mangled_name(base: &str, type_args: &[String]) -> String {
-    format!("{}.{}", base, type_args.join("."))
+/// Encode a single concrete type argument for embedding in a mangled function
+/// name. Alphanumeric bytes pass through unchanged (keeping flat names like
+/// `option.unwrap.int` stable); every other byte becomes `_XX` (uppercase hex),
+/// so nested generic states (`Option(int)`, `Result(int, str)`,
+/// `collections.HashMap`) map to valid LLVM identifier segments and can never
+/// be confused with the `.` argument separator.
+fn mangle_type_arg(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    for b in t.bytes() {
+        if b.is_ascii_alphanumeric() {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("_{:02X}", b));
+        }
+    }
+    out
+}
+
+/// Centralized, deterministic generic-symbol mangling. Produces a
+/// collision-free internal name for a function/base plus its concrete
+/// type arguments (e.g. "max" + ["i64"] -> "max.i64"). Alphanumeric
+/// argument bytes pass through untouched, so already-flat names like
+/// "option.unwrap.int" stay stable across builds; nested generic states
+/// (e.g. "Option_28int_29") and special characters are hex-encoded by
+/// `mangle_type_arg` so the result is a valid LLVM identifier segment.
+/// This is the single source of truth used by both the interpreter
+/// (`Phase 6` monomorphization) and the LLVM backend.
+fn mangled_name(base: &str, type_args: &[&str]) -> String {
+    let mut s = base.to_string();
+    for a in type_args {
+        s.push('.');
+        s.push_str(&mangle_type_arg(a));
+    }
+    s
 }
 
 /// Parse "func(Type1, Type2)" into ("func", ["Type1", "Type2"])
@@ -8421,6 +8633,104 @@ fn parse_generic_call_name(func: &str) -> Option<(&str, Vec<&str>)> {
         Some((base, args))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod mangle_tests {
+    use super::*;
+
+    /// mangle_type_arg must be injective: distinct concrete types must never
+    /// map to the same encoded segment, so mangled names can never collide.
+    #[test]
+    fn mangle_type_arg_is_injective() {
+        let cases = [
+            ("i64", "i64"),
+            ("string", "string"),
+            ("bool", "bool"),
+            ("double", "double"),
+            ("Option(int)", "Option_28int_29"),
+            ("Result(int, string)", "Result_28int_2C_20string_29"),
+            ("collections.HashMap", "collections_2EHashMap"),
+            ("Option(Result(double, bool))", "Option_28Result_28double_2C_20bool_29_29"),
+        ];
+        for (src, want) in cases {
+            assert_eq!(mangle_type_arg(src), want, "encode {}", src);
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (src, _) in cases {
+            let enc = mangle_type_arg(src);
+            assert!(
+                seen.insert(enc.clone()),
+                "collision detected for {} -> {}",
+                src,
+                enc
+            );
+        }
+    }
+
+    /// Two generic instantiations with the same base name but different
+    /// concrete type arguments must produce distinct internal symbols.
+    #[test]
+    fn same_base_different_args_are_distinct() {
+        let a = mangled_name("max", &["int"]);
+        let b = mangled_name("max", &["float"]);
+        assert_eq!(a, "max.int");
+        assert_eq!(b, "max.float");
+        assert_ne!(a, b, "max<int> and max<float> must not collide");
+    }
+
+    /// Nested generic types must each encode to a unique, dot-free LLVM
+    /// identifier segment (no parentheses/commas leak into symbols).
+    #[test]
+    fn nested_generics_encode_uniquely() {
+        let flat = mangled_name("option.unwrap", &["Option(int)"]);
+        let nested = mangled_name("option.unwrap", &["Option(Result(int, string))"]);
+        let deep = mangled_name("option.unwrap", &["Option(Option(int))"]);
+        assert_eq!(flat, "option.unwrap.Option_28int_29");
+        assert_eq!(
+            nested,
+            "option.unwrap.Option_28Result_28int_2C_20string_29_29"
+        );
+        assert_eq!(deep, "option.unwrap.Option_28Option_28int_29_29");
+        assert_ne!(flat, nested);
+        assert_ne!(nested, deep);
+        assert_ne!(flat, deep);
+        for s in [&flat, &nested, &deep] {
+            assert!(
+                !s.contains('(') && !s.contains(')') && !s.contains(','),
+                "must be a valid LLVM identifier: {}",
+                s
+            );
+        }
+    }
+
+    /// Different arg counts on the same base must differ (the dot separator
+    /// is unambiguous because encoded args never contain a literal dot).
+    #[test]
+    fn arg_count_distinguishes() {
+        let one = mangled_name("wrap", &["int"]);
+        let two = mangled_name("wrap", &["int", "string"]);
+        let three = mangled_name("wrap", &["int", "string", "bool"]);
+        assert_ne!(one, two);
+        assert_ne!(two, three);
+        assert_ne!(one, three);
+    }
+
+    /// Mangling must be deterministic and stable across repeated calls and
+    /// builds (pure string encoding, no hashing or map-ordering involved).
+    #[test]
+    fn mangling_is_deterministic() {
+        for _ in 0..100 {
+            assert_eq!(
+                mangled_name("option.unwrap", &["Option(Int)"]),
+                "option.unwrap.Option_28Int_29"
+            );
+            assert_eq!(
+                mangle_type_arg("Result(int, string)"),
+                "Result_28int_2C_20string_29"
+            );
+        }
     }
 }
 
@@ -8746,7 +9056,8 @@ fn collect_mono_from_expr(
                     check_generic_constraints(fdef, &type_args, defs)?;
 
                     // Create mangled name
-                    let mangled = mangled_name(&base_name, &type_args);
+                    let type_arg_refs: Vec<&str> = type_args.iter().map(|s| s.as_str()).collect();
+                    let mangled = mangled_name(&base_name, &type_arg_refs);
 
                     // Only create monomorphized function if not already created.
                     // Keyed by `MonoKey` so the same (function, type-args)
@@ -9229,6 +9540,24 @@ fn eval_float_method(v: f64, method: &str, args: &[Value]) -> Result<Value, Stri
             }
             Ok(Value::Float(v.sqrt()))
         }
+        "floor" => {
+            if !args.is_empty() {
+                return Err("floor() takes no arguments".to_string());
+            }
+            Ok(Value::Float(v.floor()))
+        }
+        "ceil" => {
+            if !args.is_empty() {
+                return Err("ceil() takes no arguments".to_string());
+            }
+            Ok(Value::Float(v.ceil()))
+        }
+        "round" => {
+            if !args.is_empty() {
+                return Err("round() takes no arguments".to_string());
+            }
+            Ok(Value::Float(v.round()))
+        }
         other => Err(format!("Unknown Float method: {}", other)),
     }
 }
@@ -9376,7 +9705,7 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "repeat" | "time_now" | "time_sleep" | "read_file" | "write_file" | "append_file"
             | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
             | "fs_list_dir" | "fs_create_dir" | "input"
-            | "abs" | "sqrt" | "min" | "max" | "clamp" | "pow"
+            | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
     )
 }
 
@@ -9387,10 +9716,15 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
         Expr::FloatLit(f) => Ok(Value::Float(*f)),
         Expr::StringLit(s) => Ok(Value::String(s.clone())),
         Expr::BoolLit(b) => Ok(Value::Bool(*b)),
-        Expr::Ident(name) => env
-            .get(name)
-            .cloned()
-            .ok_or_else(|| format!("Undefined variable: {}", name)),
+        Expr::Ident(name) => {
+            if let Some(v) = env.get(name) {
+                Ok(v.clone())
+            } else if defs.functions.contains_key(name) {
+                Ok(Value::FuncRef(name.clone()))
+            } else {
+                Err(format!("Undefined variable: {}", name))
+            }
+        }
         Expr::BinOp { left, op, right, resolved_operator } => {
             let l = eval_expr(left, env, defs)?;
             let r = eval_expr(right, env, defs)?;
@@ -9913,6 +10247,30 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Err("abs() expects a float".to_string())
             }
         }
+        "floor" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.floor()))
+            } else {
+                Err("floor() expects a float".to_string())
+            }
+        }
+        "ceil" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.ceil()))
+            } else {
+                Err("ceil() expects a float".to_string())
+            }
+        }
+        "round" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.round()))
+            } else {
+                Err("round() expects a float".to_string())
+            }
+        }
         "min" => {
             let a = eval_expr(&args[0], env, defs)?;
             let b = eval_expr(&args[1], env, defs)?;
@@ -10132,6 +10490,24 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                                 name: stkey.clone(),
                                 values,
                             })
+                        } else if env.contains_key(&base) {
+                            match env.get(&base).cloned().unwrap() {
+                                Value::FuncRef(ref_name) => {
+                                    let mut arg_vals = Vec::new();
+                                    for a in args {
+                                        arg_vals.push(eval_expr(a, env, defs)?);
+                                    }
+                                    call_function(&ref_name, arg_vals, defs)
+                                }
+                                Value::Closure { params: cparams, body: cbody, env: cenv } => {
+                                    let mut arg_vals = Vec::new();
+                                    for a in args {
+                                        arg_vals.push(eval_expr(a, env, defs)?);
+                                    }
+                                    call_closure(&cparams, &cbody, &cenv, arg_vals, defs)
+                                }
+                                other => Err(format!("Cannot call non-function value: {:?}", other)),
+                            }
                         } else if defs.functions.contains_key(&base) {
                             let mut arg_vals = Vec::new();
                             for a in args {
@@ -10312,6 +10688,13 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             Ok(Value::Slice(values[start_idx..end_idx as usize].to_vec()))
         }
 
+        Expr::FnDef { params, body } => {
+            Ok(Value::Closure {
+                params: params.clone(),
+                body: body.clone(),
+                env: env.clone(),
+            })
+        }
         Expr::Await(inner) => {
             let fut = eval_expr(inner, env, defs)?;
             match fut {
@@ -10374,6 +10757,34 @@ fn call_function_impl(
     }
 
     Ok(exec_value(execute_stmts(&func.body, &mut local, defs)?))
+}
+
+fn call_closure(
+    params: &[(String, String)],
+    body: &[Stmt],
+    closure_env: &HashMap<String, Value>,
+    args: Vec<Value>,
+    defs: &Defs,
+) -> Result<Value, String> {
+    if args.len() != params.len() {
+        return Err(format!(
+            "Closure expects {} argument(s), got {}",
+            params.len(),
+            args.len()
+        ));
+    }
+
+    let mut local: HashMap<String, Value> = HashMap::new();
+    // Start with captured environment
+    for (k, v) in closure_env {
+        local.insert(k.clone(), v.clone());
+    }
+    // Override with call arguments
+    for ((param_name, _param_type), val) in params.iter().zip(args.into_iter()) {
+        local.insert(param_name.clone(), val);
+    }
+
+    Ok(exec_value(execute_stmts(body, &mut local, defs)?))
 }
 
 fn call_method(

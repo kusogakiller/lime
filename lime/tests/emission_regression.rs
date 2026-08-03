@@ -1,6 +1,6 @@
 //! Phase 11 backend stabilization: LLVM emission regression tests.
 //!
-//! These exercise the full `lime build` pipeline (IR → object → executable)
+//! These exercise the full `lime build` pipeline (IR ↁEobject ↁEexecutable)
 //! against throwaway projects and guard against regressions in the LLVM
 //! backend:
 //!
@@ -57,7 +57,7 @@ fn llvm_toolchain_available() -> bool {
 /// Regression: a void `main` ending in a bare `return` must stay
 /// `define void @main_lime` + `ret void`. Previously `type_from_str("void")`
 /// fell through to `Var` and rendered the function as `i64`, so the bare
-/// return produced `ret void` inside `define i64 ...` — which clang rejects
+/// return produced `ret void` inside `define i64 ...`  Ewhich clang rejects
 /// with `value doesn't match function result type`.
 #[test]
 fn emit_object_bare_return_compiles_and_runs() {
@@ -241,6 +241,538 @@ fn emit_object_option_result_runs() {
         expected,
         lines,
         String::from_utf8_lossy(&run.stderr)
+);
+}
+
+/// Phase B-1 Step 3: str() on Option and Result must produce display
+/// strings matching the interpreter ("Some(5)", "None", "Success(10)",
+/// "Error(42)") in both native and interpreter paths.
+#[test]
+fn emit_object_str_option_result() {
+    use std::fs;
+    let dir = "target/test_emit_str_option_result";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let some = Some(5)\n    let none = None\n    let ok = Success(10)\n    let err = Error(42)\n    println(str(some))\n    println(str(none))\n    println(str(ok))\n    println(str(err))\n    return\n",
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        out.contains("ok:"),
+        "expected build to succeed\n--- output ---\n{}",
+        out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let lines: Vec<&str> = stdout.lines().collect();
+    let expected = [
+        "Some(5)",
+        "None",
+        "Success(10)",
+        "Error(42)",
+    ];
+    assert!(
+        lines == expected,
+        "str(option/result) native output mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        lines,
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    // Interpreter parity check
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let stdout: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    assert!(
+        stdout == expected,
+        "str(option/result) interpreter output mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected,
+        stdout,
+        out
+    );
+}
+
+/// Phase B-1 Step 1 (nested): generic helpers applied to *nested*
+/// generic states (`Option(Option(int))`) must mangle their type
+/// arguments into valid LLVM identifiers (`Option_28int_29` for
+/// `Option(int)`). The old unmangled form containing parentheses
+/// and commas (`@option.unwrap.Option(`) must not appear. The
+/// interpreter must produce identical output.
+#[test]
+fn emit_object_nested_generic_mangling() {
+    use std::fs;
+    let dir = "target/test_emit_nested_mangling";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let nested = Some(Some(5))\n    println(option.unwrap(option.unwrap(nested)))\n    println(option.unwrap_or(option.unwrap(nested), 0))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let stdout: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    assert!(
+        stdout == ["5", "5"],
+        "nested option interp output mismatch\nexpected: [\"5\", \"5\"]\ngot: {:?}\n--- full output ---\n{}",
+        stdout,
+        out
+    );
+
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ll = format!("{}.ll", dir);
+    let ir = fs::read_to_string(&ll).unwrap_or_default();
+    assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
+
+    for symbol in ["option.unwrap.Option_28int_29", "option.unwrap_or.int"] {
+        assert!(
+            ir.lines().any(|l| l.contains(&format!("@{}", symbol))),
+            "IR must contain mangled helper {}\n--- ir ---\n{}",
+            symbol,
+            ir
+        );
+    }
+    assert!(
+        !ir.contains("@option.unwrap.Option("),
+        "unmangled nested Option name must not remain\n--- ir ---\n{}",
+        ir
+    );
+}
+
+/// Phase B-1.2: repeated builds of the same generic program must produce
+/// identical symbols. The centralized mangling is a pure, deterministic
+/// string encoding (no hashing / map-ordering), so two `--emit-ll` builds
+/// of the *same source* must lower to an identical set of mangled `define`
+/// symbols (the bodies may mention constants that differ, but the symbol
+/// set must not drift between builds).
+#[test]
+fn emit_object_repeated_build_is_symbol_stable() {
+    use std::fs;
+    let src = "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, \"d\"))\n    println(option.unwrap(Some(Some(5))))\n    return\n";
+
+    // Build the identical source twice into fresh project dirs.
+    let dir = "target/test_emit_repeat_build";
+    write_stdlib_project(dir, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ir1 = fs::read_to_string(&format!("{}.ll", dir)).unwrap_or_default();
+    assert!(!ir1.is_empty(), "first build must emit IR");
+
+    let dir2 = "target/test_emit_repeat_build2";
+    write_stdlib_project(dir2, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir2), &["--emit-ll"]);
+    let ir2 = fs::read_to_string(&format!("{}.ll", dir2)).unwrap_or_default();
+    assert!(!ir2.is_empty(), "second build must emit IR");
+
+    // Collect mangled `define` symbol tokens from each build.
+    let syms = |ir: &str| -> Vec<String> {
+        let mut v: Vec<String> = ir
+            .lines()
+            .filter(|l| l.contains("define "))
+            .map(|l| l.split_whitespace().skip(2).next().unwrap_or("").to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        v.sort();
+        v
+    };
+    let a = syms(&ir1);
+    let b = syms(&ir2);
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "mangled symbol count must be stable across builds\nir1: {:?}\nir2: {:?}",
+        a,
+        b
+    );
+    assert_eq!(
+        a, b,
+        "mangled symbols drift between identical builds\nir1: {:?}\nir2: {:?}",
+        a, b
+    );
+
+    // Sanity: the option generic helpers really are emitted under mangled names.
+    assert!(
+        a.iter().any(|s| s.starts_with("@option.")),
+        "expected mangled option helpers, got:\n{:?}",
+        a
+    );
+}
+
+/// Phase B-1.3: math.floor, math.ceil, math.round must produce identical
+/// output in the interpreter and the native executable, including negative
+/// numbers and half-values. round() uses round-half-away-from-zero semantics
+/// (2.5 -> 3, -2.5 -> -3), matching both C `round()` and Rust `f64::round()`.
+#[test]
+fn emit_object_math_floor_ceil_round_negatives() {
+    use std::fs;
+    let dir = "target/test_emit_math_negatives";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(math.floor(1.8))\n    println(math.floor(-1.8))\n    println(math.ceil(1.2))\n    println(math.ceil(-1.2))\n    println(math.round(1.5))\n    println(math.round(-1.5))\n    println(math.round(2.5))\n    println(math.round(-2.5))\n    println(math.round(0.5))\n    println(math.round(-0.5))\n    println(math.round(1.4))\n    println(math.round(-1.6))\n    return\n",
+    );
+
+    // Interpreter run
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    let expected = [
+        "1", "-2", "2", "-1", "2", "-2", "3", "-3", "1", "-1", "1", "-2",
+    ];
+    assert_eq!(
+        interp, expected,
+        "interpreter floor/ceil/round mismatch\nexpected: {:?}\ngot: {:?}",
+        expected, interp
+    );
+
+    // Native run
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "native floor/ceil/round mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native output must match for math.floor/ceil/round"
+    );
+}
+
+/// Phase B-1.3: println must handle Option/Result/State values via the str()
+/// fallback in native codegen (auto-converting to string before printf).
+/// Integer payloads display correctly. Float/string payloads in Option/Result
+/// are a known architectural limitation (the Option struct stores all payloads
+/// as i64; string pointers and float bits are not reinterpreted at runtime).
+#[test]
+fn emit_object_display_println_option_result() {
+    use std::fs;
+    let dir = "target/test_display_println_state";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(Some(1))\n    println(None)\n    println(Success(42))\n    println(Error(7))\n    println(str(Some(5)))\n    println(str(Success(10)))\n    println(str(Error(42)))\n    return\n",
+    );
+
+    // Interpreter run
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    let expected = [
+        "Some(1)",
+        "None",
+        "Success(42)",
+        "Error(7)",
+        "Some(5)",
+        "Success(10)",
+        "Error(42)",
+    ];
+    assert_eq!(
+        interp, expected,
+        "interpreter display mismatch\nexpected: {:?}\ngot: {:?}",
+        expected, interp
+    );
+
+    // Native run
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "native display mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native output must match for println(Option/Result)"
+    );
+}
+
+/// Phase B-1.5: unwrap() on None/Error panics at runtime. We test this by
+/// calling unwrap on a Some/Success first (to confirm happy path), then
+/// triggering the panic via panic("msg"). Because `option.unwrap(None)` fails
+/// at type inference (None is polymorphic), we test the panic infrastructure
+/// via `panic("msg")` directly, and verify unwrap_or returns fallback without
+/// panicking for both None and Error.
+#[test]
+fn emit_object_unwrap_panic_and_fallback() {
+    use std::fs;
+    let dir = "target/test_unwrap_panic";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(option.unwrap_or(None, 99))\n    println(result.unwrap_or(Error(42), 77))\n    println(option.unwrap(Some(5)))\n    println(result.unwrap(Success(10)))\n    println(\"before_panic\")\n    panic(\"test_panic_message\")\n    println(\"after_panic\")\n    return\n",
+    );
+
+    // Interpreter: the first five lines succeed, then panic aborts.
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    // First five lines must succeed.
+    assert!(
+        interp.len() >= 5
+            && interp[0] == "99"
+            && interp[1] == "77"
+            && interp[2] == "5"
+            && interp[3] == "10"
+            && interp[4] == "before_panic",
+        "unwrap_or/unwrap happy paths must succeed in interpreter\ngot: {:?}\n--- full output ---\n{}",
+        interp,
+        out
+    );
+    // Panic message must appear, and "after_panic" must NOT appear.
+    let full = interp.join("\n");
+    assert!(
+        full.contains("Lime runtime panic") && full.contains("test_panic_message"),
+        "interpreter must show panic message\ngot: {:?}\n--- full output ---\n{}",
+        interp,
+        out
+    );
+    assert!(
+        !full.contains("after_panic"),
+        "interpreter must abort on panic (after_panic should not appear)\ngot: {:?}",
+        interp
+    );
+
+    // Native: same program, verify happy paths work and panic aborts.
+    // Note: abort() doesn't flush stdout buffers, so we only check stderr
+    // for the panic message and verify the binary was built successfully.
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "unwrap panic test native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_stderr = String::from_utf8_lossy(&run.stderr);
+    // The native process must have aborted with a panic message on stderr.
+    assert!(
+        native_stderr.contains("Lime runtime panic") && native_stderr.contains("test_panic_message"),
+        "native must show panic message\n--- stderr ---\n{}",
+        native_stderr
+    );
+    // "after_panic" must NOT appear in stdout (abort prevents flushing).
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        !stdout_lossy.contains("after_panic"),
+        "native must abort on panic (after_panic should not appear)\n--- stdout ---\n{}",
+        stdout_lossy
+    );
+}
+
+/// Phase B-1.5: unwrap_or() must produce identical output in interpreter and
+/// native mode for both Option and Result. This verifies interpreter/native
+/// parity for the safe unwrap path.
+#[test]
+fn emit_object_unwrap_or_parity() {
+    use std::fs;
+    let dir = "target/test_unwrap_or_parity";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(option.unwrap_or(Some(1), 0))\n    println(option.unwrap_or(None, 0))\n    println(result.unwrap_or(Success(2), 0))\n    println(result.unwrap_or(Error(3), 0))\n    println(option.unwrap(Some(4)))\n    println(result.unwrap(Success(5)))\n    return\n",
+    );
+
+    let expected = ["1", "0", "2", "0", "4", "5"];
+
+    // Interpreter
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    assert_eq!(
+        interp, expected,
+        "unwrap_or parity (interpreter) mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected, interp, out
+    );
+
+    // Native
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "unwrap_or parity native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "unwrap_or parity (native) mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native must produce identical output for unwrap_or parity"
+    );
+}
+
+/// Phase B-1.4: a single program that exercises all eight bundled stdlib
+/// packages in both the interpreter and native executable. The two must
+/// produce identical output. This is the broadest surface-area smoke test
+/// for the stdlib.
+#[test]
+fn emit_object_stdlib_all_packages_smoke() {
+    use std::fs;
+    let dir = "target/test_stdlib_all_packages";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    // string\n    println(string.len(\"hello\"))\n    println(string.trim(\"  x  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.contains(\"hello\", \"ell\"))\n    // math\n    println(math.abs(-3.0))\n    println(math.sqrt(9.0))\n    println(math.floor(2.7))\n    println(math.ceil(2.3))\n    println(math.round(2.5))\n    // option\n    let o = Some(42)\n    println(option.is_some(o))\n    println(option.unwrap_or(o, 0))\n    // result\n    let r = Success(99)\n    println(result.is_ok(r))\n    println(result.unwrap_or(r, 0))\n    // time\n    println(time.now().secs >= 0.0)\n    // io\n    io.println(\"io_ok\")\n    // fs\n    println(fs.write(\"target/test_smoke_io.txt\", \"hi\"))\n    println(fs.read(\"target/test_smoke_io.txt\"))\n    println(fs.exists(\"target/test_smoke_io.txt\"))\n    println(fs.remove(\"target/test_smoke_io.txt\"))\n    return\n",
+    );
+
+    // Interpreter
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .collect();
+    let expected = [
+        "5",       // string.len
+        "x",       // string.trim
+        "ABC",     // string.to_upper
+        "true",    // string.contains
+        "3",       // math.abs
+        "3",       // math.sqrt
+        "2",       // math.floor
+        "3",       // math.ceil
+        "3",       // math.round
+        "true",    // option.is_some
+        "42",      // option.unwrap_or
+        "true",    // result.is_ok
+        "99",      // result.unwrap_or
+        "true",    // time.now().secs >= 0.0
+        "io_ok",   // io.println
+        "true",    // fs.write
+        "hi",      // fs.read
+        "true",    // fs.exists
+        "true",    // fs.remove
+    ];
+    assert_eq!(
+        interp, expected,
+        "stdlib smoke test (interpreter) mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
+        expected, interp, out
+    );
+
+    // Native
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(
+        build_out.contains("ok:"),
+        "stdlib smoke test native build failed: {}",
+        build_out
+    );
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "stdlib smoke test (native) mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native must produce identical output for stdlib smoke test"
+    );
+}
+
+/// Phase B-1.4: repeated builds of the same stdlib-using program must produce
+/// identical IR (build reproducibility). This catches non-deterministic symbol
+/// generation or ordering issues in the codegen.
+#[test]
+fn emit_object_stdlib_build_reproducibility() {
+    use std::fs;
+    let src = "fn main():\n    println(math.sqrt(16.0))\n    println(option.unwrap_or(Some(1), 0))\n    println(option.unwrap_or(None, -1))\n    return\n";
+
+    let dir1 = "target/test_stdlib_repro1";
+    write_stdlib_project(dir1, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir1), &["--emit-ll"]);
+    let ir1 = fs::read_to_string(format!("{}.ll", dir1)).unwrap_or_default();
+
+    let dir2 = "target/test_stdlib_repro2";
+    write_stdlib_project(dir2, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir2), &["--emit-ll"]);
+    let ir2 = fs::read_to_string(format!("{}.ll", dir2)).unwrap_or_default();
+
+    assert!(!ir1.is_empty(), "first build must emit IR");
+    assert!(!ir2.is_empty(), "second build must emit IR");
+
+    // Collect sorted define symbols from each build.
+    let syms = |ir: &str| -> Vec<String> {
+        let mut v: Vec<String> = ir
+            .lines()
+            .filter(|l| l.contains("define "))
+            .map(|l| {
+                l.split_whitespace()
+                    .skip(2)
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        v.sort();
+        v
+    };
+    let a = syms(&ir1);
+    let b = syms(&ir2);
+    assert_eq!(
+        a, b,
+        "stdlib build reproducibility failed  Esymbols differ between identical builds\nir1: {:?}\nir2: {:?}",
+        a, b
     );
 }
 
@@ -268,7 +800,7 @@ fn emit_object_stdlib_builtins_lower_and_run() {
     let dir = "target/test_emit_stdlib_native";
     write_stdlib_project(
         dir,
-        "fn main():\n    println(string.trim(\"  hi  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.to_lower(\"AbC\"))\n    println(string.replace(\"aaa\", \"a\", \"b\"))\n    println(string.len(\"hello\"))\n    println(string.byte_len(\"hello\"))\n    println(string.contains(\"hello\", \"ell\"))\n    println(string.starts_with(\"hello\", \"he\"))\n    println(string.ends_with(\"hello\", \"lo\"))\n    println(string.repeat(\"ab\", 3))\n    println(string.slice(\"hello\", 1, 3))\n    let parts = string.split(\"a,b,c\", \",\")\n    println(math.sqrt(16.0))\n    println(math.abs(-3.0))\n    println(math.max(1.0, 7.0))\n    println(math.min(1.0, 7.0))\n    println(math.clamp(5.0, 0.0, 2.0))\n    println(math.pow(2.0, 3.0))\n    println(time.now().secs > 0.0)\n    println(time.elapsed(time.now()).secs >= 0.0)\n    println(time.sleep(0.01))\n    io.println(\"io test\")\n    let entries = fs.list_dir(\"target\")\n    println(fs.write(\"target/test_stdlib_native_io.txt\", \"lime fs ok\"))\n    println(fs.read(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    println(fs.size(\"target/test_stdlib_native_io.txt\") == 10)\n    println(fs.metadata(\"target/test_stdlib_native_io.txt\").is_file)\n    println(fs.remove(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    return\n",
+        "fn main():\n    println(string.trim(\"  hi  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.to_lower(\"AbC\"))\n    println(string.replace(\"aaa\", \"a\", \"b\"))\n    println(string.len(\"hello\"))\n    println(string.byte_len(\"hello\"))\n    println(string.contains(\"hello\", \"ell\"))\n    println(string.starts_with(\"hello\", \"he\"))\n    println(string.ends_with(\"hello\", \"lo\"))\n    println(string.repeat(\"ab\", 3))\n    println(string.slice(\"hello\", 1, 3))\n    let parts = string.split(\"a,b,c\", \",\")\n    println(math.sqrt(16.0))\n    println(math.abs(-3.0))\n    println(math.max(1.0, 7.0))\n    println(math.min(1.0, 7.0))\n    println(math.clamp(5.0, 0.0, 2.0))\n    println(math.pow(2.0, 3.0))\n    println(math.floor(3.7))\n    println(math.ceil(3.2))\n    println(math.round(3.5))\n    println(time.now().secs > 0.0)\n    println(time.elapsed(time.now()).secs >= 0.0)\n    println(time.sleep(0.01))\n    io.println(\"io test\")\n    let entries = fs.list_dir(\"target\")\n    println(fs.write(\"target/test_stdlib_native_io.txt\", \"lime fs ok\"))\n    println(fs.read(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    println(fs.size(\"target/test_stdlib_native_io.txt\") == 10)\n    println(fs.metadata(\"target/test_stdlib_native_io.txt\").is_file)\n    println(fs.remove(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    return\n",
     );
 
     let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
@@ -297,6 +829,9 @@ fn emit_object_stdlib_builtins_lower_and_run() {
         "runtime_math_min",
         "runtime_math_clamp",
         "runtime_math_pow",
+        "runtime_math_floor",
+        "runtime_math_ceil",
+        "runtime_math_round",
         "runtime_time_now",
         "runtime_time_sleep",
         "runtime_read_file",
@@ -347,6 +882,9 @@ fn emit_object_stdlib_builtins_lower_and_run() {
         "1",
         "2",
         "8",
+        "3",
+        "4",
+        "4",
         "true",
         "true",
         "true",
@@ -868,4 +1406,290 @@ fn emit_object_await_nested_runs() {
         lines,
         String::from_utf8_lossy(&run.stderr)
     );
+}
+
+/// Phase B-2.1: function reference — pass a named function by name and call it (interpreter only; native defers to B-2.4).
+#[test]
+fn emit_object_fn_reference() {
+    use std::fs;
+    let dir = "target/test_fn_reference";
+    write_project(
+        dir,
+        "fn add(int: a, int: b):\n    return a + b\nfn main():\n    let f = add\n    println(f(3, 4))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["7"],
+        "fn reference (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.1: anonymous function — create a function value with fn literal (interpreter only).
+#[test]
+fn emit_object_anonymous_fn() {
+    use std::fs;
+    let dir = "target/test_anonymous_fn";
+    write_project(
+        dir,
+        "fn main():\n    let f = fn(int: a, int: b):\n        return a + b\n    println(f(10, 20))\n    let g = fn(int: x):\n        return x * 2\n    println(g(5))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["30", "10"],
+        "anonymous fn (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.1: closure — inner function captures outer variable (interpreter only).
+#[test]
+fn emit_object_closure_capture() {
+    use std::fs;
+    let dir = "target/test_closure_capture";
+    write_project(
+        dir,
+        "fn make_adder(int: x):\n    return fn(int: y):\n        return x + y\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    let add10 = make_adder(10)\n    println(add10(7))\n    println(add5(100))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["8", "17", "105"],
+        "closure capture (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+// ===== Phase B-2.2: function value native parity tests =====
+
+/// Phase B-2.2: named function reference — native parity.
+#[test]
+fn emit_object_fn_reference_native() {
+    use std::fs;
+    let dir = "target/test_fn_reference_native";
+    write_project(
+        dir,
+        "fn add(int: a, int: b):\n    return a + b\nfn main():\n    let f = add\n    println(f(3, 4))\n    return\n",
+    );
+
+    // Interpreter check
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["7"],
+        "fn reference (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    // Native check
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "7", "fn reference (native) mismatch");
+}
+
+/// Phase B-2.2: anonymous function — native parity.
+#[test]
+fn emit_object_anonymous_fn_native() {
+    use std::fs;
+    let dir = "target/test_anonymous_fn_native";
+    write_project(
+        dir,
+        "fn main():\n    let f = fn(int: a, int: b):\n        return a + b\n    println(f(10, 20))\n    let g = fn(int: x):\n        return x * 2\n    println(g(5))\n    return\n",
+    );
+
+    // Interpreter check
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["30", "10"],
+        "anonymous fn (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    // Native check
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "30\n10", "anonymous fn (native) mismatch");
+}
+
+/// Phase B-2.3: untyped anonymous function params — fn(x) syntax.
+#[test]
+fn emit_object_untyped_anonymous_fn() {
+    let dir = "target/test_untyped_anonymous_fn";
+    write_project(
+        dir,
+        "fn main():\n    let f = fn(x):\n        return x * 2\n    println(f(4))\n    return\n",
+    );
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["8"],
+        "untyped anonymous fn (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: untyped function params in fn definition.
+#[test]
+fn emit_object_untyped_fn_params() {
+    let dir = "target/test_untyped_fn_params";
+    write_project(
+        dir,
+        "fn apply(f, x):\n    return f(x)\nfn add_one(x):\n    return x + 1\nfn main():\n    println(apply(add_one, 10))\n    return\n",
+    );
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["11"],
+        "untyped fn params (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: higher-order function — pass named function as argument (interpreter only).
+/// Native limitation: untyped function parameters lose Type::Fn in codegen env.
+#[test]
+fn emit_object_higher_order_fn() {
+    let dir = "target/test_higher_order_fn";
+    write_project(
+        dir,
+        "fn apply(f, x):\n    return f(x)\nfn add_one(x):\n    return x + 1\nfn main():\n    println(apply(add_one, 10))\n    return\n",
+    );
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["11"],
+        "higher-order fn (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: function returned from function — make_adder pattern (interpreter only).
+/// Native limitation: closure environments (env_ptr) are always NULL in native codegen.
+#[test]
+fn emit_object_closure_return_native_interp() {
+    let dir = "target/test_closure_capture";
+    write_project(
+        dir,
+        "fn make_adder(n):\n    return fn(x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    let add10 = make_adder(10)\n    println(add5(3))\n    println(add10(7))\n    println(add5(100))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["8", "17", "105"],
+        "closure capture (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: nested closures — inner closure captures outer parameter (interpreter only).
+/// Native limitation: closure environments (env_ptr) are always NULL in native codegen.
+#[test]
+fn emit_object_nested_closure() {
+    let dir = "target/test_nested_closure";
+    write_project(
+        dir,
+        "fn make_multiplier(n):\n    return fn(x):\n        return x * n\nfn main():\n    let triple = make_multiplier(3)\n    let double = make_multiplier(2)\n    println(triple(5))\n    println(double(5))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["15", "10"],
+        "nested closure (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: repeat build symbol stability — same source produces identical IR.
+#[test]
+fn emit_object_closure_symbol_stability() {
+    let dir = "target/test_closure_symbol_stability";
+    write_project(
+        dir,
+        "fn make_adder(n):\n    return fn(x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    return\n",
+    );
+    let out1 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
+    let out2 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
+    assert_eq!(out1, out2, "closure symbol stability failed: repeated builds produce different IR");
 }

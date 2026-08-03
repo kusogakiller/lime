@@ -1560,3 +1560,136 @@ fn emit_object_anonymous_fn_native() {
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
     assert_eq!(native_out.replace("\r", ""), "30\n10", "anonymous fn (native) mismatch");
 }
+
+/// Phase B-2.3: untyped anonymous function params — fn(x) syntax.
+#[test]
+fn emit_object_untyped_anonymous_fn() {
+    let dir = "target/test_untyped_anonymous_fn";
+    write_project(
+        dir,
+        "fn main():\n    let f = fn(x):\n        return x * 2\n    println(f(4))\n    return\n",
+    );
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["8"],
+        "untyped anonymous fn (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: untyped function params in fn definition.
+#[test]
+fn emit_object_untyped_fn_params() {
+    let dir = "target/test_untyped_fn_params";
+    write_project(
+        dir,
+        "fn apply(f, x):\n    return f(x)\nfn add_one(x):\n    return x + 1\nfn main():\n    println(apply(add_one, 10))\n    return\n",
+    );
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["11"],
+        "untyped fn params (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: higher-order function — pass named function as argument (interpreter only).
+/// Native limitation: untyped function parameters lose Type::Fn in codegen env.
+#[test]
+fn emit_object_higher_order_fn() {
+    let dir = "target/test_higher_order_fn";
+    write_project(
+        dir,
+        "fn apply(f, x):\n    return f(x)\nfn add_one(x):\n    return x + 1\nfn main():\n    println(apply(add_one, 10))\n    return\n",
+    );
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["11"],
+        "higher-order fn (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: function returned from function — make_adder pattern (interpreter only).
+/// Native limitation: closure environments (env_ptr) are always NULL in native codegen.
+#[test]
+fn emit_object_closure_return_native_interp() {
+    let dir = "target/test_closure_capture";
+    write_project(
+        dir,
+        "fn make_adder(n):\n    return fn(x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    let add10 = make_adder(10)\n    println(add5(3))\n    println(add10(7))\n    println(add5(100))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["8", "17", "105"],
+        "closure capture (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: nested closures — inner closure captures outer parameter (interpreter only).
+/// Native limitation: closure environments (env_ptr) are always NULL in native codegen.
+#[test]
+fn emit_object_nested_closure() {
+    let dir = "target/test_nested_closure";
+    write_project(
+        dir,
+        "fn make_multiplier(n):\n    return fn(x):\n        return x * n\nfn main():\n    let triple = make_multiplier(3)\n    let double = make_multiplier(2)\n    println(triple(5))\n    println(double(5))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["15", "10"],
+        "nested closure (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase B-2.3: repeat build symbol stability — same source produces identical IR.
+#[test]
+fn emit_object_closure_symbol_stability() {
+    let dir = "target/test_closure_symbol_stability";
+    write_project(
+        dir,
+        "fn make_adder(n):\n    return fn(x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    return\n",
+    );
+    let out1 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
+    let out2 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
+    assert_eq!(out1, out2, "closure symbol stability failed: repeated builds produce different IR");
+}

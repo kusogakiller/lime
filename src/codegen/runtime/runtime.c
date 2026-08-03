@@ -729,6 +729,9 @@ int64_t runtime_call_closure_i64(LimeClosure* closure, void* packed_args) {
     if (closure == NULL) {
         runtime_panic("runtime_call_closure_i64: null closure");
     }
+    if (closure->fn_ptr == NULL) {
+        runtime_panic("runtime_call_closure_i64: null function pointer");
+    }
     ClosureFnI64 fn = (ClosureFnI64)closure->fn_ptr;
     return fn(closure->env_ptr, packed_args);
 }
@@ -739,6 +742,9 @@ typedef void* (*ClosureFnPtr)(void*, void*);
 void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args) {
     if (closure == NULL) {
         runtime_panic("runtime_call_closure_ptr: null closure");
+    }
+    if (closure->fn_ptr == NULL) {
+        runtime_panic("runtime_call_closure_ptr: null function pointer");
     }
     ClosureFnPtr fn = (ClosureFnPtr)closure->fn_ptr;
     return fn(closure->env_ptr, packed_args);

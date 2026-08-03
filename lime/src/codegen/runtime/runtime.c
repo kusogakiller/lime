@@ -126,13 +126,15 @@ char* runtime_str_from_i64(int64_t v) {
 }
 
 char* runtime_str_from_f64(double v) {
+    // `%g` matches the native `printf("%g")` path used by `println(Float)`,
+    // so `str(x)` and `println(x)` render identically for every float. In the
+    // interpreter both paths also agree (`Value::to_string` -> `f64::to_string`),
+    // so integer-valued results (as produced by math.floor/ceil/round) print the
+    // same ("1", "-2") in both engines. Precision of non-integral floats is a
+    // documented limitation: native uses %g (6 significant digits) while the
+    // interpreter uses Rust's shortest round-trip repr.
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.6f", v);
-    // Trim trailing zeros (but keep at least one digit after the point).
-    size_t n = strlen(buf);
-    while (n > 0 && buf[n - 1] == '0') n--;
-    if (n > 0 && buf[n - 1] == '.') n--;
-    buf[n] = '\0';
+    snprintf(buf, sizeof(buf), "%g", v);
     return runtime_str_copy(buf);
 }
 
@@ -316,6 +318,30 @@ double runtime_math_clamp(double x, double lo, double hi) {
     return v > hi ? hi : v;
 }
 double runtime_math_pow(double a, double b) { return pow(a, b); }
+double runtime_math_floor(double x) { return floor(x); }
+double runtime_math_ceil(double x) { return ceil(x); }
+double runtime_math_round(double x) { return round(x); }
+
+// -- String helpers for Option/Result display --
+// Tag values: Option{0=Some, 1=None}, Result{0=Success, 1=Error}
+char* runtime_str_from_option(int64_t payload, int tag) {
+    static char buf[64];
+    if (tag == 1) {
+        return "None";
+    }
+    snprintf(buf, sizeof(buf), "Some(%lld)", (long long)payload);
+    return buf;
+}
+
+char* runtime_str_from_result(int64_t payload, int tag) {
+    static char buf[64];
+    if (tag == 0) {
+        snprintf(buf, sizeof(buf), "Success(%lld)", (long long)payload);
+    } else {
+        snprintf(buf, sizeof(buf), "Error(%lld)", (long long)payload);
+    }
+    return buf;
+}
 
 // -- Time --
 double runtime_time_now(void) {
@@ -681,4 +707,50 @@ LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem) {
         ((int64_t*)list.data)[index] = elem;
     }
     return list;
+}
+
+// -- Closure / function values (Phase B-2.2) --
+
+// Create a closure wrapping a function pointer and an environment pointer.
+LimeClosure* runtime_make_closure(void* fn_ptr, void* env_ptr) {
+    LimeClosure* c = (LimeClosure*)malloc(sizeof(LimeClosure));
+    if (c == NULL) {
+        runtime_panic("runtime_make_closure: out of memory");
+    }
+    c->fn_ptr = fn_ptr;
+    c->env_ptr = env_ptr;
+    return c;
+}
+
+// Call a closure's function with packed arguments, returning i64.
+// The function signature is: int64_t fn(i8* env, i8* packed_args)
+typedef int64_t (*ClosureFnI64)(void*, void*);
+int64_t runtime_call_closure_i64(LimeClosure* closure, void* packed_args) {
+    if (closure == NULL) {
+        runtime_panic("runtime_call_closure_i64: null closure");
+    }
+    if (closure->fn_ptr == NULL) {
+        runtime_panic("runtime_call_closure_i64: null function pointer");
+    }
+    ClosureFnI64 fn = (ClosureFnI64)closure->fn_ptr;
+    return fn(closure->env_ptr, packed_args);
+}
+
+// Call a closure's function with packed arguments, returning i8* (ptr).
+// The function signature is: i8* fn(i8* env, i8* packed_args)
+typedef void* (*ClosureFnPtr)(void*, void*);
+void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args) {
+    if (closure == NULL) {
+        runtime_panic("runtime_call_closure_ptr: null closure");
+    }
+    if (closure->fn_ptr == NULL) {
+        runtime_panic("runtime_call_closure_ptr: null function pointer");
+    }
+    ClosureFnPtr fn = (ClosureFnPtr)closure->fn_ptr;
+    return fn(closure->env_ptr, packed_args);
+}
+
+// Wrap a plain function pointer (no environment) into a closure.
+LimeClosure* runtime_make_fn_ref(void* fn_ptr) {
+    return runtime_make_closure(fn_ptr, NULL);
 }

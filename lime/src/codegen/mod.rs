@@ -39,7 +39,8 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     // (LLVM rejects forward-referenced struct types in function signatures).
     out.push_str("%LimeList = type { i8*, i64, i64 }\n");
     out.push_str("%LimeOption = type { i1, i8* }\n");
-    out.push_str("%LimeIface = type { i8*, i8* }\n\n");
+    out.push_str("%LimeIface = type { i8*, i8* }\n");
+    out.push_str("%LimeClosure = type { i8*, i8* }\n\n");
 
     // Runtime declarations
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
@@ -76,6 +77,11 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare double @runtime_math_max(double, double)\n");
     out.push_str("declare double @runtime_math_clamp(double, double, double)\n");
     out.push_str("declare double @runtime_math_pow(double, double)\n");
+    out.push_str("declare double @runtime_math_floor(double)\n");
+    out.push_str("declare double @runtime_math_ceil(double)\n");
+    out.push_str("declare double @runtime_math_round(double)\n");
+    out.push_str("declare i8* @runtime_str_from_option(i64, i32)\n");
+    out.push_str("declare i8* @runtime_str_from_result(i64, i32)\n");
     out.push_str("declare double @runtime_time_now()\n");
     out.push_str("declare i32 @runtime_time_sleep(double)\n");
     out.push_str("declare i8* @runtime_input(i8*)\n");
@@ -87,7 +93,13 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i32 @runtime_fs_create_dir(i8*)\n");
     out.push_str("declare i64 @runtime_fs_size(i8*)\n");
     out.push_str("declare void @runtime_fs_metadata(i8*, ptr, ptr, ptr)\n");
-    out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n\n");
+    out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n");
+
+    // Phase B-2.2: closure / function-value runtime helpers
+    out.push_str("declare %LimeClosure* @runtime_make_closure(i8*, i8*)\n");
+    out.push_str("declare i64 @runtime_call_closure_i64(%LimeClosure*, i8*)\n");
+    out.push_str("declare i8* @runtime_call_closure_ptr(%LimeClosure*, i8*)\n");
+    out.push_str("declare %LimeClosure* @runtime_make_fn_ref(i8*)\n\n");
 
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
@@ -320,11 +332,7 @@ fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: 
     }
 }
 
-fn mangled_name(base: &str, type_args: &[&str]) -> String {
-    format!("{}.{}", base, type_args.join("."))
-}
-
-/// Scan all function bodies for generic calls and monomorphize them.
+// Scan all function bodies for generic calls and monomorphize them.
 fn monomorphize_all(defs: &Defs) -> (HashMap<String, String>, HashMap<String, FunctionDef>) {
     let mut mono_name_map: HashMap<String, String> = HashMap::new();
     let mut mono_fdefs: HashMap<String, FunctionDef> = HashMap::new();
@@ -405,7 +413,7 @@ fn collect_mono_from_expr(
                     if !fdef.type_params.is_empty() {
                         let call_name = func.clone();
                         if !mono_name_map.contains_key(&call_name) {
-                            let mangled = mangled_name(base, &type_strs);
+                            let mangled = crate::mangled_name(base, &type_strs);
                             let type_params: Vec<&str> = type_strs.iter().map(|s| *s).collect();
                             let mono = monomorphize_function(fdef, &fdef.type_params, &type_params);
                             mono_name_map.insert(call_name.clone(), mangled.clone());

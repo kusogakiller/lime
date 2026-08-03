@@ -98,7 +98,21 @@ LimeList runtime_list_empty(void);
 LimeList runtime_list_add(LimeList list, int64_t elem);
 LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem);
 
-// -- Closure / function values (Phase B-2.2) --
+// -- Closure / function values (Phase B-2.2 / B-2.3) --
+//
+// LimeClosure ABI:
+//   %LimeClosure = type { i8* %fn_ptr, i8* %env_ptr }
+//
+//   fn_ptr: pointer to a function with signature i64(i8* %env, i8* %packed_args)
+//           or i8*(i8* %env, i8* %packed_args) depending on return type.
+//   env_ptr: pointer to captured environment (NULL for plain function references).
+//            Always NULL in current implementation (no native capture yet).
+//
+//   Packed args: heap-allocated i64 array, one slot per argument.
+//                The callee unpacks via GEP + bitcast + load.
+//
+//   Ownership: closure struct is heap-allocated; caller owns packed_args array.
+//
 LimeClosure* runtime_make_closure(void* fn_ptr, void* env_ptr);
 int64_t runtime_call_closure_i64(LimeClosure* closure, void* packed_args);
 void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args);

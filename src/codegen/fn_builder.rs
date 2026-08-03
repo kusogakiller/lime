@@ -587,8 +587,10 @@ impl<'a> Cg<'a> {
             .map(|(_, t)| type_from_str(t, self.defs))
             .collect();
 
-        // Return type: infer from body (first return statement), default to i64
-        let ret_type_str = "i64".to_string(); // MVP: all functions return i64
+        // Return type: hardcoded to i64 (MVP limitation).
+        // All anonymous functions currently return i64 via the closure ABI.
+        // TODO: support void/float/string returns from closures.
+        let ret_type_str = "i64".to_string();
 
         // Build function head: define i64 @anon_N(i8* %env, i8* %packed_args) {
         let mut ir = String::new();
