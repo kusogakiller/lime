@@ -1631,10 +1631,10 @@ fn emit_object_higher_order_fn() {
     );
 }
 
-/// Phase B-2.3: function returned from function — make_adder pattern (interpreter only).
-/// Native limitation: closure environments (env_ptr) are always NULL in native codegen.
+/// Phase B-2.4: function returned from function — make_adder pattern with native capture.
 #[test]
-fn emit_object_closure_return_native_interp() {
+fn emit_object_closure_return_native() {
+    use std::fs;
     let dir = "target/test_closure_capture";
     write_project(
         dir,
@@ -1654,12 +1654,23 @@ fn emit_object_closure_return_native_interp() {
         "closure capture (interpreter) mismatch\nfull output:\n{}",
         out
     );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "8\n17\n105", "closure capture (native) mismatch");
 }
 
-/// Phase B-2.3: nested closures — inner closure captures outer parameter (interpreter only).
-/// Native limitation: closure environments (env_ptr) are always NULL in native codegen.
+/// Phase B-2.4: nested closures — inner closure captures outer parameter, with native capture.
 #[test]
-fn emit_object_nested_closure() {
+fn emit_object_nested_closure_native() {
+    use std::fs;
     let dir = "target/test_nested_closure";
     write_project(
         dir,
@@ -1679,6 +1690,17 @@ fn emit_object_nested_closure() {
         "nested closure (interpreter) mismatch\nfull output:\n{}",
         out
     );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "15\n10", "nested closure (native) mismatch");
 }
 
 /// Phase B-2.3: repeat build symbol stability — same source produces identical IR.
