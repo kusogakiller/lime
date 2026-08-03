@@ -8443,7 +8443,16 @@ fn mangle_type_arg(t: &str) -> String {
     out
 }
 
-fn mangled_name(base: &str, type_args: &[String]) -> String {
+/// Centralized, deterministic generic-symbol mangling. Produces a
+/// collision-free internal name for a function/base plus its concrete
+/// type arguments (e.g. "max" + ["i64"] -> "max.i64"). Alphanumeric
+/// argument bytes pass through untouched, so already-flat names like
+/// "option.unwrap.int" stay stable across builds; nested generic states
+/// (e.g. "Option_28int_29") and special characters are hex-encoded by
+/// `mangle_type_arg` so the result is a valid LLVM identifier segment.
+/// This is the single source of truth used by both the interpreter
+/// (`Phase 6` monomorphization) and the LLVM backend.
+fn mangled_name(base: &str, type_args: &[&str]) -> String {
     let mut s = base.to_string();
     for a in type_args {
         s.push('.');
@@ -8465,6 +8474,104 @@ fn parse_generic_call_name(func: &str) -> Option<(&str, Vec<&str>)> {
         Some((base, args))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod mangle_tests {
+    use super::*;
+
+    /// mangle_type_arg must be injective: distinct concrete types must never
+    /// map to the same encoded segment, so mangled names can never collide.
+    #[test]
+    fn mangle_type_arg_is_injective() {
+        let cases = [
+            ("i64", "i64"),
+            ("string", "string"),
+            ("bool", "bool"),
+            ("double", "double"),
+            ("Option(int)", "Option_28int_29"),
+            ("Result(int, string)", "Result_28int_2C_20string_29"),
+            ("collections.HashMap", "collections_2EHashMap"),
+            ("Option(Result(double, bool))", "Option_28Result_28double_2C_20bool_29_29"),
+        ];
+        for (src, want) in cases {
+            assert_eq!(mangle_type_arg(src), want, "encode {}", src);
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (src, _) in cases {
+            let enc = mangle_type_arg(src);
+            assert!(
+                seen.insert(enc.clone()),
+                "collision detected for {} -> {}",
+                src,
+                enc
+            );
+        }
+    }
+
+    /// Two generic instantiations with the same base name but different
+    /// concrete type arguments must produce distinct internal symbols.
+    #[test]
+    fn same_base_different_args_are_distinct() {
+        let a = mangled_name("max", &["int"]);
+        let b = mangled_name("max", &["float"]);
+        assert_eq!(a, "max.int");
+        assert_eq!(b, "max.float");
+        assert_ne!(a, b, "max<int> and max<float> must not collide");
+    }
+
+    /// Nested generic types must each encode to a unique, dot-free LLVM
+    /// identifier segment (no parentheses/commas leak into symbols).
+    #[test]
+    fn nested_generics_encode_uniquely() {
+        let flat = mangled_name("option.unwrap", &["Option(int)"]);
+        let nested = mangled_name("option.unwrap", &["Option(Result(int, string))"]);
+        let deep = mangled_name("option.unwrap", &["Option(Option(int))"]);
+        assert_eq!(flat, "option.unwrap.Option_28int_29");
+        assert_eq!(
+            nested,
+            "option.unwrap.Option_28Result_28int_2C_20string_29_29"
+        );
+        assert_eq!(deep, "option.unwrap.Option_28Option_28int_29_29");
+        assert_ne!(flat, nested);
+        assert_ne!(nested, deep);
+        assert_ne!(flat, deep);
+        for s in [&flat, &nested, &deep] {
+            assert!(
+                !s.contains('(') && !s.contains(')') && !s.contains(','),
+                "must be a valid LLVM identifier: {}",
+                s
+            );
+        }
+    }
+
+    /// Different arg counts on the same base must differ (the dot separator
+    /// is unambiguous because encoded args never contain a literal dot).
+    #[test]
+    fn arg_count_distinguishes() {
+        let one = mangled_name("wrap", &["int"]);
+        let two = mangled_name("wrap", &["int", "string"]);
+        let three = mangled_name("wrap", &["int", "string", "bool"]);
+        assert_ne!(one, two);
+        assert_ne!(two, three);
+        assert_ne!(one, three);
+    }
+
+    /// Mangling must be deterministic and stable across repeated calls and
+    /// builds (pure string encoding, no hashing or map-ordering involved).
+    #[test]
+    fn mangling_is_deterministic() {
+        for _ in 0..100 {
+            assert_eq!(
+                mangled_name("option.unwrap", &["Option(Int)"]),
+                "option.unwrap.Option_28Int_29"
+            );
+            assert_eq!(
+                mangle_type_arg("Result(int, string)"),
+                "Result_28int_2C_20string_29"
+            );
+        }
     }
 }
 
@@ -8790,7 +8897,8 @@ fn collect_mono_from_expr(
                     check_generic_constraints(fdef, &type_args, defs)?;
 
                     // Create mangled name
-                    let mangled = mangled_name(&base_name, &type_args);
+                    let type_arg_refs: Vec<&str> = type_args.iter().map(|s| s.as_str()).collect();
+                    let mangled = mangled_name(&base_name, &type_arg_refs);
 
                     // Only create monomorphized function if not already created.
                     // Keyed by `MonoKey` so the same (function, type-args)

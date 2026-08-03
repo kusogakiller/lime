@@ -346,6 +346,64 @@ fn emit_object_nested_generic_mangling() {
     );
 }
 
+/// Phase B-1.2: repeated builds of the same generic program must produce
+/// identical symbols. The centralized mangling is a pure, deterministic
+/// string encoding (no hashing / map-ordering), so two `--emit-ll` builds
+/// of the *same source* must lower to an identical set of mangled `define`
+/// symbols (the bodies may mention constants that differ, but the symbol
+/// set must not drift between builds).
+#[test]
+fn emit_object_repeated_build_is_symbol_stable() {
+    use std::fs;
+    let src = "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, \"d\"))\n    println(option.unwrap(Some(Some(5))))\n    return\n";
+
+    // Build the identical source twice into fresh project dirs.
+    let dir = "target/test_emit_repeat_build";
+    write_stdlib_project(dir, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
+    let ir1 = fs::read_to_string(&format!("{}.ll", dir)).unwrap_or_default();
+    assert!(!ir1.is_empty(), "first build must emit IR");
+
+    let dir2 = "target/test_emit_repeat_build2";
+    write_stdlib_project(dir2, src);
+    let _ = lime_cmd("build", &format!("{}/citrus.toml", dir2), &["--emit-ll"]);
+    let ir2 = fs::read_to_string(&format!("{}.ll", dir2)).unwrap_or_default();
+    assert!(!ir2.is_empty(), "second build must emit IR");
+
+    // Collect mangled `define` symbol tokens from each build.
+    let syms = |ir: &str| -> Vec<String> {
+        let mut v: Vec<String> = ir
+            .lines()
+            .filter(|l| l.contains("define "))
+            .map(|l| l.split_whitespace().skip(2).next().unwrap_or("").to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        v.sort();
+        v
+    };
+    let a = syms(&ir1);
+    let b = syms(&ir2);
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "mangled symbol count must be stable across builds\nir1: {:?}\nir2: {:?}",
+        a,
+        b
+    );
+    assert_eq!(
+        a, b,
+        "mangled symbols drift between identical builds\nir1: {:?}\nir2: {:?}",
+        a, b
+    );
+
+    // Sanity: the option generic helpers really are emitted under mangled names.
+    assert!(
+        a.iter().any(|s| s.starts_with("@option.")),
+        "expected mangled option helpers, got:\n{:?}",
+        a
+    );
+}
+
 /// Write a throwaway project that depends on the bundled stdlib packages.
 fn write_stdlib_project(dir: &str, source: &str) {
     use std::fs;

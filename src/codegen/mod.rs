@@ -325,16 +325,7 @@ fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: 
     }
 }
 
-fn mangled_name(base: &str, type_args: &[&str]) -> String {
-    let mut s = base.to_string();
-    for a in type_args {
-        s.push('.');
-        s.push_str(&crate::mangle_type_arg(a));
-    }
-    s
-}
-
-/// Scan all function bodies for generic calls and monomorphize them.
+// Scan all function bodies for generic calls and monomorphize them.
 fn monomorphize_all(defs: &Defs) -> (HashMap<String, String>, HashMap<String, FunctionDef>) {
     let mut mono_name_map: HashMap<String, String> = HashMap::new();
     let mut mono_fdefs: HashMap<String, FunctionDef> = HashMap::new();
@@ -415,7 +406,7 @@ fn collect_mono_from_expr(
                     if !fdef.type_params.is_empty() {
                         let call_name = func.clone();
                         if !mono_name_map.contains_key(&call_name) {
-                            let mangled = mangled_name(base, &type_strs);
+                            let mangled = crate::mangled_name(base, &type_strs);
                             let type_params: Vec<&str> = type_strs.iter().map(|s| *s).collect();
                             let mono = monomorphize_function(fdef, &fdef.type_params, &type_params);
                             mono_name_map.insert(call_name.clone(), mangled.clone());
