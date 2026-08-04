@@ -1,0 +1,6 @@
+[package]
+name = "env"
+version = "v0.1.0"
+
+[files]
+env = "src/env.lime"

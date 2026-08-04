@@ -254,4 +254,19 @@ char* runtime_path_normalize(char* path);
 int runtime_path_equals(char* a, char* b);
 char* runtime_path_parent(char* path);
 
+// -- OS operations (Phase C-1.9) --
+char* runtime_os_name(void);
+char* runtime_os_arch(void);
+char* runtime_os_platform(void);
+char* runtime_os_hostname(void);
+char* runtime_os_cwd(void);
+int runtime_os_set_cwd(char* path);
+
+// -- ENV operations (Phase C-1.9) --
+char* runtime_env_get(char* key);
+int runtime_env_has(char* key);
+int runtime_env_set(char* key, char* value);
+int runtime_env_remove(char* key);
+LimeMap runtime_env_all(void);
+
 #endif // LIME_RUNTIME_H

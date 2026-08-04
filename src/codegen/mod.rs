@@ -210,6 +210,21 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i32 @runtime_path_equals(i8*, i8*)\n");
     out.push_str("declare i8* @runtime_path_parent(i8*)\n\n");
 
+    // OS runtime declarations (Phase C-1.9)
+    out.push_str("declare i8* @runtime_os_name()\n");
+    out.push_str("declare i8* @runtime_os_arch()\n");
+    out.push_str("declare i8* @runtime_os_platform()\n");
+    out.push_str("declare i8* @runtime_os_hostname()\n");
+    out.push_str("declare i8* @runtime_os_cwd()\n");
+    out.push_str("declare i32 @runtime_os_set_cwd(i8*)\n\n");
+
+    // ENV runtime declarations (Phase C-1.9)
+    out.push_str("declare i8* @runtime_env_get(i8*)\n");
+    out.push_str("declare i32 @runtime_env_has(i8*)\n");
+    out.push_str("declare i32 @runtime_env_set(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_env_remove(i8*)\n");
+    out.push_str("declare %LimeMap @runtime_env_all()\n\n");
+
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.str.int_nl = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");

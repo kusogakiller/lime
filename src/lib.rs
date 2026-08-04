@@ -6281,6 +6281,40 @@ fn infer_type(
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
+                "os_name" | "os_arch" | "os_platform" | "os_hostname" | "os_cwd" => {
+                    if !args.is_empty() { return Err(format!("{}() takes no arguments", func)); }
+                    Ok(Type::String)
+                }
+                "os_set_cwd" => {
+                    if args.len() != 1 { return Err("os_set_cwd() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "env_get" => {
+                    if args.len() != 1 { return Err("env_get() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::String)))
+                }
+                "env_has" => {
+                    if args.len() != 1 { return Err("env_has() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "env_set" => {
+                    if args.len() != 2 { return Err("env_set() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "env_remove" => {
+                    if args.len() != 1 { return Err("env_remove() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "env_all" => {
+                    if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -7365,6 +7399,40 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             let _ = check_expr(&args[0], env, defs)?;
             let _ = check_expr(&args[1], env, defs)?;
             Ok(Type::Bool)
+        }
+        "os_name" | "os_arch" | "os_platform" | "os_hostname" | "os_cwd" => {
+            if !args.is_empty() { return Err(format!("{}() takes no arguments", func)); }
+            Ok(Type::String)
+        }
+        "os_set_cwd" => {
+            if args.len() != 1 { return Err("os_set_cwd() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "env_get" => {
+            if args.len() != 1 { return Err("env_get() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Option(Box::new(Type::String)))
+        }
+        "env_has" => {
+            if args.len() != 1 { return Err("env_has() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "env_set" => {
+            if args.len() != 2 { return Err("env_set() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "env_remove" => {
+            if args.len() != 1 { return Err("env_remove() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "env_all" => {
+            if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
         }
         other => {
                     // Function reference in env (e.g. `let f = add; f(3, 4)`)
@@ -10663,6 +10731,9 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "path_join" | "path_basename" | "path_dirname" | "path_filename"
              | "path_extension" | "path_is_absolute" | "path_normalize"
              | "path_equals" | "path_parent"
+             | "os_name" | "os_arch" | "os_platform" | "os_hostname"
+             | "os_cwd" | "os_set_cwd"
+             | "env_get" | "env_has" | "env_set" | "env_remove" | "env_all"
     )
 }
 
@@ -11468,6 +11539,98 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Some(pos) => Ok(Value::String(trimmed[..pos].to_string())),
                 None => Ok(Value::String(String::new())),
             }
+        }
+        // ===== OS operations (Phase C-1.9) =====
+        "os_name" => {
+            if !args.is_empty() { return Err("os_name() takes no arguments".to_string()); }
+            let name = if cfg!(target_os = "windows") { "windows" }
+                else if cfg!(target_os = "macos") { "macos" }
+                else if cfg!(target_os = "linux") { "linux" }
+                else if cfg!(target_os = "freebsd") { "freebsd" }
+                else if cfg!(target_os = "unix") { "unix" }
+                else { "unknown" };
+            Ok(Value::String(name.to_string()))
+        }
+        "os_arch" => {
+            if !args.is_empty() { return Err("os_arch() takes no arguments".to_string()); }
+            let arch = if cfg!(target_arch = "x86_64") { "x86_64" }
+                else if cfg!(target_arch = "aarch64") { "aarch64" }
+                else if cfg!(target_arch = "x86") { "x86" }
+                else if cfg!(target_arch = "arm") { "arm" }
+                else { "unknown" };
+            Ok(Value::String(arch.to_string()))
+        }
+        "os_platform" => {
+            if !args.is_empty() { return Err("os_platform() takes no arguments".to_string()); }
+            let platform = if cfg!(target_os = "windows") { "windows" }
+                else if cfg!(target_os = "macos") { "darwin" }
+                else if cfg!(target_os = "linux") { "linux" }
+                else { "unknown" };
+            Ok(Value::String(platform.to_string()))
+        }
+        "os_hostname" => {
+            if !args.is_empty() { return Err("os_hostname() takes no arguments".to_string()); }
+            Ok(Value::String(String::new()))
+        }
+        "os_cwd" => {
+            if !args.is_empty() { return Err("os_cwd() takes no arguments".to_string()); }
+            match std::env::current_dir() {
+                Ok(p) => Ok(Value::String(p.to_string_lossy().into_owned())),
+                Err(_) => Ok(Value::String(String::new())),
+            }
+        }
+        "os_set_cwd" => {
+            if args.len() != 1 { return Err("os_set_cwd() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => ss, _ => return Err("os_set_cwd() expects a string".to_string()) };
+            match std::env::set_current_dir(&s) {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(_) => Ok(Value::Bool(false)),
+            }
+        }
+        // ===== ENV operations (Phase C-1.9) =====
+        "env_get" => {
+            if args.len() != 1 { return Err("env_get() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let key = match val { Value::String(s) => s, _ => return Err("env_get() expects a string key".to_string()) };
+            match std::env::var(&key) {
+                Ok(v) => Ok(Value::Option(Some(Box::new(Value::String(v))))),
+                Err(_) => Ok(Value::Option(None)),
+            }
+        }
+        "env_has" => {
+            if args.len() != 1 { return Err("env_has() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let key = match val { Value::String(s) => s, _ => return Err("env_has() expects a string key".to_string()) };
+            Ok(Value::Bool(std::env::var(&key).is_ok()))
+        }
+        "env_set" => {
+            if args.len() != 2 { return Err("env_set() takes exactly 2 arguments".to_string()); }
+            let key_val = eval_expr(&args[0], env, defs)?;
+            let val_val = eval_expr(&args[1], env, defs)?;
+            let key = match key_val { Value::String(s) => s, _ => return Err("env_set() expects string key".to_string()) };
+            let value = match val_val { Value::String(s) => s, _ => return Err("env_set() expects string value".to_string()) };
+            // SAFETY: set_var is unsafe in Rust 2024 edition; we accept the
+            // data-race risk in this single-threaded interpreter.
+            #[allow(unused_unsafe)]
+            unsafe { std::env::set_var(&key, &value) };
+            Ok(Value::Bool(true))
+        }
+        "env_remove" => {
+            if args.len() != 1 { return Err("env_remove() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let key = match val { Value::String(s) => s, _ => return Err("env_remove() expects a string key".to_string()) };
+            #[allow(unused_unsafe)]
+            unsafe { std::env::remove_var(&key) };
+            Ok(Value::Bool(true))
+        }
+        "env_all" => {
+            if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
+            let mut map = std::collections::HashMap::new();
+            for (key, value) in std::env::vars() {
+                map.insert(Value::String(key), Value::String(value));
+            }
+            Ok(Value::Map(map))
         }
         // ===== Standard-library runtime builtins (Phase 7/10) =====
         // List helpers (Lists are represented as Value::Array).

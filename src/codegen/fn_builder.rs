@@ -2893,6 +2893,113 @@ impl<'a> Cg<'a> {
                 ));
                 Ok(Some((call, Type::String)))
             }
+            // ===== OS operations (Phase C-1.9) =====
+            "os_name" => {
+                let (v, t) = call_str(self, "runtime_os_name", &[]);
+                Ok(Some((v, t)))
+            }
+            "os_arch" => {
+                let (v, t) = call_str(self, "runtime_os_arch", &[]);
+                Ok(Some((v, t)))
+            }
+            "os_platform" => {
+                let (v, t) = call_str(self, "runtime_os_platform", &[]);
+                Ok(Some((v, t)))
+            }
+            "os_hostname" => {
+                let (v, t) = call_str(self, "runtime_os_hostname", &[]);
+                Ok(Some((v, t)))
+            }
+            "os_cwd" => {
+                let (v, t) = call_str(self, "runtime_os_cwd", &[]);
+                Ok(Some((v, t)))
+            }
+            "os_set_cwd" => {
+                let a = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_os_set_cwd", &[a]);
+                Ok(Some((v, t)))
+            }
+            // ===== ENV operations (Phase C-1.9) =====
+            "env_get" => {
+                let key = str_arg(self, &args[0])?;
+                let ptr_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_env_get(i8* {})\n", ptr_val, key
+                ));
+                // Check if NULL -> None, else -> Some(value)
+                let is_null = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
+                ));
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %Option, align 8\n", slot
+                ));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                ));
+                // tag = 1 if null (None), 0 if not null (Some)
+                let zext_temp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = zext i1 {} to i32\n", zext_temp, is_null
+                ));
+                // Use select: if is_null then 1 else 0
+                let tag_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                ));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                ));
+                // If null, store 0; otherwise store ptrtoint of the pointer
+                let ptr_as_i64 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                ));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                ));
+                Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
+            }
+            "env_has" => {
+                let key = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_env_has", &[key]);
+                Ok(Some((v, t)))
+            }
+            "env_set" => {
+                let key = str_arg(self, &args[0])?;
+                let val = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_env_set", &[key, val]);
+                Ok(Some((v, t)))
+            }
+            "env_remove" => {
+                let key = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_env_remove", &[key]);
+                Ok(Some((v, t)))
+            }
+            "env_all" => {
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %LimeMap, align 8\n", slot
+                ));
+                self.out.push_str(&format!(
+                    "  call void @runtime_env_all(ptr sret(%LimeMap) {})\n", slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
             _ => Ok(None),
         }
     }

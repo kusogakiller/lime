@@ -2059,3 +2059,151 @@ char* runtime_path_parent(char* path) {
     free(copy);
     return result;
 }
+
+// ========================================================================
+// OS operations (Phase C-1.9)
+// ========================================================================
+
+char* runtime_os_name(void) {
+#ifdef _WIN32
+    return runtime_str_copy("windows");
+#elif defined(__APPLE__)
+    return runtime_str_copy("macos");
+#elif defined(__linux__)
+    return runtime_str_copy("linux");
+#elif defined(__FreeBSD__)
+    return runtime_str_copy("freebsd");
+#elif defined(__unix__)
+    return runtime_str_copy("unix");
+#else
+    return runtime_str_copy("unknown");
+#endif
+}
+
+char* runtime_os_arch(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+    return runtime_str_copy("x86_64");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return runtime_str_copy("aarch64");
+#elif defined(__i386__) || defined(_M_IX86)
+    return runtime_str_copy("x86");
+#elif defined(__arm__) || defined(_M_ARM)
+    return runtime_str_copy("arm");
+#else
+    return runtime_str_copy("unknown");
+#endif
+}
+
+char* runtime_os_platform(void) {
+#ifdef _WIN32
+    return runtime_str_copy("windows");
+#elif defined(__APPLE__)
+    return runtime_str_copy("darwin");
+#elif defined(__linux__)
+    return runtime_str_copy("linux");
+#else
+    return runtime_str_copy("unknown");
+#endif
+}
+
+char* runtime_os_hostname(void) {
+#ifdef _WIN32
+    char buf[256];
+    DWORD len = sizeof(buf);
+    if (GetComputerNameA(buf, &len)) {
+        return runtime_str_copy(buf);
+    }
+    return runtime_str_copy("");
+#else
+    char buf[256];
+    if (gethostname(buf, sizeof(buf)) == 0) {
+        buf[sizeof(buf) - 1] = '\0';
+        return runtime_str_copy(buf);
+    }
+    return runtime_str_copy("");
+#endif
+}
+
+char* runtime_os_cwd(void) {
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    DWORD len = GetCurrentDirectoryA(MAX_PATH, buf);
+    if (len > 0 && len < MAX_PATH) {
+        return runtime_str_copy(buf);
+    }
+    return runtime_str_copy("");
+#else
+    char buf[4096];
+    if (getcwd(buf, sizeof(buf)) != NULL) {
+        return runtime_str_copy(buf);
+    }
+    return runtime_str_copy("");
+#endif
+}
+
+int runtime_os_set_cwd(char* path) {
+    if (!path || !*path) return 0;
+#ifdef _WIN32
+    return SetCurrentDirectoryA(path) ? 1 : 0;
+#else
+    return (chdir(path) == 0) ? 1 : 0;
+#endif
+}
+
+// ========================================================================
+// ENV operations (Phase C-1.9)
+// ========================================================================
+
+char* runtime_env_get(char* key) {
+    if (!key || !*key) return NULL;
+#ifdef _WIN32
+    char buf[32768];
+    DWORD len = GetEnvironmentVariableA(key, buf, sizeof(buf));
+    if (len > 0 && len < sizeof(buf)) {
+        return runtime_str_copy(buf);
+    }
+    return NULL;
+#else
+    char* val = getenv(key);
+    if (val != NULL) {
+        return runtime_str_copy(val);
+    }
+    return NULL;
+#endif
+}
+
+int runtime_env_has(char* key) {
+    if (!key || !*key) return 0;
+#ifdef _WIN32
+    char buf[1];
+    DWORD len = GetEnvironmentVariableA(key, buf, 0);
+    return (len > 0) ? 1 : 0;
+#else
+    return (getenv(key) != NULL) ? 1 : 0;
+#endif
+}
+
+int runtime_env_set(char* key, char* value) {
+    if (!key || !*key) return 0;
+    if (!value) value = "";
+#ifdef _WIN32
+    return SetEnvironmentVariableA(key, value) ? 1 : 0;
+#else
+    return (setenv(key, value, 1) == 0) ? 1 : 0;
+#endif
+}
+
+int runtime_env_remove(char* key) {
+    if (!key || !*key) return 0;
+#ifdef _WIN32
+    return SetEnvironmentVariableA(key, NULL) ? 1 : 0;
+#else
+    return (unsetenv(key) == 0) ? 1 : 0;
+#endif
+}
+
+// env_all stub for codegen parity; interpreter handles natively.
+LimeMap runtime_env_all(void) {
+    LimeMap empty = { NULL, 0, 0 };
+    return empty;
+}

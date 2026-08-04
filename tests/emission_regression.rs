@@ -848,7 +848,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
     fs::write(format!("{}/main.lime", dir), source).unwrap();
     fs::write(
         format!("{}/citrus.toml", dir),
-        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\n",
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\nos = \"v0.1.0\"\nenv = \"v0.1.0\"\n",
     )
     .unwrap();
 }
@@ -2571,3 +2571,58 @@ fn emit_object_path_builtins() {
     );
 }
 
+/// Phase C-1.9: OS information builtins — interpreter parity.
+#[test]
+fn emit_object_os_builtins() {
+    write_stdlib_project(
+        "target/test_os_builtins",
+        "fn main():\n    println(os.name())\n    println(os.arch())\n    println(os.platform())\n    let cwd = os.cwd()\n    println(len(cwd) > 0)\n    println(os.set_cwd(os.cwd()))\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_os_builtins/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 4, "os builtins: expected at least 4 outputs, got {:?}\nfull output:\n{}", interp, out);
+    assert_eq!(interp[0], "windows", "os.name() should be 'windows' on Windows\nfull output:\n{}", out);
+    assert!(!interp[1].is_empty(), "os.arch() should be non-empty\nfull output:\n{}", out);
+    assert!(!interp[2].is_empty(), "os.platform() should be non-empty\nfull output:\n{}", out);
+    assert_eq!(interp[3], "true", "os.cwd() length check\nfull output:\n{}", out);
+    assert_eq!(interp[4], "true", "os.set_cwd(os.cwd()) should succeed\nfull output:\n{}", out);
+}
+
+/// Phase C-1.9: ENV builtins — interpreter parity.
+#[test]
+fn emit_object_env_builtins() {
+    write_stdlib_project(
+        "target/test_env_builtins",
+        "fn main():\n    env.set(\"LIME_TEST_ENV_VAR\", \"hello_lime\")\n    println(env.has(\"LIME_TEST_ENV_VAR\"))\n    let val = env.get(\"LIME_TEST_ENV_VAR\")\n    println(val)\n    println(env.remove(\"LIME_TEST_ENV_VAR\"))\n    println(env.has(\"LIME_TEST_ENV_VAR\"))\n    println(env.has(\"PATH\"))\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_env_builtins/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["true", "Some(hello_lime)", "true", "false", "true"],
+        "env builtins mismatch\nfull output:\n{}",
+        out
+    );
+}
