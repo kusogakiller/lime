@@ -5921,6 +5921,21 @@ fn infer_type(
                     }
                      Ok(Type::Float)
                 }
+                "trunc" | "exp" | "log" | "log10"
+                | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let at = infer_type(&args[0], env, defs, constraints)?;
+                    if at == Type::Float {
+                        Ok(Type::Float)
+                    } else {
+                        Err(format!("{}() expects a float argument", func))
+                    }
+                }
+                "math_pi" | "math_e" => {
+                    Ok(Type::Float)
+                }
                 // List: list_insert, list_set, list_get, list_clear, list_sort, list_clone
                 "list_insert" => {
                     if let Some(first) = args.first() {
@@ -6783,6 +6798,34 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             } else {
                 Err(format!("Type error: pow() expects float arguments"))
             }
+        }
+        "trunc" | "exp" | "log" | "log10" => {
+            if args.len() != 1 {
+                return Err(format!("Type error: {}() takes exactly 1 argument", func));
+            }
+            let at = check_expr(&args[0], env, defs)?;
+            if at == Type::Float || at == Type::Unknown {
+                Ok(Type::Float)
+            } else {
+                Err(format!("Type error: {}() expects a float argument", func))
+            }
+        }
+        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
+            if args.len() != 1 {
+                return Err(format!("Type error: {}() takes exactly 1 argument", func));
+            }
+            let at = check_expr(&args[0], env, defs)?;
+            if at == Type::Float || at == Type::Unknown {
+                Ok(Type::Float)
+            } else {
+                Err(format!("Type error: {}() expects a float argument", func))
+            }
+        }
+        "math_pi" | "math_e" => {
+            if !args.is_empty() {
+                return Err(format!("Type error: {}() takes no arguments", func));
+            }
+            Ok(Type::Float)
         }
         "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort" | "list_clone" | "list_empty" => {
             for a in args { check_expr(a, env, defs)?; }
@@ -10074,6 +10117,9 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "input" | "eprint" | "eprintln"
              | "io_read_line" | "io_read_all" | "io_write_stdout" | "io_write_stderr"
              | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
+             | "trunc" | "exp" | "log" | "log10"
+             | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
+             | "math_pi" | "math_e"
              | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
              | "to_int" | "to_float" | "equals" | "compare"
              | "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort" | "list_clone" | "list_empty"
@@ -11147,6 +11193,92 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             } else {
                 Err("pow() expects two floats".to_string())
             }
+        }
+        "trunc" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.trunc()))
+            } else {
+                Err("trunc() expects a float".to_string())
+            }
+        }
+        "exp" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.exp()))
+            } else {
+                Err("exp() expects a float".to_string())
+            }
+        }
+        "log" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.ln()))
+            } else {
+                Err("log() expects a float".to_string())
+            }
+        }
+        "log10" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.log10()))
+            } else {
+                Err("log10() expects a float".to_string())
+            }
+        }
+        "sin" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.sin()))
+            } else {
+                Err("sin() expects a float".to_string())
+            }
+        }
+        "cos" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.cos()))
+            } else {
+                Err("cos() expects a float".to_string())
+            }
+        }
+        "tan" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.tan()))
+            } else {
+                Err("tan() expects a float".to_string())
+            }
+        }
+        "asin" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.asin()))
+            } else {
+                Err("asin() expects a float".to_string())
+            }
+        }
+        "acos" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.acos()))
+            } else {
+                Err("acos() expects a float".to_string())
+            }
+        }
+        "atan" => {
+            let x = eval_expr(&args[0], env, defs)?;
+            if let Value::Float(f) = x {
+                Ok(Value::Float(f.atan()))
+            } else {
+                Err("atan() expects a float".to_string())
+            }
+        }
+        "math_pi" => {
+            Ok(Value::Float(std::f64::consts::PI))
+        }
+        "math_e" => {
+            Ok(Value::Float(std::f64::consts::E))
         }
         // ===== std.io runtime builtin =====
         "input" => {

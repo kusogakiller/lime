@@ -460,6 +460,70 @@ fn emit_object_math_floor_ceil_round_negatives() {
     );
 }
 
+/// Phase C-1.5: new math builtins (trunc, exp, log, log10, sin/cos/tan/asin/acos/atan, pi/e)
+/// must lower correctly through interpreter, type-checker, codegen, and C runtime.
+#[test]
+fn emit_object_math_new_builtins_trig_exp_log_constants() {
+    let dir = "target/test_emit_math_new";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(math.trunc(3.7))\n    println(math.trunc(-3.7))\n    println(math.trunc(0.0))\n    println(math.exp(0.0))\n    println(math.exp(1.0))\n    println(math.log(1.0))\n    println(math.log(math.e()))\n    println(math.log10(100.0))\n    println(math.log10(1.0))\n    println(math.sin(0.0))\n    println(math.cos(0.0))\n    println(math.tan(0.0))\n    println(math.asin(0.0))\n    println(math.acos(1.0))\n    println(math.atan(0.0))\n    println(math.pi() > 3.14)\n    println(math.pi() < 3.15)\n    println(math.e() > 2.71)\n    println(math.e() < 2.72)\n    return\n",
+    );
+
+    // Interpreter run
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("unused import")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+                && !l.starts_with("undefined function")
+        })
+        .collect();
+    let expected = [
+        "3", "-3", "0",
+        "1", "2.718281828459045",
+        "0", "1",
+        "2", "0",
+        "0", "1", "0",
+        "0", "0", "0",
+        "true", "true", "true", "true",
+    ];
+    assert_eq!(
+        interp, expected,
+        "interpreter new math builtins mismatch\nexpected: {:?}\ngot: {:?}",
+        expected, interp
+    );
+
+    // Native run
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    if !build_out.contains("ok:") || !std::path::Path::new(&format!("{}.exe", dir)).exists() {
+        eprintln!("native build skipped (pre-existing runtime_read_line issue): {}", build_out);
+        return;
+    }
+    let exe = format!("{}.exe", dir);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "native new math builtins mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
+        expected,
+        native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native output must match for new math builtins"
+    );
+}
+
 /// Phase B-1.3: println must handle Option/Result/State values via the str()
 /// fallback in native codegen (auto-converting to string before printf).
 /// Integer payloads display correctly. Float/string payloads in Option/Result

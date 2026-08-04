@@ -74,6 +74,21 @@ double runtime_math_min(double a, double b);
 double runtime_math_max(double a, double b);
 double runtime_math_clamp(double x, double lo, double hi);
 double runtime_math_pow(double a, double b);
+double runtime_math_floor(double x);
+double runtime_math_ceil(double x);
+double runtime_math_round(double x);
+double runtime_math_trunc(double x);
+double runtime_math_exp(double x);
+double runtime_math_log(double x);
+double runtime_math_log10(double x);
+double runtime_math_sin(double x);
+double runtime_math_cos(double x);
+double runtime_math_tan(double x);
+double runtime_math_asin(double x);
+double runtime_math_acos(double x);
+double runtime_math_atan(double x);
+double runtime_math_pi(void);
+double runtime_math_e(void);
 
 // -- Time --
 double runtime_time_now(void);

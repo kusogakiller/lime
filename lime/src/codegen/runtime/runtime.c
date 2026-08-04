@@ -442,6 +442,18 @@ double runtime_math_pow(double a, double b) { return pow(a, b); }
 double runtime_math_floor(double x) { return floor(x); }
 double runtime_math_ceil(double x) { return ceil(x); }
 double runtime_math_round(double x) { return round(x); }
+double runtime_math_trunc(double x) { return trunc(x); }
+double runtime_math_exp(double x) { return exp(x); }
+double runtime_math_log(double x) { return log(x); }
+double runtime_math_log10(double x) { return log10(x); }
+double runtime_math_sin(double x) { return sin(x); }
+double runtime_math_cos(double x) { return cos(x); }
+double runtime_math_tan(double x) { return tan(x); }
+double runtime_math_asin(double x) { return asin(x); }
+double runtime_math_acos(double x) { return acos(x); }
+double runtime_math_atan(double x) { return atan(x); }
+double runtime_math_pi(void) { return M_PI; }
+double runtime_math_e(void) { return M_E; }
 
 // -- String helpers for Option/Result display --
 // Tag values: Option{0=Some, 1=None}, Result{0=Success, 1=Error}

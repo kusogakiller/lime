@@ -1820,6 +1820,64 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_f64(self, "runtime_math_round", &[x]);
                 Ok(Some((v, t)))
             }
+            "trunc" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_trunc", &[x]);
+                Ok(Some((v, t)))
+            }
+            "exp" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_exp", &[x]);
+                Ok(Some((v, t)))
+            }
+            "log" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_log", &[x]);
+                Ok(Some((v, t)))
+            }
+            "log10" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_log10", &[x]);
+                Ok(Some((v, t)))
+            }
+            "sin" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_sin", &[x]);
+                Ok(Some((v, t)))
+            }
+            "cos" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_cos", &[x]);
+                Ok(Some((v, t)))
+            }
+            "tan" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_tan", &[x]);
+                Ok(Some((v, t)))
+            }
+            "asin" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_asin", &[x]);
+                Ok(Some((v, t)))
+            }
+            "acos" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_acos", &[x]);
+                Ok(Some((v, t)))
+            }
+            "atan" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_atan", &[x]);
+                Ok(Some((v, t)))
+            }
+            "math_pi" => {
+                let (v, t) = call_f64(self, "runtime_math_pi", &[]);
+                Ok(Some((v, t)))
+            }
+            "math_e" => {
+                let (v, t) = call_f64(self, "runtime_math_e", &[]);
+                Ok(Some((v, t)))
+            }
             // ---- time builtins ----
             "time_now" => {
                 let (v, t) = call_f64(self, "runtime_time_now", &[]);
