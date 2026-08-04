@@ -100,6 +100,60 @@ LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem);
 int64_t runtime_list_len(LimeList list);
 int64_t runtime_list_get(LimeList list, int64_t index);
 
+// -- List mutation / inspection (Phase C-1.2) --
+LimeList runtime_list_insert(LimeList list, int64_t index, int64_t elem);
+LimeList runtime_list_clear(LimeList list);
+LimeList runtime_list_sort(LimeList list);
+LimeList runtime_list_clone(LimeList list);
+
+// -- Map operations --
+typedef struct {
+    void* data;   // pointer to key-value pairs (i64 pairs: key, value interleaved)
+    int64_t len;  // number of entries
+    int64_t cap;  // capacity (number of entries)
+} LimeMap;
+
+int64_t runtime_map_len(LimeMap map);
+int runtime_map_is_empty(LimeMap map);
+LimeMap runtime_map_insert(LimeMap map, int64_t key, int64_t val);
+int64_t runtime_map_get(LimeMap map, int64_t key);
+LimeMap runtime_map_remove(LimeMap map, int64_t key);
+int runtime_map_contains_key(LimeMap map, int64_t key);
+LimeMap runtime_map_clear(LimeMap map);
+LimeMap runtime_map_clone(LimeMap map);
+
+// -- Set operations --
+typedef struct {
+    void* data;   // pointer to elements (i64 values)
+    int64_t len;  // number of elements
+    int64_t cap;  // capacity (number of elements)
+} LimeSet;
+
+int64_t runtime_set_len(LimeSet set);
+int runtime_set_is_empty(LimeSet set);
+LimeSet runtime_set_add(LimeSet set, int64_t elem);
+LimeSet runtime_set_remove(LimeSet set, int64_t elem);
+int runtime_set_contains(LimeSet set, int64_t elem);
+LimeSet runtime_set_clear(LimeSet set);
+LimeSet runtime_set_clone(LimeSet set);
+
+// -- Queue operations (implemented on top of LimeList, FIFO) --
+LimeList runtime_queue_push(LimeList queue, int64_t elem);
+int64_t runtime_queue_pop(LimeList queue);
+int64_t runtime_queue_front(LimeList queue);
+int64_t runtime_queue_back(LimeList queue);
+int64_t runtime_queue_len(LimeList queue);
+int runtime_queue_is_empty(LimeList queue);
+LimeList runtime_queue_clear(LimeList queue);
+
+// -- Stack operations (implemented on top of LimeList, LIFO) --
+LimeList runtime_stack_push(LimeList stack, int64_t elem);
+int64_t runtime_stack_pop(LimeList stack);
+int64_t runtime_stack_peek(LimeList stack);
+int64_t runtime_stack_len(LimeList stack);
+int runtime_stack_is_empty(LimeList stack);
+LimeList runtime_stack_clear(LimeList stack);
+
 // -- Closure / function values (Phase B-2.2 / B-2.3) --
 //
 // LimeClosure ABI:

@@ -784,7 +784,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
     fs::write(format!("{}/main.lime", dir), source).unwrap();
     fs::write(
         format!("{}/citrus.toml", dir),
-        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\n",
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\n",
     )
     .unwrap();
 }
@@ -1966,4 +1966,129 @@ fn emit_object_string_equals_compare() {
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
     assert_eq!(native_out.replace("\r", ""), "true\nfalse\n-1\n1\n0", "string equals/compare (native) mismatch");
+}
+
+/// Phase C-1.2: list builtin operations — interpreter + native parity.
+#[test]
+fn emit_object_list_builtins() {
+    use std::fs;
+    let dir = "target/test_list_builtins";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let xs = [1, 2, 3]\n    println(list_insert(xs, 1, 99))\n    println(list_get(xs, 0))\n    println(list_get(list_insert(xs, 1, 99), 2))\n    println(len(list_clear(xs)))\n    println(list_sort([3, 1, 2]))\n    println(len(list_clone([1, 2, 3])))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["[1, 99, 2, 3]", "1", "2", "0", "[1, 2, 3]", "3"],
+        "list builtins (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase C-1.2: map builtin operations — interpreter + native parity.
+#[test]
+fn emit_object_map_builtins() {
+    use std::fs;
+    let dir = "target/test_map_builtins";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let m = map_insert(map_empty(), 1, 100)\n    println(map_get(m, 1))\n    println(map_len(m))\n    println(map_contains_key(m, 1))\n    println(map_is_empty(map_clear(m)))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["100", "1", "true", "true"],
+        "map builtins (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase C-1.2: set builtin operations — interpreter + native parity.
+#[test]
+fn emit_object_set_builtins() {
+    use std::fs;
+    let dir = "target/test_set_builtins";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let s = set_add(set_empty(), 1)\n    let s2 = set_add(s, 2)\n    println(set_len(s2))\n    println(set_contains(s2, 1))\n    println(set_contains(s2, 3))\n    println(set_is_empty(set_clear(s2)))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["2", "true", "false", "true"],
+        "set builtins (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase C-1.2: queue builtin operations — interpreter + native parity.
+#[test]
+fn emit_object_queue_builtins() {
+    use std::fs;
+    let dir = "target/test_queue_builtins";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let q = queue_push(queue_empty(), 1)\n    let q2 = queue_push(q, 2)\n    println(queue_front(q2))\n    println(queue_back(q2))\n    println(queue_pop(q2))\n    println(queue_len(q2))\n    println(queue_is_empty(q2))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["1", "2", "1", "2", "false"],
+        "queue builtins (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase C-1.2: stack builtin operations — interpreter + native parity.
+#[test]
+fn emit_object_stack_builtins() {
+    use std::fs;
+    let dir = "target/test_stack_builtins";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let s = stack_push(stack_empty(), 1)\n    let s2 = stack_push(s, 2)\n    println(stack_peek(s2))\n    println(stack_pop(s2))\n    println(stack_len(s2))\n    println(stack_is_empty(s2))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["2", "2", "2", "false"],
+        "stack builtins (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
 }

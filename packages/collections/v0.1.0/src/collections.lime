@@ -181,3 +181,127 @@ fn index_of(T)(List(T): list, T: item):
 
 fn contains(T)(List(T): list, T: item):
     return contains_item(list, item)
+
+// ===== Phase C-1.2: list builtins =====
+fn list_insert(T)(List(T): list, int: idx, T: item):
+    return list_insert(list, idx, item)
+
+fn list_set(T)(List(T): list, int: idx, T: item):
+    let List(T): result = list_set(list, idx, item)
+    return result
+
+fn list_get(T)(List(T): list, int: idx):
+    return list_get(list, idx)
+
+fn list_clear(T)(List(T): list):
+    return list_clear(list)
+
+fn list_sort(T)(List(T): list):
+    return list_sort(list)
+
+fn list_clone(T)(List(T): list):
+    return list_clone(list)
+
+// ===== Phase C-1.2: Map(K, V) builtins =====
+fn map_len(K, V)(Map(K, V): m):
+    return map_len(m)
+
+fn map_is_empty(K, V)(Map(K, V): m):
+    return map_is_empty(m)
+
+fn map_insert_builtin(K, V)(Map(K, V): m, K: key, V: value):
+    let Map(K, V): result = map_insert(m, key, value)
+    return result
+
+fn map_get_builtin(K, V)(Map(K, V): m, K: key):
+    return map_get(m, key)
+
+fn map_remove_builtin(K, V)(Map(K, V): m, K: key):
+    let Map(K, V): result = map_remove(m, key)
+    return result
+
+fn map_contains_key_builtin(K, V)(Map(K, V): m, K: key):
+    return map_contains_key(m, key)
+
+fn map_keys_builtin(K, V)(Map(K, V): m):
+    return map_keys(m)
+
+fn map_values_builtin(K, V)(Map(K, V): m):
+    return map_values(m)
+
+fn map_clear_builtin(K, V)(Map(K, V): m):
+    let Map(K, V): result = map_clear(m)
+    return result
+
+fn map_clone_builtin(K, V)(Map(K, V): m):
+    return map_clone(m)
+
+// ===== Phase C-1.2: Set(T) builtins =====
+fn set_len(T)(Set(T): s):
+    return set_len(s)
+
+fn set_is_empty(T)(Set(T): s):
+    return set_is_empty(s)
+
+fn set_add_builtin(T)(Set(T): s, T: item):
+    let Set(T): result = set_add(s, item)
+    return result
+
+fn set_remove_builtin(T)(Set(T): s, T: item):
+    let Set(T): result = set_remove(s, item)
+    return result
+
+fn set_contains_builtin(T)(Set(T): s, T: item):
+    return set_contains(s, item)
+
+fn set_clear_builtin(T)(Set(T): s):
+    let Set(T): result = set_clear(s)
+    return result
+
+fn set_clone_builtin(T)(Set(T): s):
+    return set_clone(s)
+
+// ===== Phase C-1.2: Queue(T) builtins (FIFO) =====
+fn queue_push(T)(List(T): q, T: item):
+    let List(T): result = queue_push(q, item)
+    return result
+
+fn queue_pop(T)(List(T): q):
+    return queue_pop(q)
+
+fn queue_front(T)(List(T): q):
+    return queue_front(q)
+
+fn queue_back(T)(List(T): q):
+    return queue_back(q)
+
+fn queue_len(T)(List(T): q):
+    return queue_len(q)
+
+fn queue_is_empty(T)(List(T): q):
+    return queue_is_empty(q)
+
+fn queue_clear(T)(List(T): q):
+    let List(T): result = queue_clear(q)
+    return result
+
+// ===== Phase C-1.2: Stack(T) builtins (LIFO) =====
+fn stack_push(T)(List(T): s, T: item):
+    let List(T): result = stack_push(s, item)
+    return result
+
+fn stack_pop(T)(List(T): s):
+    return stack_pop(s)
+
+fn stack_peek(T)(List(T): s):
+    return stack_peek(s)
+
+fn stack_len(T)(List(T): s):
+    return stack_len(s)
+
+fn stack_is_empty(T)(List(T): s):
+    return stack_is_empty(s)
+
+fn stack_clear(T)(List(T): s):
+    let List(T): result = stack_clear(s)
+    return result

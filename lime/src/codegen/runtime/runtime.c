@@ -843,6 +843,267 @@ int64_t runtime_list_get(LimeList list, int64_t index) {
     return 0;
 }
 
+// -- List mutation / inspection (Phase C-1.2) --
+
+// Insert `elem` at `index`, shifting elements right. Clamps index to [0, len].
+LimeList runtime_list_insert(LimeList list, int64_t index, int64_t elem) {
+    if (index < 0) index = 0;
+    if (index > list.len) index = list.len;
+    if (list.len >= list.cap) grow_list(&list);
+    int64_t* arr = (int64_t*)list.data;
+    memmove(arr + index + 1, arr + index, (list.len - index) * sizeof(int64_t));
+    arr[index] = elem;
+    list.len++;
+    return list;
+}
+
+LimeList runtime_list_clear(LimeList list) {
+    list.len = 0;
+    return list;
+}
+
+// Sort the list elements (simple insertion sort for i64 values).
+LimeList runtime_list_sort(LimeList list) {
+    int64_t* arr = (int64_t*)list.data;
+    for (int64_t i = 1; i < list.len; i++) {
+        int64_t key = arr[i];
+        int64_t j = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = key;
+    }
+    return list;
+}
+
+LimeList runtime_list_clone(LimeList list) {
+    LimeList result = {0, 0, 0};
+    if (list.len > 0) {
+        if (result.len >= result.cap) grow_list(&result);
+        while (result.cap < list.len) grow_list(&result);
+        memcpy(result.data, list.data, list.len * sizeof(int64_t));
+        result.len = list.len;
+    }
+    return result;
+}
+
+// -- Map operations --
+
+static LimeMap map_grow(LimeMap map, int64_t min_cap) {
+    if (map.cap >= min_cap) return map;
+    int64_t new_cap = map.cap > 0 ? map.cap * 2 : 4;
+    while (new_cap < min_cap) new_cap *= 2;
+    void* new_data = realloc(map.data, new_cap * 2 * sizeof(int64_t));
+    if (!new_data) runtime_panic("map: out of memory");
+    map.data = new_data;
+    map.cap = new_cap;
+    return map;
+}
+
+int64_t runtime_map_len(LimeMap map) {
+    return map.len;
+}
+
+int runtime_map_is_empty(LimeMap map) {
+    return map.len == 0 ? 1 : 0;
+}
+
+LimeMap runtime_map_insert(LimeMap map, int64_t key, int64_t val) {
+    for (int64_t i = 0; i < map.len; i++) {
+        int64_t* pair = (int64_t*)map.data + i * 2;
+        if (pair[0] == key) {
+            pair[1] = val;
+            return map;
+        }
+    }
+    if (map.len >= map.cap) map = map_grow(map, map.len + 1);
+    int64_t* pair = (int64_t*)map.data + map.len * 2;
+    pair[0] = key;
+    pair[1] = val;
+    map.len++;
+    return map;
+}
+
+int64_t runtime_map_get(LimeMap map, int64_t key) {
+    for (int64_t i = 0; i < map.len; i++) {
+        int64_t* pair = (int64_t*)map.data + i * 2;
+        if (pair[0] == key) return pair[1];
+    }
+    return 0;
+}
+
+LimeMap runtime_map_remove(LimeMap map, int64_t key) {
+    for (int64_t i = 0; i < map.len; i++) {
+        int64_t* pair = (int64_t*)map.data + i * 2;
+        if (pair[0] == key) {
+            int64_t* dst = (int64_t*)map.data + i * 2;
+            int64_t* src = (int64_t*)map.data + (i + 1) * 2;
+            int64_t remaining = map.len - i - 1;
+            if (remaining > 0) {
+                memmove(dst, src, remaining * 2 * sizeof(int64_t));
+            }
+            map.len--;
+            return map;
+        }
+    }
+    return map;
+}
+
+int runtime_map_contains_key(LimeMap map, int64_t key) {
+    for (int64_t i = 0; i < map.len; i++) {
+        int64_t* pair = (int64_t*)map.data + i * 2;
+        if (pair[0] == key) return 1;
+    }
+    return 0;
+}
+
+LimeMap runtime_map_clear(LimeMap map) {
+    map.len = 0;
+    return map;
+}
+
+LimeMap runtime_map_clone(LimeMap map) {
+    LimeMap result = {0, 0, 0};
+    if (map.len > 0) {
+        result = map_grow(result, map.len);
+        memcpy(result.data, map.data, map.len * 2 * sizeof(int64_t));
+        result.len = map.len;
+    }
+    return result;
+}
+
+// -- Set operations --
+
+static LimeSet set_grow(LimeSet set, int64_t min_cap) {
+    if (set.cap >= min_cap) return set;
+    int64_t new_cap = set.cap > 0 ? set.cap * 2 : 4;
+    while (new_cap < min_cap) new_cap *= 2;
+    void* new_data = realloc(set.data, new_cap * sizeof(int64_t));
+    if (!new_data) runtime_panic("set: out of memory");
+    set.data = new_data;
+    set.cap = new_cap;
+    return set;
+}
+
+int64_t runtime_set_len(LimeSet set) {
+    return set.len;
+}
+
+int runtime_set_is_empty(LimeSet set) {
+    return set.len == 0 ? 1 : 0;
+}
+
+LimeSet runtime_set_add(LimeSet set, int64_t elem) {
+    for (int64_t i = 0; i < set.len; i++) {
+        if (((int64_t*)set.data)[i] == elem) return set;
+    }
+    if (set.len >= set.cap) set = set_grow(set, set.len + 1);
+    ((int64_t*)set.data)[set.len] = elem;
+    set.len++;
+    return set;
+}
+
+LimeSet runtime_set_remove(LimeSet set, int64_t elem) {
+    for (int64_t i = 0; i < set.len; i++) {
+        if (((int64_t*)set.data)[i] == elem) {
+            memmove((int64_t*)set.data + i, (int64_t*)set.data + i + 1, (set.len - i - 1) * sizeof(int64_t));
+            set.len--;
+            return set;
+        }
+    }
+    return set;
+}
+
+int runtime_set_contains(LimeSet set, int64_t elem) {
+    for (int64_t i = 0; i < set.len; i++) {
+        if (((int64_t*)set.data)[i] == elem) return 1;
+    }
+    return 0;
+}
+
+LimeSet runtime_set_clear(LimeSet set) {
+    set.len = 0;
+    return set;
+}
+
+LimeSet runtime_set_clone(LimeSet set) {
+    LimeSet result = {0, 0, 0};
+    if (set.len > 0) {
+        result = set_grow(result, set.len);
+        memcpy(result.data, set.data, set.len * sizeof(int64_t));
+        result.len = set.len;
+    }
+    return result;
+}
+
+// -- Queue operations (FIFO: push at back, pop from front) --
+
+LimeList runtime_queue_push(LimeList queue, int64_t elem) {
+    return runtime_list_add(queue, elem);
+}
+
+int64_t runtime_queue_pop(LimeList queue) {
+    if (queue.len == 0) runtime_panic("queue_pop: empty queue");
+    int64_t val = ((int64_t*)queue.data)[0];
+    memmove((int64_t*)queue.data, (int64_t*)queue.data + 1, (queue.len - 1) * sizeof(int64_t));
+    queue.len--;
+    return val;
+}
+
+int64_t runtime_queue_front(LimeList queue) {
+    if (queue.len == 0) runtime_panic("queue_front: empty queue");
+    return ((int64_t*)queue.data)[0];
+}
+
+int64_t runtime_queue_back(LimeList queue) {
+    if (queue.len == 0) runtime_panic("queue_back: empty queue");
+    return ((int64_t*)queue.data)[queue.len - 1];
+}
+
+int64_t runtime_queue_len(LimeList queue) {
+    return queue.len;
+}
+
+int runtime_queue_is_empty(LimeList queue) {
+    return queue.len == 0 ? 1 : 0;
+}
+
+LimeList runtime_queue_clear(LimeList queue) {
+    queue.len = 0;
+    return queue;
+}
+
+// -- Stack operations (LIFO: push at back, pop from back) --
+
+LimeList runtime_stack_push(LimeList stack, int64_t elem) {
+    return runtime_list_add(stack, elem);
+}
+
+int64_t runtime_stack_pop(LimeList stack) {
+    if (stack.len == 0) runtime_panic("stack_pop: empty stack");
+    stack.len--;
+    return ((int64_t*)stack.data)[stack.len];
+}
+
+int64_t runtime_stack_peek(LimeList stack) {
+    if (stack.len == 0) runtime_panic("stack_peek: empty stack");
+    return ((int64_t*)stack.data)[stack.len - 1];
+}
+
+int64_t runtime_stack_len(LimeList stack) {
+    return stack.len;
+}
+
+int runtime_stack_is_empty(LimeList stack) {
+    return stack.len == 0 ? 1 : 0;
+}
+
+LimeList runtime_stack_clear(LimeList stack) {
+    stack.len = 0;
+    return stack;
+}
+
 // -- Closure / function values (Phase B-2.2) --
 
 // Create a closure wrapping a function pointer and an environment pointer.

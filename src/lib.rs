@@ -1,5 +1,5 @@
 use std::fs;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Embed the C runtime source so the compiler can compile it on-the-fly.
 const RUNTIME_C_SOURCE: &str = include_str!("codegen/runtime/runtime.c");
@@ -4407,6 +4407,8 @@ enum Value {
     Bool(bool),
     Array(Vec<Value>),
     Slice(Vec<Value>),
+    Map(HashMap<Value, Value>),
+    Set(HashSet<Value>),
     StringBuilder(String),
     Option(Option<Box<Value>>),
     State {
@@ -4763,12 +4765,70 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Array(a), Value::Array(b)) => a == b,
             (Value::Slice(a), Value::Slice(b)) => a == b,
+            (Value::Map(a), Value::Map(b)) => a == b,
+            (Value::Set(a), Value::Set(b)) => a == b,
             (Value::Option(a), Value::Option(b)) => a == b,
             (Value::State { name: an, values: av }, Value::State { name: bn, values: bv }) => an == bn && av == bv,
             (Value::Struct { name: an, fields: af }, Value::Struct { name: bn, fields: bf }) => an == bn && af == bf,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::FuncRef(a), Value::FuncRef(b)) => a == b,
             _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}
+
+impl std::hash::Hash for Value {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Value::Int(i) => {
+                std::mem::discriminant(self).hash(state);
+                i.hash(state);
+            }
+            Value::Float(f) => {
+                std::mem::discriminant(self).hash(state);
+                f.to_bits().hash(state);
+            }
+            Value::String(s) => {
+                std::mem::discriminant(self).hash(state);
+                s.hash(state);
+            }
+            Value::Bool(b) => {
+                std::mem::discriminant(self).hash(state);
+                b.hash(state);
+            }
+            Value::Array(arr) => {
+                std::mem::discriminant(self).hash(state);
+                arr.hash(state);
+            }
+            Value::Slice(arr) => {
+                std::mem::discriminant(self).hash(state);
+                arr.hash(state);
+            }
+            Value::Map(m) => {
+                std::mem::discriminant(self).hash(state);
+                // Hash maps by key-value pairs in sorted order (by key hash)
+                let mut pairs: Vec<_> = m.iter().collect();
+                pairs.sort_by_key(|(k, _)| {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    k.hash(&mut h);
+                    h.finish()
+                });
+                pairs.hash(state);
+            }
+            Value::Set(s) => {
+                std::mem::discriminant(self).hash(state);
+                // Hash sets by elements in sorted order (by element hash)
+                let mut elems: Vec<_> = s.iter().collect();
+                elems.sort_by_key(|e| {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    e.hash(&mut h);
+                    h.finish()
+                });
+                elems.hash(state);
+            }
+            _ => std::mem::discriminant(self).hash(state),
         }
     }
 }
@@ -4788,7 +4848,17 @@ impl Value {
                 let strs: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 format!("Slice[{}]", strs.join(", "))
             }
-        Value::StringBuilder(s) => s.clone(),
+            Value::Map(m) => {
+                let entries: Vec<String> = m.iter()
+                    .map(|(k, v)| format!("{}: {}", k.to_string(), v.to_string()))
+                    .collect();
+                format!("Map({{{}}})", entries.join(", "))
+            }
+            Value::Set(s) => {
+                let elems: Vec<String> = s.iter().map(|v| v.to_string()).collect();
+                format!("Set({})", elems.join(", "))
+            }
+            Value::StringBuilder(s) => s.clone(),
         Value::Option(opt) => match opt {
             Some(v) => format!("Some({})", v.to_string()),
             None => "None".to_string(),
@@ -4816,6 +4886,94 @@ impl Value {
             Value::Tuple(elems) => {
                 let strs: Vec<String> = elems.iter().map(|v| v.to_string()).collect();
                 format!("({})", strs.join(", "))
+            }
+        }
+    }
+
+    fn compare(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => a.cmp(b),
+            (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+            (Value::Float(a), Value::Float(b)) => {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            }
+            (Value::String(a), Value::String(b)) => a.cmp(b),
+            (Value::Array(a), Value::Array(b)) => {
+                if a.len() != b.len() {
+                    return a.len().cmp(&b.len());
+                }
+                for (ae, be) in a.iter().zip(b.iter()) {
+                    let cmp = ae.compare(be);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                }
+                std::cmp::Ordering::Equal
+            }
+            (Value::Slice(a), Value::Slice(b)) => {
+                if a.len() != b.len() {
+                    return a.len().cmp(&b.len());
+                }
+                for (ae, be) in a.iter().zip(b.iter()) {
+                    let cmp = ae.compare(be);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                }
+                std::cmp::Ordering::Equal
+            }
+            (Value::Tuple(a), Value::Tuple(b)) => {
+                if a.len() != b.len() {
+                    return a.len().cmp(&b.len());
+                }
+                for (ae, be) in a.iter().zip(b.iter()) {
+                    let cmp = ae.compare(be);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                }
+                std::cmp::Ordering::Equal
+            }
+            (Value::Map(a), Value::Map(b)) => {
+                if a.len() != b.len() {
+                    return a.len().cmp(&b.len());
+                }
+                let mut a_keys: Vec<_> = a.keys().collect();
+                let mut b_keys: Vec<_> = b.keys().collect();
+                a_keys.sort_by(|x, y| x.compare(y));
+                b_keys.sort_by(|x, y| x.compare(y));
+                for (ak, bk) in a_keys.iter().zip(b_keys.iter()) {
+                    let cmp = ak.compare(bk);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                    let cmp = a.get(*ak).unwrap().compare(b.get(*bk).unwrap());
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                }
+                std::cmp::Ordering::Equal
+            }
+            (Value::Set(a), Value::Set(b)) => {
+                if a.len() != b.len() {
+                    return a.len().cmp(&b.len());
+                }
+                // Compare elements (sets are compared by their sorted contents)
+                let mut a_elems: Vec<_> = a.iter().collect();
+                let mut b_elems: Vec<_> = b.iter().collect();
+                a_elems.sort_by(|x, y| x.compare(y));
+                b_elems.sort_by(|x, y| x.compare(y));
+                for (ae, be) in a_elems.iter().zip(b_elems.iter()) {
+                    let cmp = ae.compare(be);
+                    if cmp != std::cmp::Ordering::Equal {
+                        return cmp;
+                    }
+                }
+                std::cmp::Ordering::Equal
+            }
+            _ => {
+                // Different variants: compare by string representation
+                self.to_string().cmp(&other.to_string())
             }
         }
     }
@@ -5757,8 +5915,98 @@ fn infer_type(
                             return Err("clamp() expects float arguments".to_string());
                         }
                     }
-                    Ok(Type::Float)
+                     Ok(Type::Float)
                 }
+                // List: list_insert, list_set, list_get, list_clear, list_sort, list_clone
+                "list_insert" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "list_set" => Ok(Type::Unit),
+                "list_get" => {
+                    if let Some(first) = args.first() {
+                        let ty = infer_type(first, env, defs, constraints)?;
+                        match ty {
+                            Type::List(elem) => Ok((*elem).clone()),
+                            _ => Ok(Type::Unknown),
+                        }
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "list_clear" | "list_sort" | "list_clone" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "list_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                // Map builtins
+                "map_len" | "map_size" => Ok(Type::Int),
+                "map_is_empty" => Ok(Type::Bool),
+                "map_insert" => Ok(Type::Unit),
+                "map_get" => Ok(Type::Unknown),
+                "map_remove" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "map_contains_key" => Ok(Type::Bool),
+                "map_keys" | "map_values" => Ok(Type::List(Box::new(Type::Unknown))),
+                "map_clear" | "map_clone" | "map_empty" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+
+                // Set builtins
+                "set_len" | "set_size" => Ok(Type::Int),
+                "set_is_empty" => Ok(Type::Bool),
+                "set_add" | "set_remove" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "set_contains" => Ok(Type::Bool),
+                "set_clear" | "set_clone" | "set_empty" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                // Queue builtins
+                "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_clear" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "queue_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                "queue_len" | "queue_size" => Ok(Type::Int),
+                "queue_is_empty" => Ok(Type::Bool),
+                // Stack builtins
+                "stack_push" | "stack_pop" | "stack_peek" | "stack_clear" => {
+                    if let Some(first) = args.first() {
+                        infer_type(first, env, defs, constraints)
+                    } else {
+                        Ok(Type::Unknown)
+                    }
+                }
+                "stack_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                "stack_len" | "stack_size" => Ok(Type::Int),
+                "stack_is_empty" => Ok(Type::Bool),
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -6496,6 +6744,61 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 Ok(Type::Float)
             } else {
                 Err(format!("Type error: pow() expects float arguments"))
+            }
+        }
+        "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort" | "list_clone" | "list_empty" => {
+            for a in args { check_expr(a, env, defs)?; }
+            match func.as_str() {
+                "list_insert" | "list_set" | "list_clear" | "list_empty" => Ok(Type::Unknown),
+                "list_get" => Ok(Type::Unknown),
+                "list_sort" | "list_clone" => Ok(Type::Unknown),
+                _ => Ok(Type::Unknown),
+            }
+        }
+        "map_len" | "map_size" | "map_is_empty" | "map_insert" | "map_get" | "map_remove"
+        | "map_contains_key" | "map_keys" | "map_values" | "map_clear" | "map_clone" | "map_empty" => {
+            for a in args { check_expr(a, env, defs)?; }
+            match func.as_str() {
+                "map_len" | "map_size" => Ok(Type::Int),
+                "map_is_empty" => Ok(Type::Bool),
+                "map_keys" => Ok(Type::List(Box::new(Type::Unknown))),
+                "map_values" => Ok(Type::List(Box::new(Type::Unknown))),
+                "map_get" => Ok(Type::Option(Box::new(Type::Unknown))),
+                "map_contains_key" | "map_insert" | "map_remove" | "map_clear" | "map_clone" | "map_empty" => {
+                    Ok(Type::Unknown)
+                }
+                _ => Ok(Type::Unknown),
+            }
+        }
+        "set_len" | "set_size" | "set_is_empty" | "set_add" | "set_remove" | "set_contains"
+        | "set_clear" | "set_clone" | "set_empty" => {
+            for a in args { check_expr(a, env, defs)?; }
+            match func.as_str() {
+                "set_len" | "set_size" => Ok(Type::Int),
+                "set_is_empty" | "set_contains" => Ok(Type::Bool),
+                "set_add" | "set_remove" | "set_clear" | "set_clone" | "set_empty" => Ok(Type::Unknown),
+                _ => Ok(Type::Unknown),
+            }
+        }
+        "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_len"
+        | "queue_is_empty" | "queue_clear" | "queue_empty" => {
+            for a in args { check_expr(a, env, defs)?; }
+            match func.as_str() {
+                "queue_len" => Ok(Type::Int),
+                "queue_is_empty" => Ok(Type::Bool),
+                "queue_pop" | "queue_front" | "queue_back" => Ok(Type::Unknown),
+                "queue_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                _ => Ok(Type::Unknown),
+            }
+        }
+        "stack_push" | "stack_pop" | "stack_peek" | "stack_len" | "stack_is_empty" | "stack_clear" | "stack_empty" => {
+            for a in args { check_expr(a, env, defs)?; }
+            match func.as_str() {
+                "stack_len" => Ok(Type::Int),
+                "stack_is_empty" => Ok(Type::Bool),
+                "stack_pop" | "stack_peek" => Ok(Type::Unknown),
+                "stack_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                _ => Ok(Type::Unknown),
             }
         }
         other => {
@@ -9729,9 +10032,15 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "repeat" | "time_now" | "time_sleep" | "read_file" | "write_file" | "append_file"
             | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
             | "fs_list_dir" | "fs_create_dir" | "input"
-            | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
-            | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
-            | "to_int" | "to_float" | "equals" | "compare"
+             | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
+             | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
+             | "to_int" | "to_float" | "equals" | "compare"
+             | "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort" | "list_clone" | "list_empty"
+             | "map_len" | "map_is_empty" | "map_insert" | "map_get" | "map_remove" | "map_contains_key"
+             | "map_keys" | "map_values" | "map_clear" | "map_clone" | "map_empty"
+             | "set_len" | "set_is_empty" | "set_add" | "set_remove" | "set_contains" | "set_clear" | "set_clone" | "set_empty"
+             | "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_len" | "queue_is_empty" | "queue_clear" | "queue_empty"
+             | "stack_push" | "stack_pop" | "stack_peek" | "stack_len" | "stack_is_empty" | "stack_clear" | "stack_empty"
     )
 }
 
@@ -10150,6 +10459,373 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             } else {
                 Err("remove_at() expects (list, int)".to_string())
             }
+        }
+        "list_insert" => {
+            let list = eval_expr(&args[0], env, defs)?;
+            let idx = eval_expr(&args[1], env, defs)?;
+            let item = eval_expr(&args[2], env, defs)?;
+            if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
+                let idx = if i < 0 { 0 } else { i as usize };
+                let idx = idx.min(arr.len());
+                arr.insert(idx, item);
+                Ok(Value::Array(arr))
+            } else {
+                Err("list_insert() expects (list, int, T)".to_string())
+            }
+        }
+        "list_set" => {
+            let list = eval_expr(&args[0], env, defs)?;
+            let idx = eval_expr(&args[1], env, defs)?;
+            let item = eval_expr(&args[2], env, defs)?;
+            if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
+                if i >= 0 && (i as usize) < arr.len() {
+                    arr[i as usize] = item;
+                }
+                Ok(Value::Array(arr))
+            } else {
+                Err("list_set() expects (list, int, T)".to_string())
+            }
+        }
+        "list_get" => {
+            let list = eval_expr(&args[0], env, defs)?;
+            let idx = eval_expr(&args[1], env, defs)?;
+            if let (Value::Array(arr), Value::Int(i)) = (list, idx) {
+                if i >= 0 && (i as usize) < arr.len() {
+                    Ok(arr[i as usize].clone())
+                } else {
+                    Ok(Value::Int(0))
+                }
+            } else {
+                Err("list_get() expects (list, int)".to_string())
+            }
+        }
+        "list_clear" => {
+            let list = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(_) = list {
+                Ok(Value::Array(Vec::new()))
+            } else {
+                Err("list_clear() expects a list".to_string())
+            }
+        }
+        "list_sort" => {
+            let list = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = list {
+                let mut sorted = arr.clone();
+                sorted.sort_by(|a, b| a.compare(b));
+                Ok(Value::Array(sorted))
+            } else {
+                Err("list_sort() expects a list".to_string())
+            }
+        }
+        "list_clone" => {
+            let list = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = list {
+                Ok(Value::Array(arr.clone()))
+            } else {
+                Err("list_clone() expects a list".to_string())
+            }
+        }
+        "list_empty" => {
+            Ok(Value::Array(Vec::new()))
+        }
+        // Map builtins
+        "map_len" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            if let Value::Map(m) = &map {
+                Ok(Value::Int(m.len() as i64))
+            } else {
+                Err("map_len() expects a Map".to_string())
+            }
+        }
+        "map_is_empty" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            if let Value::Map(m) = &map {
+                Ok(Value::Bool(m.is_empty()))
+            } else {
+                Err("map_is_empty() expects a Map".to_string())
+            }
+        }
+        "map_insert" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            let val = eval_expr(&args[2], env, defs)?;
+            if let Value::Map(mut m) = map {
+                let mut new_map = m.clone();
+                new_map.insert(key, val);
+                Ok(Value::Map(new_map))
+            } else {
+                Err("map_insert() expects a Map".to_string())
+            }
+        }
+        "map_get" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            if let Value::Map(m) = &map {
+                Ok(m.get(&key).cloned().unwrap_or(Value::Int(0)))
+            } else {
+                Err("map_get() expects a Map".to_string())
+            }
+        }
+        "map_remove" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            if let Value::Map(mut m) = map {
+                m.remove(&key);
+                Ok(Value::Map(m))
+            } else {
+                Err("map_remove() expects a Map".to_string())
+            }
+        }
+        "map_contains_key" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            if let Value::Map(m) = &map {
+                Ok(Value::Bool(m.contains_key(&key)))
+            } else {
+                Err("map_contains_key() expects a Map".to_string())
+            }
+        }
+        "map_keys" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            if let Value::Map(m) = &map {
+                Ok(Value::Array(m.keys().cloned().collect()))
+            } else {
+                Err("map_keys() expects a Map".to_string())
+            }
+        }
+        "map_values" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            if let Value::Map(m) = &map {
+                Ok(Value::Array(m.values().cloned().collect()))
+            } else {
+                Err("map_values() expects a Map".to_string())
+            }
+        }
+        "map_clear" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            if let Value::Map(_) = map {
+                Ok(Value::Map(HashMap::new()))
+            } else {
+                Err("map_clear() expects a Map".to_string())
+            }
+        }
+        "map_clone" => {
+            let map = eval_expr(&args[0], env, defs)?;
+            if let Value::Map(m) = map {
+                Ok(Value::Map(m))
+            } else {
+                Err("map_clone() expects a Map".to_string())
+            }
+        }
+        "map_empty" => {
+            Ok(Value::Map(HashMap::new()))
+        }
+        // Set builtins
+        "set_len" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            if let Value::Set(s) = &set {
+                Ok(Value::Int(s.len() as i64))
+            } else {
+                Err("set_len() expects a Set".to_string())
+            }
+        }
+        "set_is_empty" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            if let Value::Set(s) = &set {
+                Ok(Value::Bool(s.is_empty()))
+            } else {
+                Err("set_is_empty() expects a Set".to_string())
+            }
+        }
+        "set_add" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            let item = eval_expr(&args[1], env, defs)?;
+            if let Value::Set(mut s) = set {
+                s.insert(item);
+                Ok(Value::Set(s))
+            } else {
+                Err("set_add() expects a Set".to_string())
+            }
+        }
+        "set_remove" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            let item = eval_expr(&args[1], env, defs)?;
+            if let Value::Set(mut s) = set {
+                s.remove(&item);
+                Ok(Value::Set(s))
+            } else {
+                Err("set_remove() expects a Set".to_string())
+            }
+        }
+        "set_contains" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            let item = eval_expr(&args[1], env, defs)?;
+            if let Value::Set(s) = &set {
+                Ok(Value::Bool(s.contains(&item)))
+            } else {
+                Err("set_contains() expects a Set".to_string())
+            }
+        }
+        "set_clear" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            if let Value::Set(_) = set {
+                Ok(Value::Set(HashSet::new()))
+            } else {
+                Err("set_clear() expects a Set".to_string())
+            }
+        }
+        "set_clone" => {
+            let set = eval_expr(&args[0], env, defs)?;
+            if let Value::Set(s) = set {
+                Ok(Value::Set(s))
+            } else {
+                Err("set_clone() expects a Set".to_string())
+            }
+        }
+        "set_empty" => {
+            Ok(Value::Set(HashSet::new()))
+       }
+        // Queue builtins (FIFO: push at back, pop from front)
+        "queue_push" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            let item = eval_expr(&args[1], env, defs)?;
+            if let Value::Array(mut arr) = queue {
+                arr.push(item);
+                Ok(Value::Array(arr))
+            } else {
+                Err("queue_push() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_pop" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(mut arr) = queue {
+                if arr.is_empty() {
+                    Err("queue_pop() on empty queue".to_string())
+                } else {
+                    Ok(arr.remove(0))
+                }
+            } else {
+                Err("queue_pop() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_front" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = queue {
+                if arr.is_empty() {
+                    Err("queue_front() on empty queue".to_string())
+                } else {
+                    Ok(arr[0].clone())
+                }
+            } else {
+                Err("queue_front() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_back" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = queue {
+                if arr.is_empty() {
+                    Err("queue_back() on empty queue".to_string())
+                } else {
+                    Ok(arr[arr.len() - 1].clone())
+                }
+            } else {
+                Err("queue_back() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_len" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = queue {
+                Ok(Value::Int(arr.len() as i64))
+            } else {
+                Err("queue_len() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_is_empty" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = queue {
+                Ok(Value::Bool(arr.is_empty()))
+            } else {
+                Err("queue_is_empty() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_clear" => {
+            let queue = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(_) = queue {
+                Ok(Value::Array(Vec::new()))
+            } else {
+                Err("queue_clear() expects a Queue (list)".to_string())
+            }
+        }
+        "queue_empty" => {
+            if args.len() != 0 {
+                return Err("queue_empty() takes no arguments".to_string());
+            }
+            Ok(Value::Array(Vec::new()))
+        }
+        // Stack builtins (LIFO: push at back, pop from back)
+        "stack_push" => {
+            let stack = eval_expr(&args[0], env, defs)?;
+            let item = eval_expr(&args[1], env, defs)?;
+            if let Value::Array(mut arr) = stack {
+                arr.push(item);
+                Ok(Value::Array(arr))
+            } else {
+                Err("stack_push() expects a Stack (list)".to_string())
+            }
+        }
+        "stack_pop" => {
+            let stack = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(mut arr) = stack {
+                if arr.is_empty() {
+                    Err("stack_pop() on empty stack".to_string())
+                } else {
+                    Ok(arr.pop().unwrap())
+                }
+            } else {
+                Err("stack_pop() expects a Stack (list)".to_string())
+            }
+        }
+        "stack_peek" => {
+            let stack = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = stack {
+                if arr.is_empty() {
+                    Err("stack_peek() on empty stack".to_string())
+                } else {
+                    Ok(arr[arr.len() - 1].clone())
+                }
+            } else {
+                Err("stack_peek() expects a Stack (list)".to_string())
+            }
+        }
+        "stack_len" => {
+            let stack = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = stack {
+                Ok(Value::Int(arr.len() as i64))
+            } else {
+                Err("stack_len() expects a Stack (list)".to_string())
+            }
+        }
+        "stack_is_empty" => {
+            let stack = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(arr) = stack {
+                Ok(Value::Bool(arr.is_empty()))
+            } else {
+                Err("stack_is_empty() expects a Stack (list)".to_string())
+            }
+        }
+        "stack_clear" => {
+            let stack = eval_expr(&args[0], env, defs)?;
+            if let Value::Array(_) = stack {
+                Ok(Value::Array(Vec::new()))
+            } else {
+                Err("stack_clear() expects a Stack (list)".to_string())
+            }
+        }
+        "stack_empty" => {
+            if args.len() != 0 {
+                return Err("stack_empty() takes no arguments".to_string());
+            }
+            Ok(Value::Array(Vec::new()))
         }
         // String: case helpers.
         "to_upper" => {

@@ -40,7 +40,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("%LimeList = type { i8*, i64, i64 }\n");
     out.push_str("%LimeOption = type { i1, i8* }\n");
     out.push_str("%LimeIface = type { i8*, i8* }\n");
-    out.push_str("%LimeClosure = type { i8*, i8* }\n\n");
+    out.push_str("%LimeClosure = type { i8*, i8* }\n");
+    out.push_str("%LimeMap = type { i8*, i64, i64 }\n");
+    out.push_str("%LimeSet = type { i8*, i64, i64 }\n\n");
 
     // Runtime declarations
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
@@ -105,6 +107,49 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i64 @runtime_fs_size(i8*)\n");
     out.push_str("declare void @runtime_fs_metadata(i8*, ptr, ptr, ptr)\n");
     out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n");
+
+    // Phase C-1.2: list mutation / inspection builtins
+    out.push_str("declare void @runtime_list_insert(ptr sret(%LimeList), ptr, i64, i64)\n");
+    out.push_str("declare void @runtime_list_clear(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare void @runtime_list_sort(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare void @runtime_list_clone(ptr sret(%LimeList), ptr)\n");
+
+    // Phase C-1.2: map builtins
+    out.push_str("declare i64 @runtime_map_len(ptr)\n");
+    out.push_str("declare i32 @runtime_map_is_empty(ptr)\n");
+    out.push_str("declare void @runtime_map_insert(ptr sret(%LimeMap), ptr, i64, i64)\n");
+    out.push_str("declare i64 @runtime_map_get(ptr, i64)\n");
+    out.push_str("declare void @runtime_map_remove(ptr sret(%LimeMap), ptr, i64)\n");
+    out.push_str("declare i32 @runtime_map_contains_key(ptr, i64)\n");
+    out.push_str("declare void @runtime_map_clear(ptr sret(%LimeMap), ptr)\n");
+    out.push_str("declare void @runtime_map_clone(ptr sret(%LimeMap), ptr)\n");
+
+    // Phase C-1.2: set builtins
+    out.push_str("declare i64 @runtime_set_len(ptr)\n");
+    out.push_str("declare i32 @runtime_set_is_empty(ptr)\n");
+    out.push_str("declare void @runtime_set_add(ptr sret(%LimeSet), ptr, i64)\n");
+    out.push_str("declare void @runtime_set_remove(ptr sret(%LimeSet), ptr, i64)\n");
+    out.push_str("declare i32 @runtime_set_contains(ptr, i64)\n");
+    out.push_str("declare void @runtime_set_clear(ptr sret(%LimeSet), ptr)\n");
+    out.push_str("declare void @runtime_set_clone(ptr sret(%LimeSet), ptr)\n");
+
+    // Phase C-1.2: queue builtins (FIFO, backed by LimeList)
+    out.push_str("declare void @runtime_queue_push(ptr sret(%LimeList), ptr, i64)\n");
+    out.push_str("declare i64 @runtime_queue_pop(ptr)\n");
+    out.push_str("declare i64 @runtime_queue_front(ptr)\n");
+    out.push_str("declare i64 @runtime_queue_back(ptr)\n");
+    out.push_str("declare i64 @runtime_queue_len(ptr)\n");
+    out.push_str("declare i32 @runtime_queue_is_empty(ptr)\n");
+    out.push_str("declare void @runtime_queue_clear(ptr sret(%LimeList), ptr)\n");
+
+    // Phase C-1.2: stack builtins (LIFO, backed by LimeList)
+    out.push_str("declare void @runtime_stack_push(ptr sret(%LimeList), ptr, i64)\n");
+    out.push_str("declare i64 @runtime_stack_pop(ptr)\n");
+    out.push_str("declare i64 @runtime_stack_peek(ptr)\n");
+    out.push_str("declare i64 @runtime_stack_len(ptr)\n");
+    out.push_str("declare i32 @runtime_stack_is_empty(ptr)\n");
+    out.push_str("declare void @runtime_stack_clear(ptr sret(%LimeList), ptr)\n");
+
 
     // Phase B-2.2: closure / function-value runtime helpers
     out.push_str("declare %LimeClosure* @runtime_make_closure(i8*, i8*)\n");

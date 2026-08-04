@@ -1925,6 +1925,331 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_list(self, "runtime_fs_list_dir", &[p]);
                 Ok(Some((v, t)))
             }
+            // ---- list builtins (Phase C-1.2) ----
+            "list_insert" => {
+                if args.len() != 3 {
+                    return Err("list_insert() takes 3 arguments (list, index, elem)".to_string());
+                }
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let (idx_v, _) = self.codegen_expr(&args[1])?;
+                let (elem_v, elem_t) = self.codegen_expr(&args[2])?;
+                let converted = self.convert_to_i64(&elem_v, &elem_t)?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_list_insert(ptr sret(%LimeList) {}, ptr {}, i64 {}, i64 {})\n",
+                    slot, slot, self.bare_value(&idx_v), converted
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "list_set" => {
+                if args.len() != 3 {
+                    return Err("list_set() takes 3 arguments (list, index, elem)".to_string());
+                }
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let (idx_v, _) = self.codegen_expr(&args[1])?;
+                let (elem_v, elem_t) = self.codegen_expr(&args[2])?;
+                let converted = self.convert_to_i64(&elem_v, &elem_t)?;
+                let tmp = self.fresh_temp();
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_list_set(ptr sret(%LimeList) {}, ptr {}, i64 {}, i64 {})\n",
+                    slot, slot, self.bare_value(&idx_v), converted
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "list_get" => {
+                if args.len() != 2 {
+                    return Err("list_get() takes 2 arguments (list, index)".to_string());
+                }
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let (idx_v, _) = self.codegen_expr(&args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_list_get(%LimeList {}, i64 {})\n",
+                    tmp, self.bare_value(&list_v), self.bare_value(&idx_v)
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "list_clear" | "list_sort" | "list_clone" => {
+                if args.len() != 1 {
+                    return Err(format!("{}() takes 1 argument", func));
+                }
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let rt = match func {
+                    "list_clear" => "runtime_list_clear",
+                    "list_sort" => "runtime_list_sort",
+                    "list_clone" => "runtime_list_clone",
+                    _ => unreachable!(),
+                };
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @{}(ptr sret(%LimeList) {}, ptr {})\n",
+                    rt, slot, slot
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "list_empty" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
+                Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
+            }
+            // ---- map builtins (Phase C-1.2) ----
+            "map_len" | "map_size" => {
+                let (map_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_map_len({})\n",
+                    tmp, self.bare_value(&map_v)
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "map_is_empty" => {
+                let (map_v, _) = self.codegen_expr(&args[0])?;
+                let (v, t) = call_bool(self, "runtime_map_is_empty", &[self.bare_value(&map_v).to_string()]);
+                Ok(Some((v, t)))
+            }
+            "map_insert" => {
+                if args.len() != 3 {
+                    return Err("map_insert() takes 3 arguments (map, key, val)".to_string());
+                }
+                let (map_v, map_t) = self.codegen_expr(&args[0])?;
+                let (key_v, key_t) = self.codegen_expr(&args[1])?;
+                let (val_v, val_t) = self.codegen_expr(&args[2])?;
+                let key = self.convert_to_i64(&key_v, &key_t)?;
+                let val = self.convert_to_i64(&val_v, &val_t)?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeMap {}, ptr {}, align 8\n", self.bare_value(&map_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_map_insert(ptr sret(%LimeMap) {}, ptr {}, i64 {}, i64 {})\n",
+                    slot, slot, key, val
+                ));
+                self.out.push_str(&format!("  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, map_t)))
+            }
+            "map_get" => {
+                let (map_v, _) = self.codegen_expr(&args[0])?;
+                let (key_v, key_t) = self.codegen_expr(&args[1])?;
+                let key = self.convert_to_i64(&key_v, &key_t)?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_map_get(ptr {}, i64 {})\n",
+                    tmp, self.bare_value(&map_v), key
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "map_remove" => {
+                let (map_v, map_t) = self.codegen_expr(&args[0])?;
+                let (key_v, key_t) = self.codegen_expr(&args[1])?;
+                let key = self.convert_to_i64(&key_v, &key_t)?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeMap {}, ptr {}, align 8\n", self.bare_value(&map_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_map_remove(ptr sret(%LimeMap) {}, ptr {}, i64 {})\n",
+                    slot, slot, key
+                ));
+                self.out.push_str(&format!("  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, map_t)))
+            }
+            "map_contains_key" => {
+                let (map_v, _) = self.codegen_expr(&args[0])?;
+                let (key_v, key_t) = self.codegen_expr(&args[1])?;
+                let key = self.convert_to_i64(&key_v, &key_t)?;
+                let (v, t) = call_bool(self, "runtime_map_contains_key", &[self.bare_value(&map_v).to_string(), key]);
+                Ok(Some((v, t)))
+            }
+            "map_clear" | "map_clone" => {
+                let (map_v, map_t) = self.codegen_expr(&args[0])?;
+                let rt = if func == "map_clear" { "runtime_map_clear" } else { "runtime_map_clone" };
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeMap {}, ptr {}, align 8\n", self.bare_value(&map_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @{}(ptr sret(%LimeMap) {}, ptr {})\n",
+                    rt, slot, slot
+                ));
+                self.out.push_str(&format!("  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, map_t)))
+            }
+            // ---- set builtins (Phase C-1.2) ----
+            "set_len" | "set_size" => {
+                let (set_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i64 @runtime_set_len({})\n", tmp, self.bare_value(&set_v)));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "set_is_empty" => {
+                let (set_v, _) = self.codegen_expr(&args[0])?;
+                let (v, t) = call_bool(self, "runtime_set_is_empty", &[self.bare_value(&set_v).to_string()]);
+                Ok(Some((v, t)))
+            }
+            "set_add" | "set_remove" => {
+                let (set_v, set_t) = self.codegen_expr(&args[0])?;
+                let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
+                let elem = self.convert_to_i64(&elem_v, &elem_t)?;
+                let rt = if func == "set_add" { "runtime_set_add" } else { "runtime_set_remove" };
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeSet {}, ptr {}, align 8\n", self.bare_value(&set_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @{}(ptr sret(%LimeSet) {}, ptr {}, i64 {})\n",
+                    rt, slot, slot, elem
+                ));
+                self.out.push_str(&format!("  {} = load %LimeSet, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, set_t)))
+            }
+            "set_contains" => {
+                let (set_v, _) = self.codegen_expr(&args[0])?;
+                let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
+                let elem = self.convert_to_i64(&elem_v, &elem_t)?;
+                let (v, t) = call_bool(self, "runtime_set_contains", &[self.bare_value(&set_v).to_string(), elem]);
+                Ok(Some((v, t)))
+            }
+            "set_clear" | "set_clone" => {
+                let (set_v, set_t) = self.codegen_expr(&args[0])?;
+                let rt = if func == "set_clear" { "runtime_set_clear" } else { "runtime_set_clone" };
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeSet {}, ptr {}, align 8\n", self.bare_value(&set_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @{}(ptr sret(%LimeSet) {}, ptr {})\n",
+                    rt, slot, slot
+                ));
+                self.out.push_str(&format!("  {} = load %LimeSet, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, set_t)))
+            }
+            // ---- queue builtins (Phase C-1.2) ----
+            "queue_push" => {
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
+                let elem = self.convert_to_i64(&elem_v, &elem_t)?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_queue_push(ptr sret(%LimeList) {}, ptr {}, i64 {})\n",
+                    slot, slot, elem
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "queue_pop" | "queue_front" | "queue_back" => {
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let rt = match func {
+                    "queue_pop" => "runtime_queue_pop",
+                    "queue_front" => "runtime_queue_front",
+                    "queue_back" => "runtime_queue_back",
+                    _ => unreachable!(),
+                };
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @{}({})\n",
+                    tmp, rt, self.bare_value(&list_v)
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "queue_len" | "queue_size" => {
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_queue_len({})\n",
+                    tmp, self.bare_value(&list_v)
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "queue_is_empty" => {
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let (v, t) = call_bool(self, "runtime_queue_is_empty", &[self.bare_value(&list_v).to_string()]);
+                Ok(Some((v, t)))
+            }
+            "queue_clear" => {
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_queue_clear(ptr sret(%LimeList) {}, ptr {})\n",
+                    slot, slot
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "queue_empty" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
+                Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
+            }
+            // ---- stack builtins (Phase C-1.2) ----
+            "stack_push" => {
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
+                let elem = self.convert_to_i64(&elem_v, &elem_t)?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_stack_push(ptr sret(%LimeList) {}, ptr {}, i64 {})\n",
+                    slot, slot, elem
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "stack_pop" | "stack_peek" => {
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let rt = if func == "stack_pop" { "runtime_stack_pop" } else { "runtime_stack_peek" };
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i64 @{}({})\n", tmp, rt, self.bare_value(&list_v)));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "stack_len" | "stack_size" => {
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i64 @runtime_stack_len({})\n", tmp, self.bare_value(&list_v)));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "stack_is_empty" => {
+                let (list_v, _) = self.codegen_expr(&args[0])?;
+                let (v, t) = call_bool(self, "runtime_stack_is_empty", &[self.bare_value(&list_v).to_string()]);
+                Ok(Some((v, t)))
+            }
+            "stack_clear" => {
+                let (list_v, list_t) = self.codegen_expr(&args[0])?;
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out.push_str(&format!(
+                    "  call void @runtime_stack_clear(ptr sret(%LimeList) {}, ptr {})\n",
+                    slot, slot
+                ));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                Ok(Some((tmp, list_t)))
+            }
+            "stack_empty" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
+                Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
+            }
             _ => Ok(None),
         }
     }
