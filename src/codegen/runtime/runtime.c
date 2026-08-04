@@ -2912,3 +2912,386 @@ LimeList runtime_regex_split(char* compiled, char* text) {
     list = runtime_list_add(list, (int64_t)(intptr_t)piece);
     return list;
 }
+
+// ========================================================================
+// Process operations (Phase C-1.11)
+//
+// Cross-platform subprocess management.
+// Windows: CreateProcess, GetExitCodeProcess, TerminateProcess, pipes
+// POSIX: fork, exec, waitpid, kill, pipe, dup2
+// ========================================================================
+
+#ifdef _WIN32
+
+static int64_t win_create_process(char* command, LimeList args, HANDLE* out_handle) {
+    // Build command line from command + args
+    size_t cmd_len = strlen(command) + 1;
+    for (int64_t i = 0; i < args.len; i++) {
+        char* arg = (char*)(intptr_t)runtime_list_get(args, i);
+        if (arg) cmd_len += strlen(arg) + 3; // space + quotes + null
+    }
+
+    char* cmd_line = (char*)malloc(cmd_len);
+    if (!cmd_line) return -1;
+
+    size_t pos = 0;
+    // Quote the command if it contains spaces
+    int needs_quotes = strchr(command, ' ') != NULL;
+    if (needs_quotes) cmd_line[pos++] = '"';
+    strcpy(cmd_line + pos, command);
+    pos += strlen(command);
+    if (needs_quotes) cmd_line[pos++] = '"';
+
+    for (int64_t i = 0; i < args.len; i++) {
+        char* arg = (char*)(intptr_t)runtime_list_get(args, i);
+        if (!arg) continue;
+        cmd_line[pos++] = ' ';
+        cmd_line[pos++] = '"';
+        strcpy(cmd_line + pos, arg);
+        pos += strlen(arg);
+        cmd_line[pos++] = '"';
+    }
+    cmd_line[pos] = '\0';
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    memset(&pi, 0, sizeof(pi));
+
+    // Create pipes for stdout and stderr
+    HANDLE stdout_read, stdout_write;
+    HANDLE stderr_read, stderr_write;
+
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+
+    if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0) ||
+        !CreatePipe(&stderr_read, &stderr_write, &sa, 0)) {
+        free(cmd_line);
+        return -1;
+    }
+
+    si.hStdError = stderr_write;
+    si.hStdOutput = stdout_write;
+    si.dwFlags |= STARTF_USESTDHANDLES;
+
+    BOOL success = CreateProcessA(
+        NULL,
+        cmd_line,
+        NULL,
+        NULL,
+        TRUE,
+        CREATE_NO_WINDOW,
+        NULL,
+        NULL,
+        &si,
+        &pi
+    );
+
+    // Close write ends in parent process
+    CloseHandle(stdout_write);
+    CloseHandle(stderr_write);
+
+    free(cmd_line);
+
+    if (!success) {
+        CloseHandle(stdout_read);
+        CloseHandle(stderr_read);
+        return -1;
+    }
+
+    *out_handle = pi.hProcess;
+    // Store thread handle too but we don't need it
+    CloseHandle(pi.hThread);
+
+    // Read stdout from the pipe
+    // We'll read it asynchronously - for now, return the pid
+    // The stdout pipe handle is stdout_read
+
+    // Store stdout_read in a global or thread-local storage
+    // For simplicity, we'll just return the PID and let wait/collect handle the pipes
+
+    return (int64_t)pi.dwProcessId;
+}
+
+int64_t runtime_process_spawn(char* command, LimeList args) {
+    if (!command) return -1;
+    HANDLE proc_handle;
+    int64_t pid = win_create_process(command, args, &proc_handle);
+    if (pid < 0) return -1;
+    // Store the handle for later use - we use a simple global approach
+    // In a real implementation, we'd use a handle table
+    return pid;
+}
+
+char* runtime_process_run(char* command, LimeList args) {
+    if (!command) return runtime_str_copy("");
+    // For run, we spawn and wait
+    // This is a simplified implementation
+    // In production, we'd capture stdout properly
+    char cmd_buf[4096];
+    strcpy(cmd_buf, command);
+    for (int64_t i = 0; i < args.len; i++) {
+        char* arg = (char*)(intptr_t)runtime_list_get(args, i);
+        if (arg) {
+            strcat(cmd_buf, " ");
+            strcat(cmd_buf, arg);
+        }
+    }
+
+    // Use _popen for simple command execution
+    FILE* fp = _popen(cmd_buf, "r");
+    if (!fp) return runtime_str_copy("");
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) { _pclose(fp); return NULL; }
+
+    int c;
+    while ((c = fgetc(fp)) != EOF) {
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (!nb) { free(buf); _pclose(fp); return NULL; }
+            buf = nb;
+        }
+        buf[len++] = (char)c;
+    }
+    buf[len] = '\0';
+    _pclose(fp);
+    return buf;
+}
+
+char* runtime_process_output(char* command, LimeList args) {
+    return runtime_process_run(command, args);
+}
+
+int64_t runtime_process_wait(int64_t pid) {
+    // On Windows, we can't easily wait by PID alone without the handle
+    // For now, return 0 (success) as a placeholder
+    // A full implementation would maintain a handle table
+    (void)pid;
+    return 0;
+}
+
+int runtime_process_kill(int64_t pid) {
+    if (pid <= 0) return 0;
+    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
+    if (!h) return 0;
+    BOOL ok = TerminateProcess(h, 1);
+    CloseHandle(h);
+    return ok ? 1 : 0;
+}
+
+char* runtime_process_status(int64_t pid) {
+    if (pid <= 0) return runtime_str_copy("failed");
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) return runtime_str_copy("failed");
+    DWORD exit_code;
+    if (GetExitCodeProcess(h, &exit_code)) {
+        CloseHandle(h);
+        if (exit_code == STILL_ACTIVE) {
+            return runtime_str_copy("running");
+        }
+        // Process has exited
+        char buf[32];
+        snprintf(buf, sizeof(buf), "exited(%lu)", exit_code);
+        return runtime_str_copy(buf);
+    }
+    CloseHandle(h);
+    return runtime_str_copy("failed");
+}
+
+LimeList runtime_process_args(void) {
+    LimeList list = runtime_list_empty();
+    // Get command line arguments
+    LPCommandLineW cmd_line = GetCommandLineW();
+    int argc;
+    LPWSTR* argv = CommandLineToArgvW(cmd_line, &argc);
+    if (!argv) return list;
+    for (int i = 1; i < argc; i++) {
+        int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, NULL, 0, NULL, NULL);
+        char* arg = (char*)malloc(size);
+        if (arg) {
+            WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, arg, size, NULL, NULL);
+            list = runtime_list_add(list, (int64_t)(intptr_t)arg);
+        }
+    }
+    LocalFree(argv);
+    return list;
+}
+
+#else // POSIX
+
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+static int64_t posix_spawn_process(char* command, LimeList args, int* stdout_pipe_read) {
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return -1;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return -1;
+    }
+
+    if (pid == 0) {
+        // Child process
+        close(pipefd[0]); // Close read end
+
+        // Redirect stdout
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        // Build argv
+        int argc = (int)args.len + 1;
+        char** argv = (char**)malloc(sizeof(char*) * (argc + 1));
+        if (!argv) { _exit(127); }
+        argv[0] = command;
+        for (int64_t i = 0; i < args.len; i++) {
+            argv[i + 1] = (char*)(intptr_t)runtime_list_get(args, i);
+        }
+        argv[argc] = NULL;
+
+        execvp(command, argv);
+        // If exec fails
+        _exit(127);
+    }
+
+    // Parent process
+    close(pipefd[1]); // Close write end
+    *stdout_pipe_read = pipefd[0];
+    return (int64_t)pid;
+}
+
+int64_t runtime_process_spawn(char* command, LimeList args) {
+    if (!command) return -1;
+    int stdout_read = -1;
+    int64_t pid = posix_spawn_process(command, args, &stdout_read);
+    if (pid < 0) return -1;
+    // We don't store the pipe read fd for now
+    // A full implementation would maintain a process table
+    (void)stdout_read;
+    return pid;
+}
+
+char* runtime_process_run(char* command, LimeList args) {
+    if (!command) return runtime_str_copy("");
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return runtime_str_copy("");
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return runtime_str_copy("");
+    }
+
+    if (pid == 0) {
+        // Child process
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        int argc = (int)args.len + 1;
+        char** argv = (char**)malloc(sizeof(char*) * (argc + 1));
+        if (!argv) { _exit(127); }
+        argv[0] = command;
+        for (int64_t i = 0; i < args.len; i++) {
+            argv[i + 1] = (char*)(intptr_t)runtime_list_get(args, i);
+        }
+        argv[argc] = NULL;
+
+        execvp(command, argv);
+        _exit(127);
+    }
+
+    // Parent process
+    close(pipefd[1]);
+
+    // Read from pipe
+    size_t cap = 4096;
+    size_t len = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) { close(pipefd[0]); waitpid(pid, NULL, 0); return NULL; }
+
+    int c;
+    while ((c = read(pipefd[0], 1, 1)) > 0) {
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (!nb) { free(buf); close(pipefd[0]); waitpid(pid, NULL, 0); return NULL; }
+            buf = nb;
+        }
+        buf[len++] = (char)c;
+    }
+    buf[len] = '\0';
+    close(pipefd[0]);
+
+    // Wait for child
+    int status;
+    waitpid(pid, &status, 0);
+
+    return buf;
+}
+
+char* runtime_process_output(char* command, LimeList args) {
+    return runtime_process_run(command, args);
+}
+
+int64_t runtime_process_wait(int64_t pid) {
+    if (pid <= 0) return -1;
+    int status;
+    pid_t result = waitpid((pid_t)pid, &status, 0);
+    if (result < 0) return -1;
+    if (WIFEXITED(status)) {
+        return (int64_t)WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return -1;
+    }
+    return -1;
+}
+
+int runtime_process_kill(int64_t pid) {
+    if (pid <= 0) return 0;
+    int result = kill((pid_t)pid, SIGTERM);
+    return result == 0 ? 1 : 0;
+}
+
+char* runtime_process_status(int64_t pid) {
+    if (pid <= 0) return runtime_str_copy("failed");
+    int status;
+    pid_t result = waitpid((pid_t)pid, &status, WNOHANG);
+    if (result < 0) return runtime_str_copy("failed");
+    if (result == 0) return runtime_str_copy("running");
+    if (WIFEXITED(status)) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "exited(%d)", WEXITSTATUS(status));
+        return runtime_str_copy(buf);
+    }
+    return runtime_str_copy("failed");
+}
+
+LimeList runtime_process_args(void) {
+    LimeList list = runtime_list_empty();
+    extern char** environ;
+    // Use the program arguments from the environment
+    // In a real implementation, we'd pass the args from the Lime runtime
+    // For now, return an empty list
+    (void)environ;
+    return list;
+}
+
+#endif

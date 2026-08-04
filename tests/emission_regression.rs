@@ -848,7 +848,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
     fs::write(format!("{}/main.lime", dir), source).unwrap();
     fs::write(
         format!("{}/citrus.toml", dir),
-        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\nos = \"v0.1.0\"\nenv = \"v0.1.0\"\nregex = \"v0.1.0\"\n",
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\nos = \"v0.1.0\"\nenv = \"v0.1.0\"\nregex = \"v0.1.0\"\nprocess = \"v0.1.0\"\n",
     )
     .unwrap();
 }
@@ -2665,4 +2665,27 @@ fn emit_object_regex_builtins() {
     assert_eq!(interp[13], "false", "invalid pattern\nfull output:\n{}", out);
     assert_eq!(interp[14], "true", "anchor match\nfull output:\n{}", out);
     assert_eq!(interp[15], "false", "anchor no match\nfull output:\n{}", out);
+}
+
+#[test]
+fn emit_object_process_builtins() {
+    write_stdlib_project(
+        "target/test_process_builtins",
+        "fn main():\n    let args = process_args()\n    println(args)\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_process_builtins/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    // process_args returns a list of strings
+    assert!(interp.len() >= 1, "process builtins: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
 }

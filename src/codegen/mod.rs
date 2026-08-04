@@ -234,6 +234,15 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_regex_replace_all(i8*, i8*, i8*)\n");
     out.push_str("declare %LimeList @runtime_regex_split(i8*, i8*)\n\n");
 
+    // Process runtime declarations (Phase C-1.11)
+    out.push_str("declare i64 @runtime_process_spawn(i8*, %LimeList)\n");
+    out.push_str("declare i8* @runtime_process_run(i8*, %LimeList)\n");
+    out.push_str("declare i8* @runtime_process_output(i8*, %LimeList)\n");
+    out.push_str("declare i64 @runtime_process_wait(i64)\n");
+    out.push_str("declare i32 @runtime_process_kill(i64)\n");
+    out.push_str("declare i8* @runtime_process_status(i64)\n");
+    out.push_str("declare %LimeList @runtime_process_args()\n\n");
+
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.str.int_nl = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");

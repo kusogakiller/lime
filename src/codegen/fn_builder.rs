@@ -3122,6 +3122,44 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_list(self, "runtime_regex_split", &[pat, text]);
                 Ok(Some((v, t)))
             }
+            // ===== Process operations (Phase C-1.11) =====
+            "process_spawn" => {
+                let cmd = str_arg(self, &args[0])?;
+                let arg_list = list_arg(self, &args[1])?;
+                let (v, t) = call_i64(self, "runtime_process_spawn", &[cmd, arg_list]);
+                Ok(Some((v, t)))
+            }
+            "process_run" => {
+                let cmd = str_arg(self, &args[0])?;
+                let arg_list = list_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_process_run", &[cmd, arg_list]);
+                Ok(Some((v, t)))
+            }
+            "process_output" => {
+                let cmd = str_arg(self, &args[0])?;
+                let arg_list = list_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_process_output", &[cmd, arg_list]);
+                Ok(Some((v, t)))
+            }
+            "process_wait" => {
+                let pid = i64_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_process_wait", &[pid]);
+                Ok(Some((v, t)))
+            }
+            "process_kill" => {
+                let pid = i64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_process_kill", &[pid]);
+                Ok(Some((v, t)))
+            }
+            "process_status" => {
+                let pid = i64_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_process_status", &[pid]);
+                Ok(Some((v, t)))
+            }
+            "process_args" => {
+                let (v, t) = call_list(self, "runtime_process_args", &[]);
+                Ok(Some((v, t)))
+            }
             _ => Ok(None),
         }
     }

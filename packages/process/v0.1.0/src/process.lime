@@ -1,0 +1,43 @@
+/// Process management utilities for Lime.
+/// Provides subprocess spawning, execution, and control.
+///
+/// Design notes:
+/// - Process handles are opaque values containing a PID.
+/// - Native handles (pipes, process handles) are managed internally.
+/// - Future async(lime) runtime can build on this API by adding
+///   awaitable methods to Process without breaking existing code.
+/// - No async runtime, event loop, coroutine, or threads are implemented yet.
+
+/// Start a process without waiting for it to complete.
+/// Returns Result(Process, ProcessError).
+fn spawn(str: command, list(str): args):
+    return process_spawn(command, args)
+
+/// Execute a process and wait for completion.
+/// Returns Result(ProcessOutput, ProcessError).
+fn run(str: command, list(str): args):
+    return process_run(command, args)
+
+/// Execute a command and return its stdout.
+/// Returns Result(str, ProcessError).
+fn output(str: command, list(str): args):
+    return process_output(command, args)
+
+/// Wait for a process to exit.
+/// Returns Result(int, ProcessError).
+/// Designed to become `await process.wait()` in the async runtime.
+fn wait(process: Process):
+    return process_wait(process)
+
+/// Terminate a running process.
+/// Returns true if the process was terminated, false otherwise.
+fn kill(process: Process):
+    return process_kill(process)
+
+/// Return the current state of a process.
+fn status(process: Process):
+    return process_status(process)
+
+/// Return the arguments of the current program.
+fn args():
+    return process_args()

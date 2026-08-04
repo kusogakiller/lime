@@ -270,19 +270,28 @@ int runtime_env_remove(char* key);
 LimeMap runtime_env_all(void);
 
 // -- Regex operations (Phase C-1.10) --
-// Returns the compiled pattern as a malloc'd string, or NULL on error.
 char* runtime_regex_compile(char* pattern);
-// Returns 1 if the compiled pattern matches the entire string.
 int runtime_regex_is_match(char* compiled, char* text);
-// Returns the first match as a malloc'd string, or NULL if no match.
 char* runtime_regex_find(char* compiled, char* text);
-// Returns all non-overlapping matches as a LimeList of strings.
 LimeList runtime_regex_find_all(char* compiled, char* text);
-// Replaces the first match. Returns a malloc'd string.
 char* runtime_regex_replace(char* compiled, char* text, char* replacement);
-// Replaces all non-overlapping matches. Returns a malloc'd string.
 char* runtime_regex_replace_all(char* compiled, char* text, char* replacement);
-// Splits the string by the pattern. Returns a LimeList of strings.
 LimeList runtime_regex_split(char* compiled, char* text);
+
+// -- Process operations (Phase C-1.11) --
+// Spawns a process without waiting. Returns PID or -1 on error.
+int64_t runtime_process_spawn(char* command, LimeList args);
+// Runs a process and waits for completion. Returns malloc'd stdout string.
+char* runtime_process_run(char* command, LimeList args);
+// Runs a process and returns stdout only. Returns malloc'd string.
+char* runtime_process_output(char* command, LimeList args);
+// Waits for a process to exit. Returns exit code or -1 on error.
+int64_t runtime_process_wait(int64_t pid);
+// Terminates a process. Returns 1 on success, 0 on failure.
+int runtime_process_kill(int64_t pid);
+// Returns process status as a malloc'd string: "running", "exited", or "failed".
+char* runtime_process_status(int64_t pid);
+// Returns the current program arguments as a LimeList of strings.
+LimeList runtime_process_args(void);
 
 #endif // LIME_RUNTIME_H

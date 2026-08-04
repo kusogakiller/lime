@@ -6352,6 +6352,38 @@ fn infer_type(
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::List(Box::new(Type::String)))
                 }
+                // ===== Process operations (Phase C-1.11) =====
+                "process_spawn" => {
+                    if args.len() != 2 { return Err("process_spawn() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "process_run" | "process_output" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "process_wait" => {
+                    if args.len() != 1 { return Err("process_wait() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Int)
+                }
+                "process_kill" => {
+                    if args.len() != 1 { return Err("process_kill() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "process_status" => {
+                    if args.len() != 1 { return Err("process_status() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "process_args" => {
+                    if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
+                    Ok(Type::List(Box::new(Type::String)))
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -7506,6 +7538,38 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
             let _ = check_expr(&args[0], env, defs)?;
             let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::List(Box::new(Type::String)))
+        }
+        // ===== Process operations (Phase C-1.11) =====
+        "process_spawn" => {
+            if args.len() != 2 { return Err("process_spawn() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Int)
+        }
+        "process_run" | "process_output" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::String)
+        }
+        "process_wait" => {
+            if args.len() != 1 { return Err("process_wait() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Int)
+        }
+        "process_kill" => {
+            if args.len() != 1 { return Err("process_kill() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "process_status" => {
+            if args.len() != 1 { return Err("process_status() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::String)
+        }
+        "process_args" => {
+            if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
             Ok(Type::List(Box::new(Type::String)))
         }
         other => {
@@ -10810,6 +10874,7 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "env_get" | "env_has" | "env_set" | "env_remove" | "env_all"
              | "regex_compile" | "regex_is_match" | "regex_match" | "regex_find"
              | "regex_find_all" | "regex_replace" | "regex_replace_all" | "regex_split"
+              | "process_spawn" | "process_run" | "process_output" | "process_wait" | "process_kill" | "process_status" | "process_args"
     )
 }
 
@@ -11807,6 +11872,82 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     Ok(Value::Array(results))
                 }
             }
+        }
+        // ===== Process operations (Phase C-1.11) =====
+        "process_spawn" => {
+            if args.len() != 2 { return Err("process_spawn() takes exactly 2 arguments".to_string()); }
+            let cmd_val = eval_expr(&args[0], env, defs)?;
+            let args_val = eval_expr(&args[1], env, defs)?;
+            let command = match cmd_val { Value::String(s) => s, _ => return Err("process_spawn() expects string command".to_string()) };
+            let arg_list = match args_val { Value::Array(a) => a, _ => return Err("process_spawn() expects list of strings".to_string()) };
+            let arg_strings: Vec<String> = arg_list.iter().map(|v| match v { Value::String(s) => s.clone(), _ => String::new() }).collect();
+            match std::process::Command::new(&command).args(&arg_strings).spawn() {
+                Ok(child) => Ok(Value::Int(child.id() as i64)),
+                Err(_) => Ok(Value::Int(-1)),
+            }
+        }
+        "process_run" => {
+            if args.len() != 2 { return Err("process_run() takes exactly 2 arguments".to_string()); }
+            let cmd_val = eval_expr(&args[0], env, defs)?;
+            let args_val = eval_expr(&args[1], env, defs)?;
+            let command = match cmd_val { Value::String(s) => s, _ => return Err("process_run() expects string command".to_string()) };
+            let arg_list = match args_val { Value::Array(a) => a, _ => return Err("process_run() expects list of strings".to_string()) };
+            let arg_strings: Vec<String> = arg_list.iter().map(|v| match v { Value::String(s) => s.clone(), _ => String::new() }).collect();
+            match std::process::Command::new(&command).args(&arg_strings).output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    Ok(Value::String(stdout))
+                }
+                Err(_) => Ok(Value::String(String::new())),
+            }
+        }
+        "process_output" => {
+            if args.len() != 2 { return Err("process_output() takes exactly 2 arguments".to_string()); }
+            let cmd_val = eval_expr(&args[0], env, defs)?;
+            let args_val = eval_expr(&args[1], env, defs)?;
+            let command = match cmd_val { Value::String(s) => s, _ => return Err("process_output() expects string command".to_string()) };
+            let arg_list = match args_val { Value::Array(a) => a, _ => return Err("process_output() expects list of strings".to_string()) };
+            let arg_strings: Vec<String> = arg_list.iter().map(|v| match v { Value::String(s) => s.clone(), _ => String::new() }).collect();
+            match std::process::Command::new(&command).args(&arg_strings).output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    Ok(Value::String(stdout))
+                }
+                Err(_) => Ok(Value::String(String::new())),
+            }
+        }
+        "process_wait" => {
+            if args.len() != 1 { return Err("process_wait() takes exactly 1 argument".to_string()); }
+            let pid_val = eval_expr(&args[0], env, defs)?;
+            let pid = match pid_val { Value::Int(i) => i, _ => return Err("process_wait() expects int pid".to_string()) };
+            // In the interpreter, we cannot easily wait on a child by PID
+            // since we do not store Child handles. Return 0 for now.
+            Ok(Value::Int(0))
+        }
+        "process_kill" => {
+            if args.len() != 1 { return Err("process_kill() takes exactly 1 argument".to_string()); }
+            let pid_val = eval_expr(&args[0], env, defs)?;
+            let pid = match pid_val { Value::Int(i) => i, _ => return Err("process_kill() expects int pid".to_string()) };
+            // In the interpreter, we cannot easily kill a child by PID
+            // since we do not store Child handles. Return false for now.
+            Ok(Value::Bool(false))
+        }
+        "process_status" => {
+            if args.len() != 1 { return Err("process_status() takes exactly 1 argument".to_string()); }
+            let pid_val = eval_expr(&args[0], env, defs)?;
+            let _pid = match pid_val { Value::Int(i) => i, _ => return Err("process_status() expects int pid".to_string()) };
+            // In the interpreter, we cannot easily get status by PID
+            // since we do not store Child handles. Return unknown for now.
+            Ok(Value::String("unknown".to_string()))
+        }
+        "process_args" => {
+            if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
+            // Return the command-line arguments passed to the Lime process
+            let mut result = Vec::new();
+            for arg in std::env::args().skip(1) {
+                result.push(Value::String(arg));
+            }
+            Ok(Value::Array(result))
         }
         // ===== Standard-library runtime builtins (Phase 7/10) =====
         // List helpers (Lists are represented as Value::Array).
