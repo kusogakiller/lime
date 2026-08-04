@@ -308,6 +308,127 @@ char* runtime_str_repeat(char* s, int64_t times) {
     return r;
 }
 
+// Whether the string is empty.
+int runtime_str_is_empty(char* s) {
+    if (s == NULL) return 1;
+    return s[0] == '\0';
+}
+
+// Find the first occurrence of `sub` in `s`. Returns the byte offset,
+// or -1 if not found.
+int64_t runtime_str_find(char* s, char* sub) {
+    if (s == NULL) s = "";
+    if (sub == NULL) sub = "";
+    char* p = strstr(s, sub);
+    if (p == NULL) return -1;
+    return (int64_t)(p - s);
+}
+
+// Count non-overlapping occurrences of `sub` in `s`.
+int64_t runtime_str_count(char* s, char* sub) {
+    if (s == NULL) s = "";
+    if (sub == NULL || *sub == '\0') return 0;
+    int64_t count = 0;
+    const char* p = s;
+    size_t flen = strlen(sub);
+    while ((p = strstr(p, sub)) != NULL) {
+        count++;
+        p += flen;
+    }
+    return count;
+}
+
+// Trim ASCII whitespace from the start (mirrors the interpreter's
+// Unicode str::trim_start for the ASCII subset).
+char* runtime_str_trim_start(char* s) {
+    if (s == NULL) return runtime_str_copy("");
+    char* start = s;
+    while (*start && isspace((unsigned char)*start)) start++;
+    return runtime_str_copy(start);
+}
+
+// Trim ASCII whitespace from the end.
+char* runtime_str_trim_end(char* s) {
+    if (s == NULL) return runtime_str_copy("");
+    size_t n = strlen(s);
+    while (n > 0 && isspace((unsigned char)s[n - 1])) n--;
+    char* r = (char*)malloc(n + 1);
+    if (r == NULL) {
+        runtime_panic("runtime_str_trim_end: out of memory");
+    }
+    memcpy(r, s, n);
+    r[n] = '\0';
+    return r;
+}
+
+// Join a List(str) with `sep` between each element.
+char* runtime_str_join(LimeList* list, char* sep) {
+    if (sep == NULL) sep = "";
+    size_t seplen = strlen(sep);
+    // Compute total length.
+    size_t total = 0;
+    int64_t count = runtime_list_len(*list);
+    for (int64_t i = 0; i < count; i++) {
+        char* item = (char*)(intptr_t)runtime_list_get(*list, i);
+        if (item == NULL) item = "";
+        total += strlen(item);
+    }
+    total += seplen * (count > 0 ? (size_t)(count - 1) : 0);
+    char* r = (char*)malloc(total + 1);
+    if (r == NULL) {
+        runtime_panic("runtime_str_join: out of memory");
+    }
+    char* w = r;
+    for (int64_t i = 0; i < count; i++) {
+        char* item = (char*)(intptr_t)runtime_list_get(*list, i);
+        if (item == NULL) item = "";
+        size_t ilen = strlen(item);
+        memcpy(w, item, ilen);
+        w += ilen;
+        if (i < count - 1) {
+            memcpy(w, sep, seplen);
+            w += seplen;
+        }
+    }
+    *w = '\0';
+    return r;
+}
+
+// Parse s as a signed integer. Returns 0 on failure.
+int64_t runtime_str_to_int(char* s) {
+    if (s == NULL || *s == '\0') return 0;
+    char* end;
+    long long val = strtoll(s, &end, 10);
+    if (end == s || *end != '\0') return 0;
+    return (int64_t)val;
+}
+
+// Parse s as a float. Returns 0.0 on failure.
+double runtime_str_to_float(char* s) {
+    if (s == NULL || *s == '\0') return 0.0;
+    char* end;
+    double val = strtod(s, &end);
+    if (end == s || *end != '\0') return 0.0;
+    return val;
+}
+
+// Case-sensitive equality.
+int runtime_str_equals(char* a, char* b) {
+    if (a == NULL) a = "";
+    if (b == NULL) b = "";
+    return strcmp(a, b) == 0;
+}
+
+// Lexicographic comparison. Returns -1, 0, or 1.
+int runtime_str_compare(char* a, char* b) {
+    if (a == NULL) a = "";
+    if (b == NULL) b = "";
+    int c = strcmp(a, b);
+    if (c < 0) return -1;
+    if (c > 0) return 1;
+    return 0;
+}
+
 // -- Math --
 double runtime_math_abs(double x) { return fabs(x); }
 double runtime_math_sqrt(double x) { return sqrt(x); }
@@ -707,6 +828,19 @@ LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem) {
         ((int64_t*)list.data)[index] = elem;
     }
     return list;
+}
+
+// Return the number of elements in the list.
+int64_t runtime_list_len(LimeList list) {
+    return list.len;
+}
+
+// Return the element at `index`. Returns 0 if out of bounds.
+int64_t runtime_list_get(LimeList list, int64_t index) {
+    if (index >= 0 && index < list.len) {
+        return ((int64_t*)list.data)[index];
+    }
+    return 0;
 }
 
 // -- Closure / function values (Phase B-2.2) --

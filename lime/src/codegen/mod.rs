@@ -71,6 +71,17 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_from_i64(i64)\n");
     out.push_str("declare i8* @runtime_str_from_f64(double)\n");
     out.push_str("declare i8* @runtime_str_from_bool(i1)\n");
+    // Phase B-3: extended string builtins
+    out.push_str("declare i32 @runtime_str_is_empty(i8*)\n");
+    out.push_str("declare i64 @runtime_str_find(i8*, i8*)\n");
+    out.push_str("declare i64 @runtime_str_count(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_str_trim_start(i8*)\n");
+    out.push_str("declare i8* @runtime_str_trim_end(i8*)\n");
+    out.push_str("declare i8* @runtime_str_join(ptr, i8*)\n");
+    out.push_str("declare i64 @runtime_str_to_int(i8*)\n");
+    out.push_str("declare double @runtime_str_to_float(i8*)\n");
+    out.push_str("declare i32 @runtime_str_equals(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_str_compare(i8*, i8*)\n");
     out.push_str("declare double @runtime_math_abs(double)\n");
     out.push_str("declare double @runtime_math_sqrt(double)\n");
     out.push_str("declare double @runtime_math_min(double, double)\n");

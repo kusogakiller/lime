@@ -570,10 +570,131 @@ impl<'a> Cg<'a> {
         }
     }
 
+    /// Collect free variables used in a statement list.
+    /// Free variables are names that appear in `Expr::Ident` but are not
+    /// defined as local parameters or by `Stmt::Let` within the body.
+    /// `param_names` are the closure's own parameters (excluded from results).
+    fn collect_free_vars(body: &[Stmt], param_names: &[String]) -> Vec<String> {
+        let mut used = Vec::new();
+        let mut defined = Vec::new();
+        for p in param_names {
+            defined.push(p.clone());
+        }
+        Self::collect_vars_stmts(body, &mut used, &mut defined);
+        used.sort();
+        used.dedup();
+        used
+    }
+
+    fn collect_vars_stmts(stmts: &[Stmt], used: &mut Vec<String>, defined: &mut Vec<String>) {
+        for s in stmts {
+            match s {
+                Stmt::Let { name, value, .. } => {
+                    Self::collect_vars_expr(value, used, defined);
+                    defined.push(name.clone());
+                }
+                Stmt::Assign { name, value, .. } => {
+                    Self::collect_vars_expr(value, used, defined);
+                    if !defined.contains(name) && !used.contains(name) {
+                        used.push(name.clone());
+                    }
+                }
+                Stmt::Return { value: Some(e), .. } => {
+                    Self::collect_vars_expr(e, used, defined);
+                }
+                Stmt::If { cond, then_branch, else_branch } => {
+                    Self::collect_vars_expr(cond, used, defined);
+                    Self::collect_vars_stmts(then_branch, used, defined);
+                    if let Some(eb) = else_branch {
+                        Self::collect_vars_stmts(eb, used, defined);
+                    }
+                }
+                Stmt::While { cond, body } => {
+                    Self::collect_vars_expr(cond, used, defined);
+                    Self::collect_vars_stmts(body, used, defined);
+                }
+                Stmt::Expr(e) => {
+                    Self::collect_vars_expr(e, used, defined);
+                }
+                Stmt::Defer { body } => {
+                    Self::collect_vars_stmts(body, used, defined);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_vars_expr(e: &Expr, used: &mut Vec<String>, defined: &mut Vec<String>) {
+        match e {
+            Expr::Ident(n) => {
+                if !defined.contains(n) && !used.contains(n) {
+                    used.push(n.clone());
+                }
+            }
+            Expr::Call { args, .. } => {
+                for a in args {
+                    Self::collect_vars_expr(a, used, defined);
+                }
+            }
+            Expr::BinOp { left, right, .. } => {
+                Self::collect_vars_expr(left, used, defined);
+                Self::collect_vars_expr(right, used, defined);
+            }
+            Expr::UnOp { operand, .. } => {
+                Self::collect_vars_expr(operand, used, defined);
+            }
+            Expr::Array(items) => {
+                for item in items {
+                    Self::collect_vars_expr(item, used, defined);
+                }
+            }
+            Expr::FieldAccess { object, .. } => {
+                Self::collect_vars_expr(object, used, defined);
+            }
+            Expr::Index { target, index } => {
+                Self::collect_vars_expr(target, used, defined);
+                Self::collect_vars_expr(index, used, defined);
+            }
+            Expr::FnDef { params, body } => {
+                // Nested fn: its params shadow outer names
+                let mut inner_defined = defined.clone();
+                for (n, _) in params {
+                    inner_defined.push(n.clone());
+                }
+                Self::collect_vars_stmts(body, used, &mut inner_defined);
+            }
+            Expr::Slice { target, start, end } => {
+                Self::collect_vars_expr(target, used, defined);
+                if let Some(s) = start { Self::collect_vars_expr(s, used, defined); }
+                if let Some(e) = end { Self::collect_vars_expr(e, used, defined); }
+            }
+            Expr::Tuple(elems) => {
+                for elem in elems {
+                    Self::collect_vars_expr(elem, used, defined);
+                }
+            }
+            Expr::Range { start, end, .. } => {
+                Self::collect_vars_expr(start, used, defined);
+                Self::collect_vars_expr(end, used, defined);
+            }
+            Expr::Await(inner) => {
+                Self::collect_vars_expr(inner, used, defined);
+            }
+            Expr::MethodCall { object, args, .. } => {
+                Self::collect_vars_expr(object, used, defined);
+                for a in args {
+                    Self::collect_vars_expr(a, used, defined);
+                }
+            }
+            _ => {} // literals, no sub-expressions
+        }
+    }
+
     /// Codegen for anonymous function definitions (fn (int: a, int: b) { ... }).
     /// Generates a standalone LLVM function: `define i64 @anon_N(i8* %env, i8* %packed_args)`
     /// that unpacks arguments from the packed struct, executes the body, and returns.
-    /// Returns a %LimeClosure* wrapping { fn_ptr, env_ptr=NULL }.
+    /// If the closure captures free variables, they are packed into a heap i64 array
+    /// and passed as the env_ptr.
     fn codegen_anon_fn(
         &mut self,
         params: &[(String, String)],
@@ -588,26 +709,88 @@ impl<'a> Cg<'a> {
             .collect();
 
         // Return type: hardcoded to i64 (MVP limitation).
-        // All anonymous functions currently return i64 via the closure ABI.
-        // TODO: support void/float/string returns from closures.
         let ret_type_str = "i64".to_string();
+
+        // Detect free variables in the body that exist in the parent scope
+        let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+        let all_free = Self::collect_free_vars(body, &param_names);
+        let captures: Vec<(String, Type)> = all_free.iter()
+            .filter_map(|n| {
+                self.env.get(n).cloned().map(|t| (n.clone(), t))
+            })
+            .collect();
 
         // Build function head: define i64 @anon_N(i8* %env, i8* %packed_args) {
         let mut ir = String::new();
         ir.push_str(&format!(
-            "\n; Anonymous function\ndefine {} @{}(i8* %env, i8* %packed_args) {{\n",
-            ret_type_str, name
+            "\n; Anonymous function ({} captures)\ndefine {} @{}(i8* %env, i8* %packed_args) {{\n",
+            captures.len(), ret_type_str, name
         ));
 
         // Entry block
         ir.push_str("L0:\n");
 
-        // Unpack arguments from the packed struct
+        // Unpack captured variables from the env array
         let mut child = Cg::new(self.defs, self.memory, self.string_literals, self.mono_name_map, self.mono_fdefs);
-        // Reuse the name as a temp namespace; reset temp counter
         let mut named: HashMap<String, String> = HashMap::new();
         let mut env_types: HashMap<String, Type> = HashMap::new();
 
+        for (i, (cname, ctype)) in captures.iter().enumerate() {
+            // GEP into env to get i64* for this capture
+            let raw_ptr = format!("%env_unpack_{}", i);
+            let offset = (i as i64) * 8;
+            ir.push_str(&format!(
+                "  {} = getelementptr i8, i8* %env, i64 {}\n",
+                raw_ptr, offset
+            ));
+            let ptr_i64 = format!("%env_ptr_{}", i);
+            ir.push_str(&format!(
+                "  {} = bitcast i8* {} to i64*\n",
+                ptr_i64, raw_ptr
+            ));
+            let loaded_i64 = format!("%env_loaded_{}", i);
+            ir.push_str(&format!(
+                "  {} = load i64, i64* {}, align 8\n",
+                loaded_i64, ptr_i64
+            ));
+            // Convert from i64 to actual type
+            let converted = format!("%env_val_{}", i);
+            match ctype {
+                Type::Float => {
+                    ir.push_str(&format!(
+                        "  {} = bitcast i64 {} to double\n",
+                        converted, loaded_i64
+                    ));
+                }
+                Type::Bool => {
+                    ir.push_str(&format!(
+                        "  {} = trunc i64 {} to i1\n",
+                        converted, loaded_i64
+                    ));
+                }
+                _ => {
+                    ir.push_str(&format!(
+                        "  {} = add i64 {}, 0\n",
+                        converted, loaded_i64
+                    ));
+                }
+            }
+            // alloca + store for the body to reference
+            let alloca_ptr = format!("%al_cap_{}", i);
+            let llty_real = llvm_type_name(ctype);
+            ir.push_str(&format!(
+                "  {} = alloca {}, align 8\n",
+                alloca_ptr, llty_real
+            ));
+            ir.push_str(&format!(
+                "  store {} {}, {}* {}, align 8\n",
+                llty_real, converted, llty_real, alloca_ptr
+            ));
+            named.insert(cname.clone(), alloca_ptr);
+            env_types.insert(cname.clone(), ctype.clone());
+        }
+
+        // Unpack arguments from the packed struct
         for (i, (pname, ptype_str)) in params.iter().enumerate() {
             let pty = type_from_str(ptype_str, self.defs);
             let llty = llvm_type_name(&pty);
@@ -644,8 +827,8 @@ impl<'a> Cg<'a> {
             env_types.insert(pname.clone(), pty);
         }
 
-        // Codegen the body using a child Cg, injecting unpacked args
-        child.out.clear(); // empty; we build body separately
+        // Codegen the body using a child Cg, injecting unpacked args + captures
+        child.out.clear();
         child.named = named;
         child.env = env_types;
         child.current_block = "L0".to_string();
@@ -667,18 +850,88 @@ impl<'a> Cg<'a> {
 
         self.pending_fns.push(ir);
 
-        // Return: %LimeClosure* @runtime_make_fn_ref(@anon_N as i8*)
-        // Function type: i64 (i8*, i8*)*
-        let fn_ptr_cast2 = self.fresh_temp();
+        // Create the closure, packing captures into env if needed
+        let fn_ptr_cast = self.fresh_temp();
         let closure = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = bitcast i64 (i8*, i8*)* @{} to i8*\n",
-            fn_ptr_cast2, name
+            fn_ptr_cast, name
         ));
-        self.out.push_str(&format!(
-            "  {} = call %LimeClosure* @runtime_make_fn_ref(i8* {})\n",
-            closure, fn_ptr_cast2
-        ));
+
+        if captures.is_empty() {
+            // No captures: use runtime_make_fn_ref (env_ptr = NULL)
+            self.out.push_str(&format!(
+                "  {} = call %LimeClosure* @runtime_make_fn_ref(i8* {})\n",
+                closure, fn_ptr_cast
+            ));
+        } else {
+            // Pack captures into a heap i64 array
+            let env_size = (captures.len() * 8) as i64;
+            let env_raw = self.fresh_temp();
+            self.out.push_str(&format!(
+                "  {} = call i8* @runtime_alloc(i64 {}, i64 8)\n",
+                env_raw, env_size
+            ));
+            // Collect alloca pointers first to avoid borrow conflict
+            let capture_ptrs: Vec<(String, Type, String)> = captures.iter().map(|(cname, ctype)| {
+                let ptr = self.named.get(cname)
+                    .cloned()
+                    .unwrap_or_else(|| format!("MISSING_{}", cname));
+                (cname.clone(), ctype.clone(), ptr)
+            }).collect();
+            for (i, (_cname, ctype, ptr)) in capture_ptrs.iter().enumerate() {
+                let loaded = self.fresh_temp();
+                let llty = llvm_type_name(ctype);
+                self.out.push_str(&format!(
+                    "  {} = load {}, {}* {}, align {}\n",
+                    loaded, llty, llty, ptr, align_of(ctype)
+                ));
+                // Pack as i64
+                let packed_val = self.fresh_temp();
+                match ctype {
+                    Type::Float => {
+                        self.out.push_str(&format!(
+                            "  {} = bitcast double {} to i64\n",
+                            packed_val, loaded
+                        ));
+                    }
+                    Type::Bool => {
+                        self.out.push_str(&format!(
+                            "  {} = zext i1 {} to i64\n",
+                            packed_val, loaded
+                        ));
+                    }
+                    _ => {
+                        self.out.push_str(&format!(
+                            "  {} = add i64 {}, 0\n",
+                            packed_val, loaded
+                        ));
+                    }
+                }
+                // Store into env array slot
+                let slot_ptr_raw = self.fresh_temp();
+                let offset = (i as i64) * 8;
+                self.out.push_str(&format!(
+                    "  {} = getelementptr i8, i8* {}, i64 {}\n",
+                    slot_ptr_raw, env_raw, offset
+                ));
+                let slot_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = bitcast i8* {} to i64*\n",
+                    slot_ptr, slot_ptr_raw
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, i64* {}, align 8\n",
+                    packed_val, slot_ptr
+                ));
+            }
+            // Create closure with env_ptr
+            self.out.push_str(&format!(
+                "  {} = call %LimeClosure* @runtime_make_closure(i8* {}, i8* {})\n",
+                closure, fn_ptr_cast, env_raw
+            ));
+        }
+
         Ok((closure, Type::Fn(
             param_types,
             Box::new(Type::Int), // MVP: assume i64 return
@@ -1293,6 +1546,22 @@ impl<'a> Cg<'a> {
         fn i64_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
             arg(cg, e, &Type::Int)
         }
+        // Codegen a list expression, store it in a stack slot, and return
+        // the pointer. This is needed for runtime functions that accept
+        // %LimeList* (e.g. join).
+        fn list_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            let (val, _ty) = cg.codegen_expr(e)?;
+            let slot = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = alloca %LimeList, align 8\n",
+                slot
+            ));
+            cg.out.push_str(&format!(
+                "  store %LimeList {}, ptr {}, align 8\n",
+                val, slot
+            ));
+            Ok(slot)
+        }
 
         // Emit a call returning an i8* string.
         fn call_str(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
@@ -1331,6 +1600,21 @@ impl<'a> Cg<'a> {
                 tmp, helper, call_args.join(", ")
             ));
             (tmp, Type::Int)
+        }
+        // Emit a call returning an i32, sign-extend to i64 to match Type::Int.
+        fn call_i32(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            let result = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i32 @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            cg.out.push_str(&format!(
+                "  {} = sext i32 {} to i64\n",
+                result, tmp
+            ));
+
+            (result, Type::Int)
         }
         // Emit a call returning a %LimeList via sret (strings boxed as i64
         // element slots, matching `split`/`fs_list_dir`).
@@ -1433,6 +1717,61 @@ impl<'a> Cg<'a> {
             "split" => {
                 let a = str_args(self, args, 2)?;
                 let (v, t) = call_list(self, "runtime_str_split", &a);
+                Ok(Some((v, t)))
+            }
+            "is_empty" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_str_is_empty", &[s]);
+                Ok(Some((v, t)))
+            }
+            "find" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_i64(self, "runtime_str_find", &a);
+                Ok(Some((v, t)))
+            }
+            "count" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_i64(self, "runtime_str_count", &a);
+                Ok(Some((v, t)))
+            }
+            "trim_start" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_trim_start", &[s]);
+                Ok(Some((v, t)))
+            }
+            "trim_end" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_trim_end", &[s]);
+                Ok(Some((v, t)))
+            }
+            "join" => {
+                let sep = str_arg(self, &args[0])?;
+                let list = list_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_join(ptr {}, {})\n",
+                    tmp, list, sep
+                ));
+                Ok(Some((tmp, Type::String)))
+            }
+            "to_int" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_str_to_int", &[s]);
+                Ok(Some((v, t)))
+            }
+            "to_float" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_str_to_float", &[s]);
+                Ok(Some((v, t)))
+            }
+            "equals" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_equals", &a);
+                Ok(Some((v, t)))
+            }
+            "compare" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_i32(self, "runtime_str_compare", &a);
                 Ok(Some((v, t)))
             }
             // ---- math builtins ----

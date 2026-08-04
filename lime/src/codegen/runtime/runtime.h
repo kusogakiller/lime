@@ -97,6 +97,8 @@ LimeList runtime_fs_list_dir(char* path);
 LimeList runtime_list_empty(void);
 LimeList runtime_list_add(LimeList list, int64_t elem);
 LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem);
+int64_t runtime_list_len(LimeList list);
+int64_t runtime_list_get(LimeList list, int64_t index);
 
 // -- Closure / function values (Phase B-2.2 / B-2.3) --
 //

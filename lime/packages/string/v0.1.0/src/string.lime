@@ -52,3 +52,45 @@ fn to_lower(str: s):
 // Repeat `s` `times` times.
 fn repeat(str: s, int: times):
     return repeat(s, times)
+
+// ===== Phase B-3: extended string APIs =====
+
+// Whether the string is empty.
+fn is_empty(str: s):
+    return is_empty(s)
+
+// Byte offset of the first occurrence of `sub`, or -1.
+fn find(str: s, str: sub):
+    return find(s, sub)
+
+// Number of non-overlapping occurrences of `sub`.
+fn count(str: s, str: sub):
+    return count(s, sub)
+
+// Trim leading whitespace.
+fn trim_start(str: s):
+    return trim_start(s)
+
+// Trim trailing whitespace.
+fn trim_end(str: s):
+    return trim_end(s)
+
+// Join a List(str) with `sep` between each element.
+fn join(str: sep, list(str): parts):
+    return join(sep, parts)
+
+// Parse the string as a signed integer. Returns 0 on failure.
+fn to_int(str: s):
+    return to_int(s)
+
+// Parse the string as a float. Returns 0.0 on failure.
+fn to_float(str: s):
+    return to_float(s)
+
+// Case-sensitive equality.
+fn equals(str: s, str: other):
+    return equals(s, other)
+
+// Lexicographic comparison. Returns -1, 0, or 1.
+fn compare(str: s, str: other):
+    return compare(s, other)
