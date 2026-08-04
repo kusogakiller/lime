@@ -1,19 +1,46 @@
-// std.io: 入出力ユーティリティ
-// 基盤となる print/println/input はランタイム組込みとして提供される。
-// ここではそれらをラップし、利便性の高いヘルパを提供する。
+// std.io: Input/output utilities for Lime 1.0.
+// Core print/println/input are provided as runtime builtins.
+// This package wraps them and adds eprint, eprintln, read_line,
+// read_all, write_stdout, write_stderr.
 
-// 改行なし出力
+// ===== Output =====
+
+// Print to stdout without trailing newline.
 fn print(str: s):
     print(s)
 
-// 改行付き出力
+// Print to stdout with trailing newline.
 fn println(str: s):
     println(s)
 
-// 標準入力から1行読み込む（省略時は空プロンプト）
-fn read_line():
-    return input()
+// Print to stderr without trailing newline.
+fn eprint(str: s):
+    eprint(s)
 
-// プロンプト付き入力
+// Print to stderr with trailing newline.
+fn eprintln(str: s):
+    eprintln(s)
+
+// ===== Input =====
+
+// Read one line from stdin (no prompt). Strips trailing newline.
+fn read_line():
+    return io_read_line()
+
+// Read all remaining input from stdin until EOF.
+fn read_all():
+    return io_read_all()
+
+// Read one line from stdin with a prompt. Strips trailing newline.
 fn prompt(str: message):
     return input(message)
+
+// ===== Low-level =====
+
+// Write a string directly to stdout. Returns true on success.
+fn write_stdout(str: s):
+    return io_write_stdout(s)
+
+// Write a string directly to stderr. Returns true on success.
+fn write_stderr(str: s):
+    return io_write_stderr(s)

@@ -98,6 +98,12 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare double @runtime_time_now()\n");
     out.push_str("declare i32 @runtime_time_sleep(double)\n");
     out.push_str("declare i8* @runtime_input(i8*)\n");
+    out.push_str("declare void @runtime_eprint(i8*)\n");
+    out.push_str("declare void @runtime_eprintln(i8*)\n");
+    out.push_str("declare i8* @runtime_read_line(void)\n");
+    out.push_str("declare i8* @runtime_read_all(void)\n");
+    out.push_str("declare i32 @runtime_write_stdout(i8*)\n");
+    out.push_str("declare i32 @runtime_write_stderr(i8*)\n");
     out.push_str("declare i8* @runtime_read_file(i8*)\n");
     out.push_str("declare i32 @runtime_write_file(i8*, i8*)\n");
     out.push_str("declare i32 @runtime_append_file(i8*, i8*)\n");

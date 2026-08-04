@@ -5820,12 +5820,14 @@ fn infer_type(
         Expr::Call { func, args } => {
             match func.as_str() {
                 "print" | "println" => Ok(Type::Unit),
+                "eprint" | "eprintln" => Ok(Type::Unit),
                 "len" => Ok(Type::Int),
                 "StringBuilder" => Ok(Type::Unknown),
                 "int" => Ok(Type::Int),
                 "float" => Ok(Type::Float),
                 "str" => Ok(Type::String),
-                "input" => Ok(Type::String),
+                "input" | "io_read_line" | "io_read_all" => Ok(Type::String),
+                "io_write_stdout" | "io_write_stderr" => Ok(Type::Bool),
                 "read_file" => Ok(Type::String),
                 "write_file" | "append_file" | "remove_file" | "file_exists" | "fs_exists"
                     | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file" | "fs_is_dir"
@@ -6690,6 +6692,20 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         "input" => {
             for a in args { check_expr(a, env, defs)?; }
             Ok(Type::String)
+        }
+        "eprint" | "eprintln" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::Unit)
+        }
+        "io_read_line" | "io_read_all" => {
+            if !args.is_empty() {
+                return Err(format!("Type error: {}() takes no arguments", func));
+            }
+            Ok(Type::String)
+        }
+        "io_write_stdout" | "io_write_stderr" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::Bool)
         }
         "read_file" => {
             for a in args { check_expr(a, env, defs)?; }
@@ -10055,7 +10071,8 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
              | "fs_list_dir" | "fs_create_dir" | "fs_copy" | "fs_rename"
              | "fs_is_file" | "fs_is_dir" | "fs_remove_dir" | "fs_read_lines" | "fs_write_lines"
-             | "input"
+             | "input" | "eprint" | "eprintln"
+             | "io_read_line" | "io_read_all" | "io_write_stdout" | "io_write_stderr"
              | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
              | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
              | "to_int" | "to_float" | "equals" | "compare"
@@ -11144,6 +11161,61 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 .read_line(&mut line)
                 .map_err(|e| format!("input() failed: {}", e))?;
             Ok(Value::String(line.trim_end_matches(['\n', '\r']).to_string()))
+        }
+        "eprint" => {
+            use std::io::Write as _;
+            for arg in args {
+                let val = eval_expr(arg, env, defs)?;
+                eprint!("{}", val.to_string());
+            }
+            let _ = std::io::stderr().flush();
+            Ok(Value::Int(0))
+        }
+        "eprintln" => {
+            use std::io::Write as _;
+            for arg in args {
+                let val = eval_expr(arg, env, defs)?;
+                eprintln!("{}", val.to_string());
+            }
+            let _ = std::io::stderr().flush();
+            Ok(Value::Int(0))
+        }
+        "io_read_line" => {
+            use std::io::Write as _;
+            let _ = std::io::stdout().flush();
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| format!("io_read_line() failed: {}", e))?;
+            Ok(Value::String(line.trim_end_matches(['\n', '\r']).to_string()))
+        }
+        "io_read_all" => {
+            use std::io::Read as _;
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| format!("io_read_all() failed: {}", e))?;
+            Ok(Value::String(buf))
+        }
+        "io_write_stdout" => {
+            use std::io::Write as _;
+            let v = eval_expr(&args[0], env, defs)?;
+            if let Value::String(s) = v {
+                let result = std::io::stdout().write_all(s.as_bytes());
+                Ok(Value::Bool(result.is_ok()))
+            } else {
+                Err("io_write_stdout() expects a string".to_string())
+            }
+        }
+        "io_write_stderr" => {
+            use std::io::Write as _;
+            let v = eval_expr(&args[0], env, defs)?;
+            if let Value::String(s) = v {
+                let result = std::io::stderr().write_all(s.as_bytes());
+                Ok(Value::Bool(result.is_ok()))
+            } else {
+                Err("io_write_stderr() expects a string".to_string())
+            }
         }
         // ===== std.fs runtime builtins (Phase 10 P3) =====
         "read_file" => {

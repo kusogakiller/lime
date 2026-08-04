@@ -2144,3 +2144,68 @@ fn emit_object_fs_read_write_lines() {
         out
     );
 }
+
+/// Phase C-1.4: io.eprintln and io.write_stdout — interpreter + native parity.
+#[test]
+fn emit_object_io_eprintln_write_stdout() {
+    use std::fs;
+    let dir = "target/test_io_eprintln";
+    let _ = fs::remove_dir_all(dir);
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(io.write_stdout(\"hello\"))\n    println(\"done\")\n    io.eprintln(\"err-msg\")\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["hellotrue", "done", "err-msg"],
+        "io eprintln/write_stdout (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase C-1.4: io.read_line with piped input — interpreter + native parity.
+#[test]
+fn emit_object_io_read_line() {
+    use std::fs;
+    use std::io::Write;
+    let dir = "target/test_io_read_line";
+    let _ = fs::remove_dir_all(dir);
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let s = io.read_line()\n    println(s)\n    return\n",
+    );
+
+    let bin = env!("CARGO_BIN_EXE_lime");
+    let mut child = Command::new(bin)
+        .args(["run", &format!("{}/citrus.toml", dir)])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn");
+    if let Some(ref mut stdin) = child.stdin {
+        stdin.write_all(b"hello lime\n").unwrap();
+    }
+    let output = child.wait_with_output().expect("failed to wait");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        lines,
+        ["hello lime"],
+        "io.read_line (interpreter) mismatch\nstdout:\n{}",
+        stdout
+    );
+}

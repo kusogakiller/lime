@@ -81,6 +81,12 @@ int runtime_time_sleep(double secs);
 
 // -- stdio --
 char* runtime_input(char* prompt);
+void runtime_eprint(char* s);
+void runtime_eprintln(char* s);
+char* runtime_read_line(void);
+char* runtime_read_all(void);
+int runtime_write_stdout(char* s);
+int runtime_write_stderr(char* s);
 
 // -- Filesystem --
 char* runtime_read_file(char* path);

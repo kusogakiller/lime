@@ -527,6 +527,78 @@ char* runtime_input(char* prompt) {
     return buf;
 }
 
+void runtime_eprint(char* s) {
+    if (s == NULL) return;
+    fputs(s, stderr);
+}
+
+void runtime_eprintln(char* s) {
+    if (s == NULL) return;
+    fputs(s, stderr);
+    fputc('\n', stderr);
+}
+
+char* runtime_read_line(void) {
+    size_t cap = 128;
+    size_t len = 0;
+    char* buf = (char*)malloc(cap);
+    if (buf == NULL) {
+        runtime_panic("runtime_read_line: out of memory");
+    }
+    int c;
+    while ((c = fgetc(stdin)) != EOF && c != '\n') {
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (nb == NULL) {
+                free(buf);
+                runtime_panic("runtime_read_line: out of memory");
+            }
+            buf = nb;
+        }
+        buf[len++] = (char)c;
+    }
+    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) len--;
+    buf[len] = '\0';
+    return buf;
+}
+
+char* runtime_read_all(void) {
+    size_t cap = 4096;
+    size_t len = 0;
+    char* buf = (char*)malloc(cap);
+    if (buf == NULL) {
+        runtime_panic("runtime_read_all: out of memory");
+    }
+    int c;
+    while ((c = fgetc(stdin)) != EOF) {
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (nb == NULL) {
+                free(buf);
+                runtime_panic("runtime_read_all: out of memory");
+            }
+            buf = nb;
+        }
+        buf[len++] = (char)c;
+    }
+    buf[len] = '\0';
+    return buf;
+}
+
+int runtime_write_stdout(char* s) {
+    if (s == NULL) return 0;
+    size_t n = strlen(s);
+    return (int)(fwrite(s, 1, n, stdout) == n);
+}
+
+int runtime_write_stderr(char* s) {
+    if (s == NULL) return 0;
+    size_t n = strlen(s);
+    return (int)(fwrite(s, 1, n, stderr) == n);
+}
+
 // -- Filesystem --
 char* runtime_read_file(char* path) {
     if (path == NULL) return NULL;

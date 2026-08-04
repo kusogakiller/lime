@@ -1842,6 +1842,38 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_str(self, "runtime_input", &[prompt]);
                 Ok(Some((v, t)))
             }
+            "eprint" | "eprintln" => {
+                for arg in args {
+                    let (v, _) = self.codegen_expr(arg)?;
+                    let rt = if func == "eprint" { "runtime_eprint" } else { "runtime_eprintln" };
+                    self.out.push_str(&format!(
+                        "  call void @{}({})\n",
+                        rt,
+                        self.fmt_call_arg(&v, &Type::String)
+                    ));
+                }
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            "io_read_line" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_read_line()\n", tmp));
+                Ok(Some((tmp, Type::String)))
+            }
+            "io_read_all" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_read_all()\n", tmp));
+                Ok(Some((tmp, Type::String)))
+            }
+            "io_write_stdout" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_write_stdout", &[p]);
+                Ok(Some((v, t)))
+            }
+            "io_write_stderr" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_write_stderr", &[p]);
+                Ok(Some((v, t)))
+            }
             // ---- filesystem builtins ----
             "read_file" => {
                 let p = str_arg(self, &args[0])?;
