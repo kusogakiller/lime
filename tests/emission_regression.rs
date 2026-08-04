@@ -1715,3 +1715,255 @@ fn emit_object_closure_symbol_stability() {
     let out2 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
     assert_eq!(out1, out2, "closure symbol stability failed: repeated builds produce different IR");
 }
+
+/// Phase C-1.1: string stdlib is_empty — runtime + native parity.
+#[test]
+fn emit_object_string_is_empty() {
+    use std::fs;
+    let dir = "target/test_string_is_empty";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(string.is_empty(\"\"))\n    println(string.is_empty(\"a\"))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["true", "false"],
+        "string is_empty (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "true\nfalse", "string is_empty (native) mismatch");
+}
+
+/// Phase C-1.1: string stdlib find — runtime + native parity.
+#[test]
+fn emit_object_string_find() {
+    use std::fs;
+    let dir = "target/test_string_find";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(string.find(\"hello\", \"ll\"))\n    println(string.find(\"hello\", \"xyz\"))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["2", "-1"],
+        "string find (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "2\n-1", "string find (native) mismatch");
+}
+
+/// Phase C-1.1: string stdlib count — runtime + native parity.
+#[test]
+fn emit_object_string_count() {
+    use std::fs;
+    let dir = "target/test_string_count";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(string.count(\"hello\", \"l\"))\n    println(string.count(\"hello\", \"x\"))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["2", "0"],
+        "string count (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "2\n0", "string count (native) mismatch");
+}
+
+/// Phase C-1.1: string stdlib trim_start/trim_end — runtime + native parity.
+#[test]
+fn emit_object_string_trim_start_end() {
+    use std::fs;
+    let dir = "target/test_string_trim_start_end";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let s = \"  abc  \"\n    println(string.trim_start(s))\n    println(string.trim_end(s))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["abc  ", "  abc"],
+        "string trim_start/end (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "abc  \n  abc", "string trim_start/end (native) mismatch");
+}
+
+/// Phase C-1.1: string stdlib join — runtime + native parity.
+#[test]
+fn emit_object_string_join() {
+    use std::fs;
+    let dir = "target/test_string_join";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let parts = string.split(\"a,b,c\", \",\")\n    println(string.join(\"-\", parts))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["a-b-c"],
+        "string join (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "a-b-c", "string join (native) mismatch");
+}
+
+/// Phase C-1.1: string stdlib to_int/to_float — runtime + native parity.
+#[test]
+fn emit_object_string_to_int_float() {
+    use std::fs;
+    let dir = "target/test_string_to_int_float";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(string.to_int(\"42\"))\n    println(string.to_int(\"abc\"))\n    println(string.to_float(\"3.14\"))\n    println(string.to_float(\"xyz\"))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["42", "0", "3.14", "0"],
+        "string to_int/to_float (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "42\n0\n3.14\n0", "string to_int/to_float (native) mismatch");
+}
+
+/// Phase C-1.1: string stdlib equals/compare — runtime + native parity.
+#[test]
+fn emit_object_string_equals_compare() {
+    use std::fs;
+    let dir = "target/test_string_equals_compare";
+    write_stdlib_project(
+        dir,
+        "fn main():\n    println(string.equals(\"a\", \"a\"))\n    println(string.equals(\"a\", \"b\"))\n    println(string.compare(\"a\", \"b\"))\n    println(string.compare(\"b\", \"a\"))\n    println(string.compare(\"a\", \"a\"))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["true", "false", "-1", "1", "0"],
+        "string equals/compare (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    assert!(out.contains("ok:"), "native build failed:\n{}", out);
+    let exe = format!("{}.exe", dir);
+    assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
+    let run = Command::new(&exe).output().unwrap();
+    let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    assert_eq!(native_out.replace("\r", ""), "true\nfalse\n-1\n1\n0", "string equals/compare (native) mismatch");
+}

@@ -4903,6 +4903,11 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
             return Type::List(Box::new(type_from_str(inner, defs)));
         }
     }
+    if let Some(inner) = s.strip_prefix("list(") {
+        if let Some(inner) = inner.strip_suffix(')') {
+            return Type::List(Box::new(type_from_str(inner, defs)));
+        }
+    }
     // fn(params) -> ret type
     if let Some(rest) = s.strip_prefix("fn(") {
         if let Some(arrow_pos) = rest.find(") -> ") {
@@ -5681,6 +5686,11 @@ fn infer_type(
                         _ => Ok(Type::String),
                     }
                 }
+                "is_empty" => Ok(Type::Bool),
+                "find" | "count" | "to_int" | "compare" => Ok(Type::Int),
+                "trim_start" | "trim_end" | "join" => Ok(Type::String),
+                "equals" => Ok(Type::Bool),
+                "to_float" => Ok(Type::Float),
                 "push" | "reverse" | "remove_at" => {
                     if let Some(first) = args.first() {
                         // These return the same list type as the input list
@@ -9720,6 +9730,8 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
             | "fs_list_dir" | "fs_create_dir" | "input"
             | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
+            | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
+            | "to_int" | "to_float" | "equals" | "compare"
     )
 }
 
@@ -10399,6 +10411,117 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     .map_err(|e| format!("remove_file('{}') failed: {}", path, e))
             } else {
                 Err("remove_file() expects a string path".to_string())
+            }
+        }
+        "is_empty" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            if let Value::String(a) = s {
+                Ok(Value::Bool(a.is_empty()))
+            } else {
+                Err("is_empty() expects a string".to_string())
+            }
+        }
+        "find" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            let sub = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(a), Value::String(b)) = (s, sub) {
+                match a.find(&b) {
+                    Some(i) => Ok(Value::Int(i as i64)),
+                    None => Ok(Value::Int(-1)),
+                }
+            } else {
+                Err("find() expects two strings".to_string())
+            }
+        }
+        "count" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            let sub = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(a), Value::String(b)) = (s, sub) {
+                if b.is_empty() {
+                    Ok(Value::Int(a.chars().count() as i64))
+                } else {
+                    Ok(Value::Int(a.matches(&b).count() as i64))
+                }
+            } else {
+                Err("count() expects two strings".to_string())
+            }
+        }
+        "trim_start" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            if let Value::String(a) = s {
+                Ok(Value::String(a.trim_start().to_string()))
+            } else {
+                Err("trim_start() expects a string".to_string())
+            }
+        }
+        "trim_end" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            if let Value::String(a) = s {
+                Ok(Value::String(a.trim_end().to_string()))
+            } else {
+                Err("trim_end() expects a string".to_string())
+            }
+        }
+        "join" => {
+            let sep = eval_expr(&args[0], env, defs)?;
+            let list = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(s), Value::Array(arr)) = (sep, list) {
+                let strs: Result<Vec<String>, _> = arr
+                    .iter()
+                    .map(|v| match v {
+                        Value::String(s) => Ok(s.clone()),
+                        _ => Err("join() list elements must be strings".to_string()),
+                    })
+                    .collect();
+                match strs {
+                    Ok(parts) => Ok(Value::String(parts.join(&s))),
+                    Err(e) => Err(e),
+                }
+            } else {
+                Err("join() expects (string, list)".to_string())
+            }
+        }
+        "to_int" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            if let Value::String(a) = s {
+                Ok(Value::Int(a.trim().parse::<i64>().unwrap_or(0)))
+            } else {
+                Err("to_int() expects a string".to_string())
+            }
+        }
+        "to_float" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            if let Value::String(a) = s {
+                match a.trim().parse::<f64>() {
+                    Ok(f) => Ok(Value::Float(f)),
+                    Err(_) => Ok(Value::Float(0.0)),
+                }
+            } else {
+                Err("to_float() expects a string".to_string())
+            }
+        }
+        "equals" => {
+            let a = eval_expr(&args[0], env, defs)?;
+            let b = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(a), Value::String(b)) = (a, b) {
+                Ok(Value::Bool(a == b))
+            } else {
+                Err("equals() expects two strings".to_string())
+            }
+        }
+        "compare" => {
+            let a = eval_expr(&args[0], env, defs)?;
+            let b = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(a), Value::String(b)) = (a, b) {
+                use std::cmp::Ordering;
+                let r = match a.cmp(&b) {
+                    Ordering::Less => -1,
+                    Ordering::Equal => 0,
+                    Ordering::Greater => 1,
+                };
+                Ok(Value::Int(r))
+            } else {
+                Err("compare() expects two strings".to_string())
             }
         }
         other => {

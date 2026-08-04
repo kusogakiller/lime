@@ -1546,6 +1546,22 @@ impl<'a> Cg<'a> {
         fn i64_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
             arg(cg, e, &Type::Int)
         }
+        // Codegen a list expression, store it in a stack slot, and return
+        // the pointer. This is needed for runtime functions that accept
+        // %LimeList* (e.g. join).
+        fn list_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            let (val, _ty) = cg.codegen_expr(e)?;
+            let slot = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = alloca %LimeList, align 8\n",
+                slot
+            ));
+            cg.out.push_str(&format!(
+                "  store %LimeList {}, ptr {}, align 8\n",
+                val, slot
+            ));
+            Ok(slot)
+        }
 
         // Emit a call returning an i8* string.
         fn call_str(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
@@ -1584,6 +1600,21 @@ impl<'a> Cg<'a> {
                 tmp, helper, call_args.join(", ")
             ));
             (tmp, Type::Int)
+        }
+        // Emit a call returning an i32, sign-extend to i64 to match Type::Int.
+        fn call_i32(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
+            let tmp = cg.fresh_temp();
+            let result = cg.fresh_temp();
+            cg.out.push_str(&format!(
+                "  {} = call i32 @{}({})\n",
+                tmp, helper, call_args.join(", ")
+            ));
+            cg.out.push_str(&format!(
+                "  {} = sext i32 {} to i64\n",
+                result, tmp
+            ));
+
+            (result, Type::Int)
         }
         // Emit a call returning a %LimeList via sret (strings boxed as i64
         // element slots, matching `split`/`fs_list_dir`).
@@ -1686,6 +1717,61 @@ impl<'a> Cg<'a> {
             "split" => {
                 let a = str_args(self, args, 2)?;
                 let (v, t) = call_list(self, "runtime_str_split", &a);
+                Ok(Some((v, t)))
+            }
+            "is_empty" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_str_is_empty", &[s]);
+                Ok(Some((v, t)))
+            }
+            "find" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_i64(self, "runtime_str_find", &a);
+                Ok(Some((v, t)))
+            }
+            "count" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_i64(self, "runtime_str_count", &a);
+                Ok(Some((v, t)))
+            }
+            "trim_start" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_trim_start", &[s]);
+                Ok(Some((v, t)))
+            }
+            "trim_end" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_str_trim_end", &[s]);
+                Ok(Some((v, t)))
+            }
+            "join" => {
+                let sep = str_arg(self, &args[0])?;
+                let list = list_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_join(ptr {}, {})\n",
+                    tmp, list, sep
+                ));
+                Ok(Some((tmp, Type::String)))
+            }
+            "to_int" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_str_to_int", &[s]);
+                Ok(Some((v, t)))
+            }
+            "to_float" => {
+                let s = str_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_str_to_float", &[s]);
+                Ok(Some((v, t)))
+            }
+            "equals" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_bool(self, "runtime_str_equals", &a);
+                Ok(Some((v, t)))
+            }
+            "compare" => {
+                let a = str_args(self, args, 2)?;
+                let (v, t) = call_i32(self, "runtime_str_compare", &a);
                 Ok(Some((v, t)))
             }
             // ---- math builtins ----
