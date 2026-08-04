@@ -5828,10 +5828,12 @@ fn infer_type(
                 "input" => Ok(Type::String),
                 "read_file" => Ok(Type::String),
                 "write_file" | "append_file" | "remove_file" | "file_exists" | "fs_exists"
-                    | "fs_create_dir" => Ok(Type::Bool),
+                    | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file" | "fs_is_dir"
+                    | "fs_remove_dir" => Ok(Type::Bool),
                 "fs_size" => Ok(Type::Int),
                 "fs_metadata" => Ok(Type::Struct("fs.FileMetadata".to_string())),
-                "fs_list_dir" => Ok(Type::List(Box::new(Type::String))),
+                "fs_list_dir" | "fs_read_lines" => Ok(Type::List(Box::new(Type::String))),
+                "fs_write_lines" => Ok(Type::Bool),
                 "time_now" => Ok(Type::Float),
                 "time_sleep" => Ok(Type::Bool),
                 "split" => Ok(Type::List(Box::new(Type::String))),
@@ -6694,6 +6696,26 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             Ok(Type::String)
         }
         "write_file" | "append_file" | "remove_file" | "file_exists" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::Bool)
+        }
+        "fs_exists" | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file" | "fs_is_dir" | "fs_remove_dir" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::Bool)
+        }
+        "fs_size" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::Int)
+        }
+        "fs_metadata" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::Struct("fs.FileMetadata".to_string()))
+        }
+        "fs_list_dir" | "fs_read_lines" => {
+            for a in args { check_expr(a, env, defs)?; }
+            Ok(Type::List(Box::new(Type::String)))
+        }
+        "fs_write_lines" => {
             for a in args { check_expr(a, env, defs)?; }
             Ok(Type::Bool)
         }
@@ -10031,7 +10053,9 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "split" | "slice" | "byte_len" | "reverse" | "remove_at" | "to_upper" | "to_lower"
             | "repeat" | "time_now" | "time_sleep" | "read_file" | "write_file" | "append_file"
             | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
-            | "fs_list_dir" | "fs_create_dir" | "input"
+             | "fs_list_dir" | "fs_create_dir" | "fs_copy" | "fs_rename"
+             | "fs_is_file" | "fs_is_dir" | "fs_remove_dir" | "fs_read_lines" | "fs_write_lines"
+             | "input"
              | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
              | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
              | "to_int" | "to_float" | "equals" | "compare"
@@ -10938,6 +10962,95 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     .map_err(|e| format!("fs_create_dir('{}') failed: {}", path, e))
             } else {
                 Err("fs_create_dir() expects a string path".to_string())
+            }
+        }
+        "fs_copy" => {
+            let src = eval_expr(&args[0], env, defs)?;
+            let dst = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(s), Value::String(d)) = (src, dst) {
+                std::fs::copy(&s, &d)
+                    .map(|_| Value::Bool(true))
+                    .map_err(|e| format!("fs_copy('{}', '{}') failed: {}", s, d, e))
+            } else {
+                Err("fs_copy() expects (string src, string dst)".to_string())
+            }
+        }
+        "fs_rename" => {
+            let src = eval_expr(&args[0], env, defs)?;
+            let dst = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(s), Value::String(d)) = (src, dst) {
+                std::fs::rename(&s, &d)
+                    .map(|_| Value::Bool(true))
+                    .map_err(|e| format!("fs_rename('{}', '{}') failed: {}", s, d, e))
+            } else {
+                Err("fs_rename() expects (string src, string dst)".to_string())
+            }
+        }
+        "fs_is_file" => {
+            let p = eval_expr(&args[0], env, defs)?;
+            if let Value::String(path) = p {
+                Ok(Value::Bool(std::path::Path::new(&path).is_file()))
+            } else {
+                Err("fs_is_file() expects a string path".to_string())
+            }
+        }
+        "fs_is_dir" => {
+            let p = eval_expr(&args[0], env, defs)?;
+            if let Value::String(path) = p {
+                Ok(Value::Bool(std::path::Path::new(&path).is_dir()))
+            } else {
+                Err("fs_is_dir() expects a string path".to_string())
+            }
+        }
+        "fs_remove_dir" => {
+            let p = eval_expr(&args[0], env, defs)?;
+            if let Value::String(path) = p {
+                std::fs::remove_dir(&path)
+                    .map(|_| Value::Bool(true))
+                    .map_err(|e| format!("fs_remove_dir('{}') failed: {}", path, e))
+            } else {
+                Err("fs_remove_dir() expects a string path".to_string())
+            }
+        }
+        "fs_read_lines" => {
+            let p = eval_expr(&args[0], env, defs)?;
+            if let Value::String(path) = p {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        let lines: Vec<Value> = content
+                            .lines()
+                            .map(|l| Value::String(l.to_string()))
+                            .collect();
+                        Ok(Value::Array(lines))
+                    }
+                    Err(e) => Err(format!("fs_read_lines('{}') failed: {}", path, e)),
+                }
+            } else {
+                Err("fs_read_lines() expects a string path".to_string())
+            }
+        }
+        "fs_write_lines" => {
+            let p = eval_expr(&args[0], env, defs)?;
+            let lines_val = eval_expr(&args[1], env, defs)?;
+            if let (Value::String(path), Value::Array(lines)) = (p, lines_val) {
+                let parts: Result<Vec<String>, _> = lines
+                    .iter()
+                    .map(|v| match v {
+                        Value::String(s) => Ok(s.clone()),
+                        _ => Err("fs_write_lines() line elements must be strings".to_string()),
+                    })
+                    .collect();
+                match parts {
+                    Ok(strs) => {
+                        let content = strs.join("\n");
+                        std::fs::write(&path, content)
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("fs_write_lines('{}') failed: {}", path, e))
+                    }
+                    Err(e) => Err(e),
+                }
+            } else {
+                Err("fs_write_lines() expects (string path, list lines)".to_string())
             }
         }
         // Math helpers.

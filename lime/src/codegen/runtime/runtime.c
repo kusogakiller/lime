@@ -721,6 +721,106 @@ LimeList runtime_fs_list_dir(char* path) {
 #endif
 }
 
+int runtime_fs_copy(char* src, char* dst) {
+    if (src == NULL || dst == NULL) return 0;
+    FILE* fin = fopen(src, "rb");
+    if (fin == NULL) return 0;
+    FILE* fout = fopen(dst, "wb");
+    if (fout == NULL) { fclose(fin); return 0; }
+    char buf[8192];
+    size_t n;
+    int ok = 1;
+    while ((n = fread(buf, 1, sizeof(buf), fin)) > 0) {
+        if (fwrite(buf, 1, n, fout) != n) { ok = 0; break; }
+    }
+    fclose(fin);
+    fclose(fout);
+    return ok;
+}
+
+int runtime_fs_rename(char* src, char* dst) {
+    if (src == NULL || dst == NULL) return 0;
+    return rename(src, dst) == 0;
+}
+
+int runtime_fs_is_file(char* path) {
+    if (path == NULL) return 0;
+#ifdef _WIN32
+    struct _stat st;
+    if (_stat(path, &st) != 0) return 0;
+    return (st.st_mode & _S_IFREG) != 0;
+#else
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    return S_ISREG(st.st_mode);
+#endif
+}
+
+int runtime_fs_is_dir(char* path) {
+    if (path == NULL) return 0;
+#ifdef _WIN32
+    struct _stat st;
+    if (_stat(path, &st) != 0) return 0;
+    return (st.st_mode & _S_IFDIR) != 0;
+#else
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+    return S_ISDIR(st.st_mode);
+#endif
+}
+
+int runtime_fs_remove_dir(char* path) {
+    if (path == NULL) return 0;
+    return rmdir(path) == 0;
+}
+
+LimeList runtime_fs_read_lines(char* path) {
+    LimeList list = runtime_list_empty();
+    if (path == NULL) return list;
+    char* content = runtime_read_file(path);
+    if (content == NULL) return list;
+    char* line = content;
+    while (*line) {
+        char* end = strchr(line, '\n');
+        size_t len;
+        if (end) {
+            len = (size_t)(end - line);
+            /* strip trailing \r */
+            if (len > 0 && line[len - 1] == '\r') len--;
+            end++;
+        } else {
+            len = strlen(line);
+            if (len > 0 && line[len - 1] == '\r') len--;
+        }
+        char* s = (char*)malloc(len + 1);
+        if (s == NULL) {
+            runtime_panic("runtime_fs_read_lines: out of memory");
+        }
+        memcpy(s, line, len);
+        s[len] = '\0';
+        list = runtime_list_add(list, (int64_t)(intptr_t)s);
+        if (end) line = end; else break;
+    }
+    free(content);
+    return list;
+}
+
+int runtime_fs_write_lines(char* path, LimeList lines) {
+    if (path == NULL) return 0;
+    FILE* f = fopen(path, "wb");
+    if (f == NULL) return 0;
+    int ok = 1;
+    for (int64_t i = 0; i < lines.len; i++) {
+        char* s = (char*)(intptr_t)lines.data[i];
+        if (s == NULL) s = "";
+        size_t n = strlen(s);
+        if (fwrite(s, 1, n, f) != n) { ok = 0; break; }
+        if (fwrite("\n", 1, 1, f) != 1) { ok = 0; break; }
+    }
+    fclose(f);
+    return ok;
+}
+
 // -- List helpers --
 
 // Grow a LimeList buffer so capacity doubles (starts at 4) until it exceeds

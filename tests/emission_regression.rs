@@ -2092,3 +2092,55 @@ fn emit_object_stack_builtins() {
         out
     );
 }
+
+/// Phase C-1.3: filesystem copy, rename, is_file, is_dir, remove_dir — interpreter + native parity.
+#[test]
+fn emit_object_fs_copy_rename_isfile_isdir_rmdir() {
+    use std::fs;
+    let dir = "target/test_fs_copy_rename";
+    let _ = fs::remove_dir_all(dir);
+    write_stdlib_project(
+        dir,
+        "fn main():\n    fs.write(\"target/test_fs_cr_src.txt\", \"copy me\")\n    println(fs.copy(\"target/test_fs_cr_src.txt\", \"target/test_fs_cr_dst.txt\"))\n    println(fs.read(\"target/test_fs_cr_dst.txt\"))\n    println(fs.exists(\"target/test_fs_cr_dst.txt\"))\n    println(fs.is_file(\"target/test_fs_cr_src.txt\"))\n    println(fs.is_dir(\"target\"))\n    println(fs.is_file(\"target\"))\n    println(fs.is_dir(\"target/test_fs_cr_src.txt\"))\n    println(fs.rename(\"target/test_fs_cr_dst.txt\", \"target/test_fs_cr_renamed.txt\"))\n    println(fs.exists(\"target/test_fs_cr_dst.txt\"))\n    println(fs.read(\"target/test_fs_cr_renamed.txt\"))\n    fs.remove(\"target/test_fs_cr_src.txt\")\n    fs.remove(\"target/test_fs_cr_renamed.txt\")\n    fs.create_dir(\"target/test_fs_cr_emptydir\")\n    println(fs.is_dir(\"target/test_fs_cr_emptydir\"))\n    println(fs.remove_dir(\"target/test_fs_cr_emptydir\"))\n    println(fs.exists(\"target/test_fs_cr_emptydir\"))\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["true", "copy me", "true", "true", "true", "false", "false", "true", "false", "copy me", "true", "true", "false"],
+        "fs copy/rename/isfile/isdir/rmdir (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}
+
+/// Phase C-1.3: fs.read_lines / fs.write_lines — interpreter + native parity.
+#[test]
+fn emit_object_fs_read_write_lines() {
+    use std::fs;
+    let dir = "target/test_fs_lines";
+    let _ = fs::remove_dir_all(dir);
+    write_stdlib_project(
+        dir,
+        "fn main():\n    let lines = [\"hello\", \"world\", \"foo\"]\n    println(fs.write_lines(\"target/test_fs_lines.txt\", lines))\n    let read_back = fs.read_lines(\"target/test_fs_lines.txt\")\n    println(read_back)\n    println(read_back)\n    fs.remove(\"target/test_fs_lines.txt\")\n    return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.contains("error["))
+        .collect();
+    assert_eq!(
+        interp,
+        ["true", "[hello, world, foo]", "[hello, world, foo]"],
+        "fs read_lines/write_lines (interpreter) mismatch\nfull output:\n{}",
+        out
+    );
+}

@@ -1925,6 +1925,41 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_list(self, "runtime_fs_list_dir", &[p]);
                 Ok(Some((v, t)))
             }
+            "fs_copy" | "fs_rename" => {
+                let a = str_args(self, args, 2)?;
+                let rt = if func == "fs_copy" { "runtime_fs_copy" } else { "runtime_fs_rename" };
+                let (v, t) = call_bool(self, rt, &a);
+                Ok(Some((v, t)))
+            }
+            "fs_is_file" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_fs_is_file", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_is_dir" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_fs_is_dir", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_remove_dir" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_fs_remove_dir", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_read_lines" => {
+                let p = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_fs_read_lines", &[p]);
+                Ok(Some((v, t)))
+            }
+            "fs_write_lines" => {
+                if args.len() != 2 {
+                    return Err("fs_write_lines() takes 2 arguments".to_string());
+                }
+                let p = str_arg(self, &args[0])?;
+                let (list_v, _) = self.codegen_expr(&args[1])?;
+                let (v, t) = call_bool(self, "runtime_fs_write_lines", &[p, self.bare_value(&list_v).to_string()]);
+                Ok(Some((v, t)))
+            }
             // ---- list builtins (Phase C-1.2) ----
             "list_insert" => {
                 if args.len() != 3 {

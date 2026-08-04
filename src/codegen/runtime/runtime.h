@@ -92,6 +92,13 @@ int runtime_fs_create_dir(char* path);
 int64_t runtime_fs_size(char* path);
 void runtime_fs_metadata(char* path, int64_t* size, int8_t* is_dir, int8_t* is_file);
 LimeList runtime_fs_list_dir(char* path);
+int runtime_fs_copy(char* src, char* dst);
+int runtime_fs_rename(char* src, char* dst);
+int runtime_fs_is_file(char* path);
+int runtime_fs_is_dir(char* path);
+int runtime_fs_remove_dir(char* path);
+LimeList runtime_fs_read_lines(char* path);
+int runtime_fs_write_lines(char* path, LimeList lines);
 
 // -- List operations --
 LimeList runtime_list_empty(void);

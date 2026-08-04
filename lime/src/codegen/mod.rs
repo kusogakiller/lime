@@ -107,6 +107,13 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i64 @runtime_fs_size(i8*)\n");
     out.push_str("declare void @runtime_fs_metadata(i8*, ptr, ptr, ptr)\n");
     out.push_str("declare void @runtime_fs_list_dir(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare i32 @runtime_fs_copy(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_fs_rename(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_fs_is_file(i8*)\n");
+    out.push_str("declare i32 @runtime_fs_is_dir(i8*)\n");
+    out.push_str("declare i32 @runtime_fs_remove_dir(i8*)\n");
+    out.push_str("declare void @runtime_fs_read_lines(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare i32 @runtime_fs_write_lines(i8*, ptr)\n");
 
     // Phase C-1.2: list mutation / inspection builtins
     out.push_str("declare void @runtime_list_insert(ptr sret(%LimeList), ptr, i64, i64)\n");
