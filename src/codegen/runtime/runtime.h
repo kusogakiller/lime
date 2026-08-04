@@ -243,4 +243,15 @@ LimeJson* runtime_json_array(void);
 int8_t    runtime_json_set(LimeJson* j, char* key, LimeJson* val);
 int8_t    runtime_json_push(LimeJson* j, LimeJson* elem);
 
+// -- Path operations (Phase C-1.8) --
+char* runtime_path_join(char* a, char* b);
+char* runtime_path_basename(char* path);
+char* runtime_path_dirname(char* path);
+char* runtime_path_filename(char* path);
+char* runtime_path_extension(char* path);
+int runtime_path_is_absolute(char* path);
+char* runtime_path_normalize(char* path);
+int runtime_path_equals(char* a, char* b);
+char* runtime_path_parent(char* path);
+
 #endif // LIME_RUNTIME_H

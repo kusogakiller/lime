@@ -1751,3 +1751,311 @@ int8_t runtime_json_push(LimeJson* j, LimeJson* elem) {
     j->data.array_val.items[j->data.array_val.len++] = elem;
     return 1;
 }
+
+// ========================================================================
+// Path operations (Phase C-1.8)
+// ========================================================================
+
+static int path_is_sep(char c) {
+    return c == '/' || c == '\\';
+}
+
+// Skip trailing separators (but keep root).
+static char* path_skip_trailing_seps(char* s) {
+    if (!s) return s;
+    char* end = s + strlen(s);
+    while (end > s && path_is_sep(*(end - 1))) end--;
+    *end = '\0';
+    return s;
+}
+
+// Find the last separator in the string, or NULL if none.
+static char* path_find_last_sep(const char* s) {
+    if (!s) return NULL;
+    char* last = NULL;
+    for (const char* p = s; *p; p++) {
+        if (path_is_sep(*p)) last = (char*)p;
+    }
+    return last;
+}
+
+// Find the last dot (for extension), or NULL if none.
+static char* path_find_last_dot(const char* s) {
+    if (!s) return NULL;
+    char* last = NULL;
+    for (const char* p = s; *p; p++) {
+        if (*p == '.') last = (char*)p;
+    }
+    return last;
+}
+
+// Count separators in the string.
+static int path_count_seps(const char* s) {
+    int count = 0;
+    for (const char* p = s; *p; p++) {
+        if (path_is_sep(*p)) count++;
+    }
+    return count;
+}
+
+// Copy a string segment to a newly allocated buffer.
+static char* path_strndup(const char* s, int64_t len) {
+    if (!s) return runtime_str_copy("");
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) runtime_panic("path: out of memory");
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+// -- path_join(a, b) --
+// Joins two path components. If b is absolute, returns b.
+// Handles empty components gracefully.
+char* runtime_path_join(char* a, char* b) {
+    if (!a || !*a) return runtime_str_copy(b ? b : "");
+    if (!b || !*b) return runtime_str_copy(a);
+
+    // If b starts with / or \, or is a drive letter (C:\), treat as absolute
+    if (path_is_sep(b[0])) return runtime_str_copy(b);
+    if (strlen(b) >= 2 && b[1] == ':') return runtime_str_copy(b);
+
+    // Find where b's content starts (skip leading separators)
+    const char* b_start = b;
+    while (*b_start && path_is_sep(*b_start)) b_start++;
+    if (!*b_start) return runtime_str_copy(a);
+
+    int a_len = strlen(a);
+    char* result = (char*)malloc(a_len + 1 + strlen(b_start) + 1);
+    if (!result) runtime_panic("path: out of memory");
+    memcpy(result, a, a_len);
+    result[a_len] = path_is_sep(a[a_len - 1]) ? '\0' : '/';
+    strcat(result + a_len + (result[a_len] == '/' ? 0 : 1), b_start);
+    // Fix the separator
+    if (result[a_len] != '/') {
+        result[a_len] = '/';
+    }
+    return result;
+}
+
+// -- path_basename(path) --
+// Returns the last component of a path (after the last separator).
+// Strips trailing separators before extracting.
+char* runtime_path_basename(char* path) {
+    if (!path || !*path) return runtime_str_copy("");
+
+    // Work on a copy to strip trailing separators
+    char* copy = runtime_str_copy(path);
+    path_skip_trailing_seps(copy);
+
+    char* sep = path_find_last_sep(copy);
+    if (!sep) return copy; // No separator, entire string is basename
+    char* result = runtime_str_copy(sep + 1);
+    free(copy);
+    return result;
+}
+
+// -- path_dirname(path) --
+// Returns the directory portion of a path (everything before the last separator).
+// For absolute paths, always returns at least the root.
+char* runtime_path_dirname(char* path) {
+    if (!path || !*path) return runtime_str_copy(".");
+
+    char* copy = runtime_str_copy(path);
+    path_skip_trailing_seps(copy);
+
+    char* sep = path_find_last_sep(copy);
+    if (!sep) {
+        // No separator => current directory
+        free(copy);
+        return runtime_str_copy(".");
+    }
+
+    // Strip trailing separators from the directory portion
+    char* end = sep;
+    while (end > copy && path_is_sep(*(end - 1))) end--;
+
+    // If we're at the root (all separators), return the root
+    if (end == copy && path_is_sep(*copy)) {
+        char root[2] = { *copy, '\0' };
+        free(copy);
+        return runtime_str_copy(root);
+    }
+
+    char* result = path_strndup(copy, end - copy);
+    free(copy);
+    return result;
+}
+
+// -- path_filename(path) --
+// Returns the filename portion (basename without extension).
+// For "foo/bar.txt" returns "bar", for "foo/bar.tar.gz" returns "bar.tar".
+char* runtime_path_filename(char* path) {
+    char* base = runtime_path_basename(path);
+    char* dot = path_find_last_dot(base);
+    if (!dot || dot == base) return base; // No dot, or dot at start => full basename
+
+    char* result = path_strndup(base, dot - base);
+    free(base);
+    return result;
+}
+
+// -- path_extension(path) --
+// Returns the file extension including the dot.
+// For "foo/bar.txt" returns ".txt", for "foo/bar.tar.gz" returns ".gz".
+// Returns "" if no extension.
+char* runtime_path_extension(char* path) {
+    char* base = runtime_path_basename(path);
+    char* dot = path_find_last_dot(base);
+    if (!dot || dot == base) {
+        free(base);
+        return runtime_str_copy("");
+    }
+    char* result = runtime_str_copy(dot);
+    free(base);
+    return result;
+}
+
+// -- path_is_absolute(path) --
+// Returns 1 if the path is absolute, 0 otherwise.
+// On Unix: starts with /
+// On Windows: starts with \ or drive letter (C:\)
+int runtime_path_is_absolute(char* path) {
+    if (!path || !*path) return 0;
+    if (path_is_sep(path[0])) return 1;
+    if (strlen(path) >= 2 && path[1] == ':') return 1;
+    return 0;
+}
+
+// -- path_normalize(path) --
+// Normalizes a path by:
+// 1. Collapsing multiple separators into one
+// 2. Resolving . (current dir)
+// 3. Resolving .. (parent dir)
+// 4. Removing trailing separators (except root)
+char* runtime_path_normalize(char* path) {
+    if (!path || !*path) return runtime_str_copy(".");
+
+    // Split into components, resolve . and ..
+    int max_parts = path_count_seps(path) + 2;
+    char** parts = (char**)malloc(max_parts * sizeof(char*));
+    int count = 0;
+
+    char* work = runtime_str_copy(path);
+    char* token = strtok(work, "/\\");
+    while (token) {
+        if (strcmp(token, ".") == 0) {
+            // Skip current dir
+        } else if (strcmp(token, "..") == 0) {
+            // Go up one level
+            if (count > 0) {
+                free(parts[count - 1]);
+                count--;
+            }
+        } else {
+            parts[count++] = runtime_str_copy(token);
+        }
+        token = strtok(NULL, "/\\");
+    }
+    free(work);
+
+    // If empty, return "."
+    if (count == 0) {
+        free(parts);
+        return runtime_str_copy(".");
+    }
+
+    // Calculate total length
+    int64_t total = 0;
+    for (int i = 0; i < count; i++) {
+        total += strlen(parts[i]);
+    }
+    total += count; // separators
+
+    // Add room for leading separator if absolute
+    int is_abs = path_is_sep(path[0]) || (strlen(path) >= 2 && path[1] == ':');
+    if (is_abs) total++;
+
+    char* result = (char*)malloc(total + 1);
+    if (!result) runtime_panic("path: out of memory");
+    result[0] = '\0';
+
+    if (is_abs) {
+        if (path_is_sep(path[0])) {
+            strcpy(result, "/");
+        } else {
+            // Drive letter
+            result[0] = path[0];
+            result[1] = ':';
+            result[2] = '\0';
+        }
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (i > 0 || result[0] != '\0') {
+            if (result[strlen(result) - 1] != '/') {
+                strcat(result, "/");
+            }
+        }
+        strcat(result, parts[i]);
+        free(parts[i]);
+    }
+    free(parts);
+
+    return result;
+}
+
+// -- path_equals(a, b) --
+// Compares two paths for logical equality.
+// Normalizes both paths before comparing (case-sensitive).
+int runtime_path_equals(char* a, char* b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+
+    char* na = runtime_path_normalize(a);
+    char* nb = runtime_path_normalize(b);
+    int result = runtime_str_equals(na, nb);
+    free(na);
+    free(nb);
+    return result;
+}
+
+// -- path_parent(path) --
+// Returns the parent directory. Equivalent to dirname but with different
+// semantics: returns "" for root paths and single-component paths.
+char* runtime_path_parent(char* path) {
+    if (!path || !*path) return runtime_str_copy("");
+
+    char* copy = runtime_str_copy(path);
+    path_skip_trailing_seps(copy);
+
+    // If it's a root path (just separator or drive letter + sep),
+    // parent of root is root itself.
+    if (path_is_sep(copy[0]) && !copy[1]) {
+        free(copy);
+        return runtime_str_copy("/");
+    }
+    if (strlen(copy) >= 2 && copy[1] == ':' && (!copy[2] || path_is_sep(copy[2]))) {
+        free(copy);
+        return runtime_str_copy(copy); // drive root: "C:" or "C:\"
+    }
+
+    char* sep = path_find_last_sep(copy);
+    if (!sep) {
+        free(copy);
+        return runtime_str_copy(""); // No parent
+    }
+
+    // Strip trailing separators
+    char* end = sep;
+    while (end > copy && path_is_sep(*(end - 1))) end--;
+
+    if (end == copy && path_is_sep(*copy)) {
+        char root[2] = { *copy, '\0' };
+        free(copy);
+        return runtime_str_copy(root);
+    }
+
+    char* result = path_strndup(copy, end - copy);
+    free(copy);
+    return result;
+}

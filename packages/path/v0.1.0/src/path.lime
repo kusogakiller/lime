@@ -1,0 +1,59 @@
+/// Path manipulation utilities for cross-platform file path handling.
+/// All functions operate on string paths without touching the filesystem.
+/// Paths are normalized using forward slashes on Unix and backslashes on Windows.
+
+/// Joins two path components with the platform separator.
+/// If b is absolute, returns b directly.
+/// join("foo", "bar") => "foo/bar"
+/// join("foo/", "bar") => "foo/bar"
+fn join(str: a, str: b):
+    return path_join(a, b)
+
+/// Returns the last component of a path (the filename).
+/// basename("/foo/bar.txt") => "bar.txt"
+/// basename("foo/") => "foo"
+fn basename(str: path):
+    return path_basename(path)
+
+/// Returns the directory portion of a path.
+/// dirname("/foo/bar.txt") => "/foo"
+/// dirname("bar.txt") => "."
+fn dirname(str: path):
+    return path_dirname(path)
+
+/// Returns the filename without the extension.
+/// filename("/foo/bar.txt") => "bar"
+/// filename("/foo/bar.tar.gz") => "bar.tar"
+fn filename(str: path):
+    return path_filename(path)
+
+/// Returns the file extension including the dot.
+/// extension("/foo/bar.txt") => ".txt"
+/// extension("/foo/bar.tar.gz") => ".gz"
+/// extension("/foo/bar") => ""
+fn extension(str: path):
+    return path_extension(path)
+
+/// Returns true if the path is absolute (starts with / or drive letter).
+/// is_absolute("/foo/bar") => true
+/// is_absolute("foo/bar") => false
+/// is_absolute("C:\\foo") => true
+fn is_absolute(str: path):
+    return path_is_absolute(path)
+
+/// Normalizes a path by resolving . and .. components and collapsing separators.
+/// normalize("/foo/./bar/../baz.txt") => "/foo/baz.txt"
+/// normalize("foo//bar") => "foo/bar"
+fn normalize(str: path):
+    return path_normalize(path)
+
+/// Compares two paths for logical equality after normalization.
+/// equals("/foo/./bar", "/foo/bar") => true
+fn equals(str: a, str: b):
+    return path_equals(a, b)
+
+/// Returns the parent directory of a path.
+/// parent("/foo/bar.txt") => "/foo"
+/// parent("bar.txt") => ""
+fn parent(str: path):
+    return path_parent(path)

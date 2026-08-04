@@ -1,0 +1,6 @@
+[package]
+name = "path"
+version = "v0.1.0"
+
+[files]
+path = "src/path.lime"

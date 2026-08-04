@@ -848,7 +848,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
     fs::write(format!("{}/main.lime", dir), source).unwrap();
     fs::write(
         format!("{}/citrus.toml", dir),
-        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\n",
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\n",
     )
     .unwrap();
 }
@@ -2521,4 +2521,53 @@ fn emit_object_option_result_builtins_comprehensive() {
     );
 }
 
+/// Phase C-1.8: path manipulation builtins — interpreter + native parity.
+#[test]
+fn emit_object_path_builtins() {
+    write_stdlib_project(
+        "target/test_path_builtins",
+        "fn main():\n    println(path.join(\"foo\", \"bar\"))\n    println(path.join(\"foo/\", \"bar\"))\n    println(path.basename(\"/foo/bar.txt\"))\n    println(path.basename(\"foo/\"))\n    println(path.dirname(\"/foo/bar.txt\"))\n    println(path.dirname(\"bar.txt\"))\n    println(path.filename(\"/foo/bar.txt\"))\n    println(path.filename(\"/foo/bar.tar.gz\"))\n    println(path.extension(\"/foo/bar.txt\"))\n    println(path.extension(\"/foo/bar.tar.gz\"))\n    println(path.extension(\"/foo/bar\"))\n    println(path.is_absolute(\"/foo/bar\"))\n    println(path.is_absolute(\"foo/bar\"))\n    println(path.normalize(\"/foo/./bar/../baz.txt\"))\n    println(path.normalize(\"foo//bar\"))\n    println(path.normalize(\"a/b/../c\"))\n    println(path.equals(\"/foo/./bar\", \"/foo/bar\"))\n    println(path.equals(\"foo\", \"bar\"))\n    println(path.parent(\"/foo/bar.txt\"))\n    println(path.parent(\"bar.txt\"))\n    println(path.parent(\"/\"))\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_path_builtins/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    let expected = [
+        "foo/bar",           // join("foo", "bar")
+        "foo/bar",           // join("foo/", "bar")
+        "bar.txt",           // basename("/foo/bar.txt")
+        "foo",               // basename("foo/")
+        "/foo",              // dirname("/foo/bar.txt")
+        ".",                 // dirname("bar.txt")
+        "bar",               // filename("/foo/bar.txt")
+        "bar.tar",           // filename("/foo/bar.tar.gz")
+        ".txt",              // extension("/foo/bar.txt")
+        ".gz",               // extension("/foo/bar.tar.gz")
+        "",                  // extension("/foo/bar")
+        "true",              // is_absolute("/foo/bar")
+        "false",             // is_absolute("foo/bar")
+        "/foo/baz.txt",      // normalize("/foo/./bar/../baz.txt")
+        "foo/bar",           // normalize("foo//bar")
+        "a/c",               // normalize("a/b/../c")
+        "true",              // equals("/foo/./bar", "/foo/bar")
+        "false",             // equals("foo", "bar")
+        "/foo",              // parent("/foo/bar.txt")
+        "",                  // parent("bar.txt")
+        "/",                 // parent("/")
+    ];
+    assert_eq!(
+        interp, expected,
+        "path builtins mismatch\nexpected: {:?}\ngot: {:?}\nfull output:\n{}",
+        expected, interp, out
+    );
+}
 

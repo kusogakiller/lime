@@ -6259,6 +6259,28 @@ fn infer_type(
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
+                "path_join" => {
+                    if args.len() != 2 { return Err("path_join() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "path_basename" | "path_dirname" | "path_filename" | "path_extension" | "path_normalize" | "path_parent" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "path_is_absolute" => {
+                    if args.len() != 1 { return Err("path_is_absolute() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "path_equals" => {
+                    if args.len() != 2 { return Err("path_equals() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -7318,6 +7340,28 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
         "result_equals" => {
             if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "path_join" => {
+            if args.len() != 2 { return Err("path_join() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::String)
+        }
+        "path_basename" | "path_dirname" | "path_filename" | "path_extension" | "path_normalize" | "path_parent" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::String)
+        }
+        "path_is_absolute" => {
+            if args.len() != 1 { return Err("path_is_absolute() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "path_equals" => {
+            if args.len() != 2 { return Err("path_equals() takes exactly 2 arguments".to_string()); }
             let _ = check_expr(&args[0], env, defs)?;
             let _ = check_expr(&args[1], env, defs)?;
             Ok(Type::Bool)
@@ -10543,6 +10587,43 @@ fn resolve_pkg_name(defs: &Defs, name: &str) -> Option<String> {
 /// `resolve_pkg_name` must not shadow these with a same-named package function
 /// (e.g. the `collections.reverse` generic must not capture the `reverse`
 /// builtin used inside package bodies).
+
+/// Cross-platform path helpers for the interpreter path builtins.
+/// Always use '/' as separator; handle both '/' and '\' as separators;
+/// treat any path starting with '/' or 'X:' as absolute.
+fn path_is_sep_char(c: char) -> bool { c == '/' || c == '\\' }
+
+fn path_normalize_slashes(s: &str) -> String {
+    s.chars().map(|c| if c == '\\' { '/' } else { c }).collect()
+}
+
+fn path_is_abs_str(s: &str) -> bool {
+    if s.is_empty() { return false; }
+    let bytes = s.as_bytes();
+    if bytes[0] == b'/' { return true; }
+    if bytes.len() >= 2 && bytes[1] == b':' { return true; }
+    false
+}
+
+fn path_normalize_impl(s: &str) -> String {
+    let s = path_normalize_slashes(s);
+    let is_abs = path_is_abs_str(&s);
+    let parts: Vec<&str> = s.split('/').collect();
+    let mut stack: Vec<&str> = Vec::new();
+    for part in &parts {
+        if *part == "." || part.is_empty() { continue; }
+        if *part == ".." { stack.pop(); continue; }
+        stack.push(part);
+    }
+    if stack.is_empty() {
+        return if is_abs { "/".to_string() } else { ".".to_string() };
+    }
+    let mut result = String::new();
+    if is_abs { result.push('/'); }
+    result.push_str(&stack.join("/"));
+    result
+}
+
 fn is_runtime_builtin(name: &str) -> bool {
     matches!(
         name,
@@ -10579,6 +10660,9 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "result_success" | "result_error" | "result_is_success" | "result_is_error"
              | "result_extract" | "result_extract_or" | "result_map"
              | "result_and" | "result_or" | "result_equals"
+             | "path_join" | "path_basename" | "path_dirname" | "path_filename"
+             | "path_extension" | "path_is_absolute" | "path_normalize"
+             | "path_equals" | "path_parent"
     )
 }
 
@@ -11244,6 +11328,145 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     Ok(Value::Bool(true))
                 }
                 _ => Err("result_equals() expects two Result values".to_string()),
+            }
+        }
+        // ===== Path operations (Phase C-1.8) =====
+        // Cross-platform path helpers: always use '/' as separator,
+        // handle both '/' and '\' as separators, treat any path starting
+        // with '/' or 'X:' as absolute. This ensures interpreter, codegen
+        // (C runtime), and tests produce consistent results on all platforms.
+
+        "path_join" => {
+            if args.len() != 2 { return Err("path_join() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            let b = eval_expr(&args[1], env, defs)?;
+            let sa = match a { Value::String(s) => path_normalize_slashes(&s), _ => return Err("path_join() expects string arguments".to_string()) };
+            let sb = match b { Value::String(s) => path_normalize_slashes(&s), _ => return Err("path_join() expects string arguments".to_string()) };
+            if path_is_abs_str(&sb) {
+                return Ok(Value::String(sb));
+            }
+            let sb_trimmed = sb.trim_start_matches('/');
+            if sb_trimmed.is_empty() {
+                return Ok(Value::String(sa));
+            }
+            let result = if sa.ends_with('/') {
+                format!("{}{}", sa, sb_trimmed)
+            } else {
+                format!("{}/{}", sa, sb_trimmed)
+            };
+            Ok(Value::String(result))
+        }
+        "path_basename" => {
+            if args.len() != 1 { return Err("path_basename() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_basename() expects a string".to_string()) };
+            let s = s.trim_end_matches('/');
+            if s.is_empty() { return Ok(Value::String(String::new())); }
+            match s.rfind('/') {
+                Some(pos) => Ok(Value::String(s[pos + 1..].to_string())),
+                None => Ok(Value::String(s.to_string())),
+            }
+        }
+        "path_dirname" => {
+            if args.len() != 1 { return Err("path_dirname() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_dirname() expects a string".to_string()) };
+            let s = s.trim_end_matches('/');
+            if s.is_empty() { return Ok(Value::String(".".to_string())); }
+            if path_is_abs_str(s) && !s[1..].contains('/') {
+                return Ok(Value::String("/".to_string()));
+            }
+            match s.rfind('/') {
+                Some(0) => Ok(Value::String("/".to_string())),
+                Some(pos) => Ok(Value::String(s[..pos].to_string())),
+                None => Ok(Value::String(".".to_string())),
+            }
+        }
+        "path_filename" => {
+            if args.len() != 1 { return Err("path_filename() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_filename() expects a string".to_string()) };
+            let base = {
+                let trimmed = s.trim_end_matches('/');
+                match trimmed.rfind('/') {
+                    Some(pos) => &trimmed[pos + 1..],
+                    None => trimmed,
+                }
+            };
+            match base.rfind('.') {
+                Some(0) => Ok(Value::String(base.to_string())),
+                Some(pos) if pos > 0 => Ok(Value::String(base[..pos].to_string())),
+                _ => Ok(Value::String(base.to_string())),
+            }
+        }
+        "path_extension" => {
+            if args.len() != 1 { return Err("path_extension() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_extension() expects a string".to_string()) };
+            let base = {
+                let trimmed = s.trim_end_matches('/');
+                match trimmed.rfind('/') {
+                    Some(pos) => &trimmed[pos + 1..],
+                    None => trimmed,
+                }
+            };
+            match base.rfind('.') {
+                Some(0) if base.len() == 1 => Ok(Value::String(String::new())),
+                Some(pos) if pos > 0 => Ok(Value::String(base[pos..].to_string())),
+                _ => Ok(Value::String(String::new())),
+            }
+        }
+        "path_is_absolute" => {
+            if args.len() != 1 { return Err("path_is_absolute() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_is_absolute() expects a string".to_string()) };
+            Ok(Value::Bool(path_is_abs_str(&s)))
+        }
+        "path_normalize" => {
+            if args.len() != 1 { return Err("path_normalize() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_normalize() expects a string".to_string()) };
+            let is_abs = path_is_abs_str(&s);
+            let parts: Vec<&str> = s.split('/').collect();
+            let mut stack: Vec<&str> = Vec::new();
+            for part in &parts {
+                if *part == "." || part.is_empty() { continue; }
+                if *part == ".." { stack.pop(); continue; }
+                stack.push(part);
+            }
+            if stack.is_empty() {
+                return Ok(Value::String(if is_abs { "/".to_string() } else { ".".to_string() }));
+            }
+            let mut result = String::new();
+            if is_abs { result.push('/'); }
+            result.push_str(&stack.join("/"));
+            Ok(Value::String(result))
+        }
+        "path_equals" => {
+            if args.len() != 2 { return Err("path_equals() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            let b = eval_expr(&args[1], env, defs)?;
+            let sa = match a { Value::String(s) => s, _ => return Err("path_equals() expects string arguments".to_string()) };
+            let sb = match b { Value::String(s) => s, _ => return Err("path_equals() expects string arguments".to_string()) };
+            Ok(Value::Bool(path_normalize_impl(&sa) == path_normalize_impl(&sb)))
+        }
+        "path_parent" => {
+            if args.len() != 1 { return Err("path_parent() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_parent() expects a string".to_string()) };
+            let trimmed = s.trim_end_matches('/');
+            if trimmed.is_empty() {
+                // Root path "/" or empty string: parent of root is root itself
+                if s.starts_with('/') { return Ok(Value::String("/".to_string())); }
+                return Ok(Value::String(String::new()));
+            }
+            if path_is_abs_str(trimmed) && !trimmed[1..].contains('/') {
+                return Ok(Value::String(String::new()));
+            }
+            match trimmed.rfind('/') {
+                Some(0) => Ok(Value::String("/".to_string())),
+                Some(pos) => Ok(Value::String(trimmed[..pos].to_string())),
+                None => Ok(Value::String(String::new())),
             }
         }
         // ===== Standard-library runtime builtins (Phase 7/10) =====

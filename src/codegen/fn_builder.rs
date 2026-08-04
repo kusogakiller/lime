@@ -2818,6 +2818,81 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, result));
                 Ok(Some((ext, Type::Bool)))
             }
+            // ===== Path operations (Phase C-1.8) =====
+            "path_join" => {
+                let a = str_arg(self, &args[0])?;
+                let b = str_arg(self, &args[1])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_join(i8* {}, i8* {})\n", call, a, b
+                ));
+                Ok(Some((call, Type::String)))
+            }
+            "path_basename" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_basename(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::String)))
+            }
+            "path_dirname" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_dirname(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::String)))
+            }
+            "path_filename" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_filename(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::String)))
+            }
+            "path_extension" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_extension(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::String)))
+            }
+            "path_is_absolute" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i32 @runtime_path_is_absolute(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::Bool)))
+            }
+            "path_normalize" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_normalize(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::String)))
+            }
+            "path_equals" => {
+                let a = str_arg(self, &args[0])?;
+                let b = str_arg(self, &args[1])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i32 @runtime_path_equals(i8* {}, i8* {})\n", call, a, b
+                ));
+                Ok(Some((call, Type::Bool)))
+            }
+            "path_parent" => {
+                let a = str_arg(self, &args[0])?;
+                let call = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_path_parent(i8* {})\n", call, a
+                ));
+                Ok(Some((call, Type::String)))
+            }
             _ => Ok(None),
         }
     }
