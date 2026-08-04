@@ -207,7 +207,8 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("@.str.str    = private unnamed_addr constant [3 x i8] c\"%s\\00\"\n");
     out.push_str("@.str.str_nl = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"\n");
     out.push_str("@.str.true   = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
-    out.push_str("@.str.false  = private unnamed_addr constant [6 x i8] c\"false\\00\"\n\n");
+    out.push_str("@.str.false  = private unnamed_addr constant [6 x i8] c\"false\\00\"\n");
+    out.push_str("@.str.panic_msg = private unnamed_addr constant [35 x i8] c\"extract() called on None/Error\\00\"\n\n");
 
     // Aggregate type declarations
     emit_aggregate_decls(&mut out, defs);

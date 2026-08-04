@@ -1,35 +1,26 @@
-// std.result: Result(T, E) ヘルパ
-// Result(T, E) は言語組込み（Success(T) / Error(E)）。
-// 仕様上 Ok/Err は不使用。ここでは Success/Error をそのまま使う。
+// std.result: Result(T, E) helpers
+// Result(T, E) uses Success/Error variants.
+// Public API uses extract/extract_or naming.
 
-// 成功値を取り出す。失敗の場合は fallback を返す。
-fn unwrap_or(T, E)(Result(T, E): res, T: fallback):
-    match res:
-        Success(value):
-            return value
-        Error(_):
-            return fallback
+// Extract the value from Success, or return fallback for Error.
+fn extract_or(T, E)(Result(T, E): res, T: fallback):
+    return result_extract_or(res, fallback)
 
-// 成功かどうか
+// Check if the result is Success.
 fn is_ok(T, E)(Result(T, E): res):
-    match res:
-        Success(_):
-            return true
-        Error(_):
-            return false
+    return result_is_success(res)
 
-// 失敗かどうか
+// Check if the result is Error.
 fn is_err(T, E)(Result(T, E): res):
-    match res:
-        Success(_):
-            return false
-        Error(_):
-            return true
+    return result_is_error(res)
 
-// 成功値を取り出す。失敗の場合は panic する。
+// Extract the value from Success. Panics on Error.
+fn extract(T, E)(Result(T, E): res):
+    return result_extract(res)
+
+// Backward-compatible aliases
+fn unwrap_or(T, E)(Result(T, E): res, T: fallback):
+    return result_extract_or(res, fallback)
+
 fn unwrap(T, E)(Result(T, E): res):
-    match res:
-        Success(value):
-            return value
-        Error(e):
-            panic(str(e))
+    return result_extract(res)

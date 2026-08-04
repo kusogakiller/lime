@@ -1531,6 +1531,11 @@ impl<'a> Cg<'a> {
             }
             Ok(cg.fmt_call_arg(&v, want))
         }
+        // Evaluate an argument without type checking (for polymorphic builtins).
+        fn any_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
+            let (v, _t) = cg.codegen_expr(e)?;
+            Ok(v)
+        }
         // N string arguments -> i8* formatted list.
         fn str_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
             if exprs.len() != n {
@@ -2487,6 +2492,332 @@ impl<'a> Cg<'a> {
                 let (r, t) = call_bool(self, "runtime_json_push", &[j, e]);
                 Ok(Some((r, t)))
             }
+            // ===== Option builtins =====
+            "option_some" => {
+                let v = any_arg(self, &args[0])?;
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", slot));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot));
+                self.out.push_str(&format!("  store i32 0, ptr {}, align 4\n", tag_gep));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                let converted = self.convert_to_i64(&v, &Type::Unknown)?;
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", converted, payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, slot));
+                Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
+            }
+            "option_none" => {
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", slot));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot));
+                self.out.push_str(&format!("  store i32 1, ptr {}, align 4\n", tag_gep));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                self.out.push_str(&format!("  store i64 0, ptr {}, align 8\n", payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, slot));
+                Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
+            }
+            "option_is_some" => {
+                let v = any_arg(self, &args[0])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                let cmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
+                let ext = self.fresh_temp();
+                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
+                Ok(Some((ext, Type::Bool)))
+            }
+            "option_is_none" => {
+                let v = any_arg(self, &args[0])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                let cmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
+                let ext = self.fresh_temp();
+                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
+                Ok(Some((ext, Type::Bool)))
+            }
+            "option_extract" => {
+                let v = any_arg(self, &args[0])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                let is_none = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_none, tag));
+                let panic_bb = self.fresh_block();
+                let ok_bb = self.fresh_block();
+                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_none, panic_bb, ok_bb));
+                self.out.push_str(&format!("{}:\n", panic_bb));
+                let msg = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds [35 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
+                self.out.push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
+                self.out.push_str("  unreachable\n");
+                self.out.push_str(&format!("{}:\n", ok_bb));
+                let payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload, self.bare_value(&v)));
+                Ok(Some((payload, Type::Unknown)))
+            }
+            "option_extract_or" => {
+                let v = any_arg(self, &args[0])?;
+                let default = any_arg(self, &args[1])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                let is_some = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag));
+                let payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload, self.bare_value(&v)));
+                let result = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", result, is_some, payload, self.bare_value(&default)));
+                Ok(Some((result, Type::Unknown)))
+            }
+            "option_and" => {
+                let a = any_arg(self, &args[0])?;
+                let tag_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_a, self.bare_value(&a)));
+                let is_some = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag_a));
+                let b_val = any_arg(self, &args[1])?;
+                let b_tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", b_tag, self.bare_value(&b_val)));
+                let b_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                let res_slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", res_slot));
+                let res_tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                let chosen_tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i32 {}, i32 1\n", chosen_tag, is_some, b_tag));
+                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                let res_payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                let chosen_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 0\n", chosen_payload, is_some, b_payload));
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, res_slot));
+                Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
+            }
+            "option_or" => {
+                let a = any_arg(self, &args[0])?;
+                let tag_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_a, self.bare_value(&a)));
+                let is_some = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag_a));
+                let payload_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                let b_val = any_arg(self, &args[1])?;
+                let b_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                let res_slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", res_slot));
+                let res_tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                let chosen_tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i32 0, i32 1\n", chosen_tag, is_some));
+                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                let res_payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                let chosen_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", chosen_payload, is_some, payload_a, self.bare_value(&b_payload)));
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, res_slot));
+                Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
+            }
+            "option_equals" => {
+                let a = any_arg(self, &args[0])?;
+                let b = any_arg(self, &args[1])?;
+                let tag_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_a, self.bare_value(&a)));
+                let tag_b = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_b, self.bare_value(&b)));
+                let tags_eq = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, {}\n", tags_eq, tag_a, tag_b));
+                let both_none = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", both_none, tag_a));
+                let both_none_and_eq = self.fresh_temp();
+                self.out.push_str(&format!("  {} = and i1 {}, {}\n", both_none_and_eq, tags_eq, both_none));
+                let payload_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                let payload_b = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload_b, self.bare_value(&b)));
+                let payloads_eq = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", payloads_eq, payload_a, payload_b));
+                let both_some = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", both_some, tag_a));
+                let both_some_and_eq = self.fresh_temp();
+                self.out.push_str(&format!("  {} = and i1 {}, {}\n", both_some_and_eq, tags_eq, both_some));
+                let payload_check = self.fresh_temp();
+                self.out.push_str(&format!("  {} = and i1 {}, {}\n", payload_check, both_some_and_eq, payloads_eq));
+                let result = self.fresh_temp();
+                self.out.push_str(&format!("  {} = or i1 {}, {}\n", result, both_none_and_eq, payload_check));
+                let ext = self.fresh_temp();
+                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, result));
+                Ok(Some((ext, Type::Bool)))
+            }
+            // ===== Result builtins =====
+            "result_success" => {
+                let v = any_arg(self, &args[0])?;
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", slot));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", tag_gep, slot));
+                self.out.push_str(&format!("  store i32 0, ptr {}, align 4\n", tag_gep));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                let converted = self.convert_to_i64(&v, &Type::Unknown)?;
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", converted, payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, slot));
+                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+            }
+            "result_error" => {
+                let v = any_arg(self, &args[0])?;
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", slot));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", tag_gep, slot));
+                self.out.push_str(&format!("  store i32 1, ptr {}, align 4\n", tag_gep));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                let converted = self.convert_to_i64(&v, &Type::Unknown)?;
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", converted, payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, slot));
+                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+            }
+            "result_is_success" => {
+                let v = any_arg(self, &args[0])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                let cmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
+                let ext = self.fresh_temp();
+                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
+                Ok(Some((ext, Type::Bool)))
+            }
+            "result_is_error" => {
+                let v = any_arg(self, &args[0])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                let cmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
+                let ext = self.fresh_temp();
+                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
+                Ok(Some((ext, Type::Bool)))
+            }
+            "result_extract" => {
+                let v = any_arg(self, &args[0])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                let is_error = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_error, tag));
+                let panic_bb = self.fresh_block();
+                let ok_bb = self.fresh_block();
+                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_error, panic_bb, ok_bb));
+                self.out.push_str(&format!("{}:\n", panic_bb));
+                let msg = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds [35 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
+                self.out.push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
+                self.out.push_str("  unreachable\n");
+                self.out.push_str(&format!("{}:\n", ok_bb));
+                let payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload, self.bare_value(&v)));
+                Ok(Some((payload, Type::Unknown)))
+            }
+            "result_extract_or" => {
+                let v = any_arg(self, &args[0])?;
+                let default = any_arg(self, &args[1])?;
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                let is_success = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag));
+                let payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload, self.bare_value(&v)));
+                let result = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", result, is_success, payload, self.bare_value(&default)));
+                Ok(Some((result, Type::Unknown)))
+            }
+            "result_and" => {
+                let a = any_arg(self, &args[0])?;
+                let tag_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_a, self.bare_value(&a)));
+                let is_success = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag_a));
+                let b_val = any_arg(self, &args[1])?;
+                let b_tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", b_tag, self.bare_value(&b_val)));
+                let b_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                let a_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", a_payload, self.bare_value(&a)));
+                let res_slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", res_slot));
+                let res_tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                let chosen_tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i32 {}, i32 {}\n", chosen_tag, is_success, b_tag, tag_a));
+                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                let res_payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                let chosen_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", chosen_payload, is_success, b_payload, a_payload));
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, res_slot));
+                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+            }
+            "result_or" => {
+                let a = any_arg(self, &args[0])?;
+                let tag_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_a, self.bare_value(&a)));
+                let is_success = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag_a));
+                let payload_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                let b_val = any_arg(self, &args[1])?;
+                let b_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                let res_slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", res_slot));
+                let res_tag_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                let chosen_tag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i32 0, i32 1\n", chosen_tag, is_success));
+                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                let res_payload_gep = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                let chosen_payload = self.fresh_temp();
+                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", chosen_payload, is_success, payload_a, self.bare_value(&b_payload)));
+                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, res_slot));
+                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+            }
+            "result_equals" => {
+                let a = any_arg(self, &args[0])?;
+                let b = any_arg(self, &args[1])?;
+                let tag_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_a, self.bare_value(&a)));
+                let tag_b = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_b, self.bare_value(&b)));
+                let tags_eq = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i32 {}, {}\n", tags_eq, tag_a, tag_b));
+                let payload_a = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                let payload_b = self.fresh_temp();
+                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload_b, self.bare_value(&b)));
+                let payloads_eq = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", payloads_eq, payload_a, payload_b));
+                let result = self.fresh_temp();
+                self.out.push_str(&format!("  {} = and i1 {}, {}\n", result, tags_eq, payloads_eq));
+                let ext = self.fresh_temp();
+                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, result));
+                Ok(Some((ext, Type::Bool)))
+            }
             _ => Ok(None),
         }
     }
@@ -2540,7 +2871,7 @@ impl<'a> Cg<'a> {
                 })?;
                 let field_type = type_from_str(&sdef.fields[field_idx].1, self.defs);
                 let llvm_struct_type = format!("%{}", sname);
-                let llvm_field_type = llvm_type_name(&field_type);
+                let _llvm_field_type = llvm_type_name(&field_type);
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = extractvalue {} {}, {}\n",

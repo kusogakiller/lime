@@ -2435,3 +2435,90 @@ fn emit_object_json_option_type() {
         expected, interp, out
     );
 }
+
+/// Phase C-1.7: comprehensive option/result builtin regression tests.
+/// Covers construction, extraction, equality, and, or, map, and nested types.
+#[test]
+fn emit_object_option_result_builtins_comprehensive() {
+    let dir = "target/test_emit_option_result_comprehensive";
+    write_stdlib_project(
+        dir,
+        "fn main():\n\
+         \x20   // Option construction\n\
+         \x20   let o1 = option_some(5)\n\
+         \x20   let o2 = option_none()\n\
+         \x20   // Option predicates\n\
+         \x20   println(option_is_some(o1))\n\
+         \x20   println(option_is_none(o1))\n\
+         \x20   println(option_is_some(o2))\n\
+         \x20   println(option_is_none(o2))\n\
+         \x20   // Option extraction\n\
+         \x20   println(option_extract(o1))\n\
+         \x20   println(option_extract_or(o1, 0))\n\
+         \x20   println(option_extract_or(o2, 42))\n\
+         \x20   // Option equality\n\
+         \x20   println(option_equals(option_some(1), option_some(1)))\n\
+         \x20   println(option_equals(option_some(1), option_some(2)))\n\
+         \x20   println(option_equals(option_some(1), option_none()))\n\
+         \x20   println(option_equals(option_none(), option_none()))\n\
+         \x20   // Option and/or\n\
+         \x20   println(option_and(option_some(1), option_some(2)))\n\
+         \x20   println(option_and(option_none(), option_some(2)))\n\
+         \x20   println(option_and(option_some(1), option_none()))\n\
+         \x20   println(option_or(option_none(), option_some(99)))\n\
+         \x20   println(option_or(option_some(5), option_none()))\n\
+         \x20   // Result construction\n\
+         \x20   let r1 = result_success(10)\n\
+         \x20   let r2 = result_error(\"fail\")\n\
+         \x20   // Result predicates\n\
+         \x20   println(result_is_success(r1))\n\
+         \x20   println(result_is_error(r1))\n\
+         \x20   println(result_is_success(r2))\n\
+         \x20   println(result_is_error(r2))\n\
+         \x20   // Result extraction\n\
+         \x20   println(result_extract(r1))\n\
+         \x20   println(result_extract_or(r1, 0))\n\
+         \x20   println(result_extract_or(r2, 42))\n\
+         \x20   // Result equality\n\
+         \x20   println(result_equals(result_success(1), result_success(1)))\n\
+         \x20   println(result_equals(result_success(1), result_success(2)))\n\
+         \x20   println(result_equals(result_success(1), result_error(1)))\n\
+         \x20   println(result_equals(result_error(\"a\"), result_error(\"a\")))\n\
+         \x20   // Result and/or\n\
+         \x20   println(result_and(result_success(1), result_success(2)))\n\
+         \x20   println(result_and(result_error(1), result_success(2)))\n\
+         \x20   println(result_or(result_error(1), result_success(99)))\n\
+         \x20   println(result_or(result_success(5), result_error(1)))\n\
+         \x20   return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[")
+        })
+        .collect();
+    let expected = [
+        "true", "false", "false", "true",   // option predicates: is_some(Some(5)), is_none(Some(5)), is_some(None), is_none(None)
+        "5", "5", "42",                       // option extraction
+        "true", "false", "false", "true",     // option equality
+        "Some(2)", "None", "None",            // option and
+        "Some(99)", "Some(5)",                // option or
+        "true", "false", "false", "true",     // result predicates: is_ok(Success(10)), is_err(Success(10)), is_ok(Error), is_err(Error)
+        "10", "10", "42",                     // result extraction
+        "true", "false", "false", "true",     // result equality
+        "Success(2)", "Error(1)",             // result and
+        "Success(99)", "Success(5)",          // result or
+    ];
+    assert_eq!(
+        interp, expected,
+        "option/result builtins mismatch\nexpected: {:?}\ngot: {:?}\nfull output:\n{}",
+        expected, interp, out
+    );
+}
+
+

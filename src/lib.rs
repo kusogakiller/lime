@@ -3001,7 +3001,7 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
         let mut env = env_vars.clone();
         scan_return_types_env(&body, defs, &mut env, &env_cons, &mut ret_type);
         if let Some(ref t) = ret_type {
-            if t != &Type::Unknown && t != &Type::Unit {
+            if t != &Type::Unit {
                 let struct_tp: Option<(String, Vec<String>)> = if !type_params.is_empty() {
                     match t {
                         Type::Struct(sname) if !sname.contains('(') => {
@@ -3478,7 +3478,6 @@ fn scan_return_types_env(
                     }
                     (None, None) => Type::Unit,
                 };
-                if t == Type::Unknown { continue; }
                 match ret_type {
                     Some(prev) if !type_eq(prev, &t) => {
                         // silently accept first type on mismatch (type checker already validated)
@@ -3496,7 +3495,7 @@ fn scan_return_types_env(
             Stmt::Expr(e) => {
                 // Expression-bodied function: last expression is the return value
                 match infer_type(e, env_vars, defs, env_cons) {
-                    Ok(t) if t != Type::Unknown => {
+                    Ok(t) => {
                         match ret_type {
                             Some(prev) if !type_eq(prev, &t) => {}
                             None => *ret_type = Some(t),
@@ -5172,6 +5171,7 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
         "bool" | "i1" | "b" => Type::Bool,
         "str" | "i8*" | "s" => Type::String,
         "void" | "unit" | "u" => Type::Unit,
+        "unknown" => Type::Unknown,
         "json" | "Json" => Type::Json,
         _ => {
             // 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴取ｨ費ｽｺ繧托ｽｾ蜿悶渚繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮陷夲ｽｱ鬨ｾ・ｶ繝ｻ・ｾ鬮ｴ雜｣・ｽ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ Base(Arg, ...) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主沁笳冗ｹ晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驍ｵ・ｲ陞ｳ螟ｲ・ｽ・ｾ繝ｻ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ驛｢譎｢・ｽ・ｻ
@@ -6160,6 +6160,105 @@ fn infer_type(
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Json)
                 }
+                "option_some" => {
+                    if args.len() != 1 { return Err("option_some() takes exactly 1 argument".to_string()); }
+                    let inner = infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(inner)))
+                }
+                "option_none" => {
+                    if !args.is_empty() { return Err("option_none() takes no arguments".to_string()); }
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_is_some" | "option_is_none" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "option_extract" => {
+                    if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "option_extract_or" => {
+                    if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "option_map" => {
+                    if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_and" => {
+                    if args.len() != 2 { return Err("option_and() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_or" => {
+                    if args.len() != 2 { return Err("option_or() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_equals" => {
+                    if args.len() != 2 { return Err("option_equals() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "result_success" => {
+                    if args.len() != 1 { return Err("result_success() takes exactly 1 argument".to_string()); }
+                    let inner = infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::State(format!("Result({},unknown)", type_to_string(&inner))))
+                }
+                "result_error" => {
+                    if args.len() != 1 { return Err("result_error() takes exactly 1 argument".to_string()); }
+                    let inner = infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::State(format!("Result(unknown,{})", type_to_string(&inner))))
+                }
+                "result_is_success" | "result_is_error" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "result_extract" => {
+                    if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "result_extract_or" => {
+                    if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "result_map" => {
+                    if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_and" => {
+                    if args.len() != 2 { return Err("result_and() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_or" => {
+                    if args.len() != 2 { return Err("result_or() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_equals" => {
+                    if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -7123,6 +7222,105 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             check_expr(&args[0], env, defs)?;
             check_expr(&args[1], env, defs)?;
             Ok(Type::Json)
+        }
+        "option_some" => {
+            if args.len() != 1 { return Err("option_some() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Option(Box::new(Type::Unknown)))
+        }
+        "option_none" => {
+            if !args.is_empty() { return Err("option_none() takes no arguments".to_string()); }
+            Ok(Type::Option(Box::new(Type::Unknown)))
+        }
+        "option_is_some" | "option_is_none" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "option_extract" => {
+            if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "option_extract_or" => {
+            if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "option_map" => {
+            if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Option(Box::new(Type::Unknown)))
+        }
+        "option_and" => {
+            if args.len() != 2 { return Err("option_and() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Option(Box::new(Type::Unknown)))
+        }
+        "option_or" => {
+            if args.len() != 2 { return Err("option_or() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Option(Box::new(Type::Unknown)))
+        }
+        "option_equals" => {
+            if args.len() != 2 { return Err("option_equals() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "result_success" => {
+            if args.len() != 1 { return Err("result_success() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::State("Result(unknown,unknown)".to_string()))
+        }
+        "result_error" => {
+            if args.len() != 1 { return Err("result_error() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::State("Result(unknown,unknown)".to_string()))
+        }
+        "result_is_success" | "result_is_error" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "result_extract" => {
+            if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "result_extract_or" => {
+            if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "result_map" => {
+            if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::State("Result(unknown,unknown)".to_string()))
+        }
+        "result_and" => {
+            if args.len() != 2 { return Err("result_and() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::State("Result(unknown,unknown)".to_string()))
+        }
+        "result_or" => {
+            if args.len() != 2 { return Err("result_or() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::State("Result(unknown,unknown)".to_string()))
+        }
+        "result_equals" => {
+            if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
         }
         other => {
                     // Function reference in env (e.g. `let f = add; f(3, 4)`)
@@ -10375,6 +10573,12 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "json_as_string" | "json_as_int" | "json_as_float" | "json_as_bool"
              | "json_null" | "json_object" | "json_array"
              | "json_set" | "json_push"
+             | "option_some" | "option_none" | "option_is_some" | "option_is_none"
+             | "option_extract" | "option_extract_or" | "option_map"
+             | "option_and" | "option_or" | "option_equals"
+             | "result_success" | "result_error" | "result_is_success" | "result_is_error"
+             | "result_extract" | "result_extract_or" | "result_map"
+             | "result_and" | "result_or" | "result_equals"
     )
 }
 
@@ -10830,6 +11034,217 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 return Err("None() takes no arguments".to_string());
             }
             Ok(Value::Option(None))
+        }
+        // ===== Option builtins =====
+        "option_some" => {
+            if args.len() != 1 { return Err("option_some() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            Ok(Value::Option(Some(Box::new(val))))
+        }
+        "option_none" => {
+            if !args.is_empty() { return Err("option_none() takes no arguments".to_string()); }
+            Ok(Value::Option(None))
+        }
+        "option_is_some" => {
+            if args.len() != 1 { return Err("option_is_some() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            match val {
+                Value::Option(Some(_)) => Ok(Value::Bool(true)),
+                Value::Option(None) => Ok(Value::Bool(false)),
+                _ => Err("option_is_some() expects an Option value".to_string()),
+            }
+        }
+        "option_is_none" => {
+            if args.len() != 1 { return Err("option_is_none() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            match val {
+                Value::Option(None) => Ok(Value::Bool(true)),
+                Value::Option(Some(_)) => Ok(Value::Bool(false)),
+                _ => Err("option_is_none() expects an Option value".to_string()),
+            }
+        }
+        "option_extract" => {
+            if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            match val {
+                Value::Option(Some(inner)) => Ok(*inner),
+                Value::Option(None) => Err("option_extract() called on None".to_string()),
+                _ => Err("option_extract() expects an Option value".to_string()),
+            }
+        }
+        "option_extract_or" => {
+            if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let default = eval_expr(&args[1], env, defs)?;
+            match val {
+                Value::Option(Some(inner)) => Ok(*inner),
+                Value::Option(None) => Ok(default),
+                _ => Err("option_extract_or() expects an Option value".to_string()),
+            }
+        }
+        "option_map" => {
+            if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let fn_val = eval_expr(&args[1], env, defs)?;
+            match val {
+                Value::Option(Some(inner)) => {
+                    match fn_val {
+                        Value::FuncRef(fname) => {
+                            let call_args = vec![*inner];
+                            crate::call_function(&fname, call_args, defs)
+                        }
+                        _ => Err("option_map() expects a function as second argument".to_string()),
+                    }
+                }
+                Value::Option(None) => Ok(Value::Option(None)),
+                _ => Err("option_map() expects an Option value".to_string()),
+            }
+        }
+        "option_and" => {
+            if args.len() != 2 { return Err("option_and() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            match a {
+                Value::Option(Some(_)) => eval_expr(&args[1], env, defs),
+                Value::Option(None) => Ok(Value::Option(None)),
+                _ => Err("option_and() expects an Option value as first argument".to_string()),
+            }
+        }
+        "option_or" => {
+            if args.len() != 2 { return Err("option_or() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            match a {
+                v @ Value::Option(Some(_)) => Ok(v),
+                Value::Option(None) => eval_expr(&args[1], env, defs),
+                _ => Err("option_or() expects an Option value as first argument".to_string()),
+            }
+        }
+        "option_equals" => {
+            if args.len() != 2 { return Err("option_equals() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            let b = eval_expr(&args[1], env, defs)?;
+            match (&a, &b) {
+                (Value::Option(None), Value::Option(None)) => Ok(Value::Bool(true)),
+                (Value::Option(Some(_)), Value::Option(None))
+                | (Value::Option(None), Value::Option(Some(_))) => Ok(Value::Bool(false)),
+                (Value::Option(Some(ae)), Value::Option(Some(be))) => {
+                    Ok(Value::Bool(ae.compare(&be) == std::cmp::Ordering::Equal))
+                }
+                _ => Err("option_equals() expects two Option values".to_string()),
+            }
+        }
+        // ===== Result builtins =====
+        "result_success" => {
+            if args.len() != 1 { return Err("result_success() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            Ok(Value::State { name: "Success".to_string(), values: vec![val] })
+        }
+        "result_error" => {
+            if args.len() != 1 { return Err("result_error() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            Ok(Value::State { name: "Error".to_string(), values: vec![val] })
+        }
+        "result_is_success" => {
+            if args.len() != 1 { return Err("result_is_success() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            match &val {
+                Value::State { name, .. } if name == "Success" => Ok(Value::Bool(true)),
+                Value::State { name, .. } if name == "Error" => Ok(Value::Bool(false)),
+                _ => Err("result_is_success() expects a Result value".to_string()),
+            }
+        }
+        "result_is_error" => {
+            if args.len() != 1 { return Err("result_is_error() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            match &val {
+                Value::State { name, .. } if name == "Error" => Ok(Value::Bool(true)),
+                Value::State { name, .. } if name == "Success" => Ok(Value::Bool(false)),
+                _ => Err("result_is_error() expects a Result value".to_string()),
+            }
+        }
+        "result_extract" => {
+            if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            match val {
+                Value::State { name, values } if name == "Success" => {
+                    Ok(values.into_iter().next().unwrap_or(Value::Bool(false)))
+                }
+                Value::State { name, values } if name == "Error" => {
+                    let err_val = values.into_iter().next().unwrap_or(Value::Bool(false));
+                    Err(format!("result_extract() called on Error: {}", err_val.to_string()))
+                }
+                _ => Err("result_extract() expects a Result value".to_string()),
+            }
+        }
+        "result_extract_or" => {
+            if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let default = eval_expr(&args[1], env, defs)?;
+            match val {
+                Value::State { name, values } if name == "Success" => {
+                    Ok(values.into_iter().next().unwrap_or(default))
+                }
+                Value::State { name, .. } if name == "Error" => Ok(default),
+                _ => Err("result_extract_or() expects a Result value".to_string()),
+            }
+        }
+        "result_map" => {
+            if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let fn_val = eval_expr(&args[1], env, defs)?;
+            match val {
+                Value::State { ref name, .. } if name == "Success" => {
+                    if let Value::State { values, .. } = val {
+                        let inner = values.into_iter().next().unwrap_or(Value::Bool(false));
+                        match fn_val {
+                            Value::FuncRef(fname) => {
+                                let mapped = crate::call_function(&fname, vec![inner], defs)?;
+                                Ok(Value::State { name: "Success".to_string(), values: vec![mapped] })
+                            }
+                            _ => Err("result_map() expects a function as second argument".to_string()),
+                        }
+                    } else {
+                        unreachable!()
+                    }
+                }
+                Value::State { .. } => Ok(val),
+                _ => Err("result_map() expects a Result value".to_string()),
+            }
+        }
+        "result_and" => {
+            if args.len() != 2 { return Err("result_and() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            match &a {
+                Value::State { name, .. } if name == "Success" => eval_expr(&args[1], env, defs),
+                Value::State { name, .. } if name == "Error" => Ok(a),
+                _ => Err("result_and() expects a Result value as first argument".to_string()),
+            }
+        }
+        "result_or" => {
+            if args.len() != 2 { return Err("result_or() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            match &a {
+                Value::State { name, .. } if name == "Success" => Ok(a),
+                Value::State { name, .. } if name == "Error" => eval_expr(&args[1], env, defs),
+                _ => Err("result_or() expects a Result value as first argument".to_string()),
+            }
+        }
+        "result_equals" => {
+            if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
+            let a = eval_expr(&args[0], env, defs)?;
+            let b = eval_expr(&args[1], env, defs)?;
+            match (&a, &b) {
+                (Value::State { name: na, values: va }, Value::State { name: nb, values: vb }) => {
+                    if na != nb { return Ok(Value::Bool(false)); }
+                    if va.len() != vb.len() { return Ok(Value::Bool(false)); }
+                    for (ae, be) in va.iter().zip(vb.iter()) {
+                        if ae.compare(&be) != std::cmp::Ordering::Equal {
+                            return Ok(Value::Bool(false));
+                        }
+                    }
+                    Ok(Value::Bool(true))
+                }
+                _ => Err("result_equals() expects two Result values".to_string()),
+            }
         }
         // ===== Standard-library runtime builtins (Phase 7/10) =====
         // List helpers (Lists are represented as Value::Array).

@@ -1,34 +1,26 @@
-// std.option: Option(T) ヘルパ
-// Option(T) は言語組込み（Some(x) / None）。
+// std.option: Option(T) helpers
+// Option(T) is a language builtin (Some(x) / None).
+// Public API uses extract/extract_or naming.
 
-// 値を取り出す。None の場合は fallback を返す。
-fn unwrap_or(T)(Option(T): opt, T: fallback):
-    match opt:
-        Some(value):
-            return value
-        None:
-            return fallback
+// Extract the value from Some, or return fallback for None.
+fn extract_or(T)(Option(T): opt, T: fallback):
+    return option_extract_or(opt, fallback)
 
-// Some かどうか
+// Check if the option is Some.
 fn is_some(T)(Option(T): opt):
-    match opt:
-        Some(_):
-            return true
-        None:
-            return false
+    return option_is_some(opt)
 
-// None かどうか
+// Check if the option is None.
 fn is_none(T)(Option(T): opt):
-    match opt:
-        Some(_):
-            return false
-        None:
-            return true
+    return option_is_none(opt)
 
-// 値を取り出す。None の場合は panic する。
+// Extract the value from Some. Panics on None.
+fn extract(T)(Option(T): opt):
+    return option_extract(opt)
+
+// Backward-compatible aliases
+fn unwrap_or(T)(Option(T): opt, T: fallback):
+    return option_extract_or(opt, fallback)
+
 fn unwrap(T)(Option(T): opt):
-    match opt:
-        Some(value):
-            return value
-        None:
-            panic("called unwrap() on None")
+    return option_extract(opt)
