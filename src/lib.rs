@@ -6315,6 +6315,43 @@ fn infer_type(
                     if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
                     Ok(Type::Unknown)
                 }
+                // ===== Regex operations (Phase C-1.10) =====
+                "regex_compile" => {
+                    if args.len() != 1 { return Err("regex_compile() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::String)))
+                }
+                "regex_is_match" => {
+                    if args.len() != 2 { return Err("regex_is_match() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "regex_match" | "regex_find" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::String)))
+                }
+                "regex_find_all" => {
+                    if args.len() != 2 { return Err("regex_find_all() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::List(Box::new(Type::String)))
+                }
+                "regex_replace" | "regex_replace_all" => {
+                    if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "regex_split" => {
+                    if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::List(Box::new(Type::String)))
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -7433,6 +7470,43 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         "env_all" => {
             if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
             Ok(Type::Unknown)
+        }
+        // ===== Regex operations (Phase C-1.10) =====
+        "regex_compile" => {
+            if args.len() != 1 { return Err("regex_compile() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Option(Box::new(Type::String)))
+        }
+        "regex_is_match" => {
+            if args.len() != 2 { return Err("regex_is_match() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "regex_match" | "regex_find" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Option(Box::new(Type::String)))
+        }
+        "regex_find_all" => {
+            if args.len() != 2 { return Err("regex_find_all() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::List(Box::new(Type::String)))
+        }
+        "regex_replace" | "regex_replace_all" => {
+            if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::String)
+        }
+        "regex_split" => {
+            if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::List(Box::new(Type::String)))
         }
         other => {
                     // Function reference in env (e.g. `let f = add; f(3, 4)`)
@@ -10734,6 +10808,8 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "os_name" | "os_arch" | "os_platform" | "os_hostname"
              | "os_cwd" | "os_set_cwd"
              | "env_get" | "env_has" | "env_set" | "env_remove" | "env_all"
+             | "regex_compile" | "regex_is_match" | "regex_match" | "regex_find"
+             | "regex_find_all" | "regex_replace" | "regex_replace_all" | "regex_split"
     )
 }
 
@@ -11631,6 +11707,106 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 map.insert(Value::String(key), Value::String(value));
             }
             Ok(Value::Map(map))
+        }
+        // ===== Regex operations (Phase C-1.10) =====
+        "regex_compile" => {
+            if args.len() != 1 { return Err("regex_compile() takes exactly 1 argument".to_string()); }
+            let val = eval_expr(&args[0], env, defs)?;
+            let pat = match val { Value::String(s) => s, _ => return Err("regex_compile() expects a string pattern".to_string()) };
+            match regex::Regex::new(&pat) {
+                Ok(_re) => {
+                    Ok(Value::Option(Some(Box::new(Value::String(pat)))))
+                }
+                Err(_) => Ok(Value::Option(None)),
+            }
+        }
+        "regex_is_match" => {
+            if args.len() != 2 { return Err("regex_is_match() takes exactly 2 arguments".to_string()); }
+            let pat_val = eval_expr(&args[0], env, defs)?;
+            let text_val = eval_expr(&args[1], env, defs)?;
+            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_is_match() expects string pattern".to_string()) };
+            let text = match text_val { Value::String(s) => s, _ => return Err("regex_is_match() expects string text".to_string()) };
+            match regex::Regex::new(&pat) {
+                Ok(re) => Ok(Value::Bool(re.is_match(&text))),
+                Err(_) => Ok(Value::Bool(false)),
+            }
+        }
+        "regex_match" | "regex_find" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let pat_val = eval_expr(&args[0], env, defs)?;
+            let text_val = eval_expr(&args[1], env, defs)?;
+            let pat = match pat_val { Value::String(s) => s, _ => return Err(format!("{}() expects string pattern", func)) };
+            let text = match text_val { Value::String(s) => s, _ => return Err(format!("{}() expects string text", func)) };
+            match regex::Regex::new(&pat) {
+                Ok(re) => {
+                    match re.find(&text) {
+                        Some(m) => Ok(Value::Option(Some(Box::new(Value::String(m.as_str().to_string()))))),
+                        None => Ok(Value::Option(None)),
+                    }
+                }
+                Err(_) => Ok(Value::Option(None)),
+            }
+        }
+        "regex_find_all" => {
+            if args.len() != 2 { return Err("regex_find_all() takes exactly 2 arguments".to_string()); }
+            let pat_val = eval_expr(&args[0], env, defs)?;
+            let text_val = eval_expr(&args[1], env, defs)?;
+            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_find_all() expects string pattern".to_string()) };
+            let text = match text_val { Value::String(s) => s, _ => return Err("regex_find_all() expects string text".to_string()) };
+            match regex::Regex::new(&pat) {
+                Ok(re) => {
+                    let results: Vec<Value> = re.find_iter(&text)
+                        .map(|m| Value::String(m.as_str().to_string()))
+                        .collect();
+                    Ok(Value::Array(results))
+                }
+                Err(_) => Ok(Value::Array(vec![])),
+            }
+        }
+        "regex_replace" => {
+            if args.len() != 3 { return Err("regex_replace() takes exactly 3 arguments".to_string()); }
+            let pat_val = eval_expr(&args[0], env, defs)?;
+            let text_val = eval_expr(&args[1], env, defs)?;
+            let repl_val = eval_expr(&args[2], env, defs)?;
+            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_replace() expects string pattern".to_string()) };
+            let text = match text_val { Value::String(s) => s, _ => return Err("regex_replace() expects string text".to_string()) };
+            let replacement = match repl_val { Value::String(s) => s, _ => return Err("regex_replace() expects string replacement".to_string()) };
+            match regex::Regex::new(&pat) {
+                Ok(re) => Ok(Value::String(re.replace(&text, &replacement).to_string())),
+                Err(_) => Ok(Value::String(text)),
+            }
+        }
+        "regex_replace_all" => {
+            if args.len() != 3 { return Err("regex_replace_all() takes exactly 3 arguments".to_string()); }
+            let pat_val = eval_expr(&args[0], env, defs)?;
+            let text_val = eval_expr(&args[1], env, defs)?;
+            let repl_val = eval_expr(&args[2], env, defs)?;
+            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_replace_all() expects string pattern".to_string()) };
+            let text = match text_val { Value::String(s) => s, _ => return Err("regex_replace_all() expects string text".to_string()) };
+            let replacement = match repl_val { Value::String(s) => s, _ => return Err("regex_replace_all() expects string replacement".to_string()) };
+            match regex::Regex::new(&pat) {
+                Ok(re) => Ok(Value::String(re.replace_all(&text, &replacement).to_string())),
+                Err(_) => Ok(Value::String(text)),
+            }
+        }
+        "regex_split" => {
+            if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
+            let pat_val = eval_expr(&args[0], env, defs)?;
+            let text_val = eval_expr(&args[1], env, defs)?;
+            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_split() expects string pattern".to_string()) };
+            let text = match text_val { Value::String(s) => s, _ => return Err("regex_split() expects string text".to_string()) };
+            match regex::Regex::new(&pat) {
+                Ok(re) => {
+                    let results: Vec<Value> = re.split(&text)
+                        .map(|s| Value::String(s.to_string()))
+                        .collect();
+                    Ok(Value::Array(results))
+                }
+                Err(_) => {
+                    let results = vec![Value::String(text)];
+                    Ok(Value::Array(results))
+                }
+            }
         }
         // ===== Standard-library runtime builtins (Phase 7/10) =====
         // List helpers (Lists are represented as Value::Array).

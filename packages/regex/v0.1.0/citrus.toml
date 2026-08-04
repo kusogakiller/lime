@@ -1,0 +1,6 @@
+[package]
+name = "regex"
+version = "v0.1.0"
+
+[files]
+regex = "src/regex.lime"

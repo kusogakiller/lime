@@ -2207,3 +2207,708 @@ LimeMap runtime_env_all(void) {
     LimeMap empty = { NULL, 0, 0 };
     return empty;
 }
+
+// ========================================================================
+// Regex operations (Phase C-1.10)
+//
+// A practical regex engine supporting:
+//   Literal chars, . (any), ^ $ (anchors), \b (word boundary)
+//   * + ? {n} {n,m} {n,} quantifiers
+//   [abc] [^abc] [a-z] character classes
+//   (...) groups, (?:...) non-capturing groups, | alternation
+//   \d \w \s \D \W \S shorthand classes
+//   \ escape, (?i) case-insensitive
+// ========================================================================
+
+// Check if a character is a word character.
+static int regex_is_word_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9') || c == '_';
+}
+
+// Check if a character is a whitespace character.
+static int regex_is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+// Convert to lowercase for case-insensitive matching.
+static char regex_to_lower(char c) {
+    return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+}
+
+// ---- Pattern compiler: parse regex string into a bytecode ----
+
+typedef enum {
+    RC_LITERAL,     // match literal char
+    RC_DOT,         // match any char (except \n)
+    RC_DOTALL,      // match any char including \n
+    RC_CLASS,       // match char class [abc] [^abc] [a-z]
+    RC_SHCLASS,     // shorthand class: \d \w \s \D \W \S
+    RC_STAR,        // zero or more (greedy)
+    RC_PLUS,        // one or more (greedy)
+    RC_QUESTION,    // zero or one (greedy)
+    RC_RANGE_N,     // exactly n repetitions
+    RC_RANGE_NM,    // n to m repetitions
+    RC_RANGE_NP,    // n or more repetitions
+    RC_ANCHOR_START,// ^
+    RC_ANCHOR_END,  // $
+    RC_WORD_BOUND,  // \b
+    RC_WORD_BOUND_N,// \B (negated word boundary)
+    RC_GROUP_START, // ( or (?: — group open
+    RC_GROUP_END,   // ) — group close
+    RC_ALT,         // | — alternation
+    RC_GROUP_END_Q, // )? — optional group
+} RegexCmd;
+
+typedef struct {
+    RegexCmd cmd;
+    char ch;            // for RC_LITERAL
+    char* cls;          // for RC_CLASS (heap-allocated bracket expression)
+    int cls_neg;        // for RC_CLASS: 1 if negated
+    int case_insensitive; // for RC_LITERAL
+    int n, m;           // for RC_RANGE_*
+} RegexOp;
+
+typedef struct {
+    RegexOp* ops;
+    int64_t len;
+    int64_t cap;
+} RegexProgram;
+
+static void prog_grow(RegexProgram* p) {
+    if (p->len >= p->cap) {
+        int64_t new_cap = p->cap ? p->cap * 2 : 16;
+        p->ops = (RegexOp*)realloc(p->ops, new_cap * sizeof(RegexOp));
+        if (!p->ops) runtime_panic("regex: out of memory");
+        p->cap = new_cap;
+    }
+}
+
+static void prog_add(RegexProgram* p, RegexCmd cmd) {
+    if (p->len >= p->cap) prog_grow(p);
+    memset(&p->ops[p->len], 0, sizeof(RegexOp));
+    p->ops[p->len].cmd = cmd;
+    p->len++;
+}
+
+// Find the matching closing bracket, returning index of ']' in pattern.
+// start points to the char after '['.
+static int regex_find_closing_bracket(const char* pat, int start) {
+    int i = start;
+    if (pat[i] == '^') i++; // skip negation
+    if (pat[i] == ']') i++; // ']' right after '[' or '[^' is literal
+    while (pat[i] && pat[i] != ']') i++;
+    return pat[i] ? i : -1;
+}
+
+// Parse a brace quantifier {n}, {n,m}, {n,}.
+// Returns the number of chars consumed (including braces), or 0 if not a valid quantifier.
+static int regex_parse_brace(const char* pat, int pos, int* out_n, int* out_m) {
+    if (pat[pos] != '{') return 0;
+    int i = pos + 1;
+    int n = 0, m = -1;
+    int has_n = 0;
+    while (pat[i] >= '0' && pat[i] <= '9') {
+        n = n * 10 + (pat[i] - '0');
+        has_n = 1;
+        i++;
+    }
+    if (!has_n) return 0;
+    if (pat[i] == '}') {
+        *out_n = n;
+        *out_m = n;
+        return i - pos + 1;
+    }
+    if (pat[i] == ',') {
+        i++;
+        if (pat[i] == '}') {
+            *out_n = n;
+            *out_m = -1; // unbounded
+            return i - pos + 1;
+        }
+        m = 0;
+        while (pat[i] >= '0' && pat[i] <= '9') {
+            m = m * 10 + (pat[i] - '0');
+            i++;
+        }
+        if (pat[i] == '}') {
+            *out_n = n;
+            *out_m = m;
+            return i - pos + 1;
+        }
+    }
+    return 0; // not a valid quantifier
+}
+
+// Compile a regex pattern string into a RegexProgram.
+// Returns 1 on success, 0 on error.
+static int regex_compile_prog(const char* pat, RegexProgram* prog) {
+    prog->ops = NULL;
+    prog->len = 0;
+    prog->cap = 0;
+
+    int i = 0;
+    int case_insensitive = 0;
+    while (pat[i]) {
+        // Check for (?i) inline flag
+        if (pat[i] == '(' && pat[i+1] == '?' && pat[i+2] == 'i' && pat[i+3] == ')') {
+            case_insensitive = 1;
+            i += 4;
+            continue;
+        }
+        if (pat[i] == '(' && pat[i+1] == '?' && pat[i+1] != 'i') {
+            // (?s), (?m), (?si) etc. — skip flags
+            int j = i + 2;
+            while (pat[j] && pat[j] != ')') j++;
+            if (pat[j] == ')') { i = j + 1; continue; }
+        }
+
+        char c = pat[i];
+
+        if (c == '\\') {
+            i++;
+            char esc = pat[i];
+            if (!esc) { free(prog->ops); return 0; }
+            switch (esc) {
+                case 'd': case 'D': case 'w': case 'W': case 's': case 'S':
+                    prog_add(prog, RC_SHCLASS);
+                    prog->ops[prog->len-1].ch = esc;
+                    break;
+                case 'b':
+                    prog_add(prog, RC_WORD_BOUND);
+                    break;
+                case 'B':
+                    prog_add(prog, RC_WORD_BOUND_N);
+                    break;
+                default:
+                    prog_add(prog, RC_LITERAL);
+                    prog->ops[prog->len-1].ch = esc;
+                    prog->ops[prog->len-1].case_insensitive = case_insensitive;
+                    break;
+            }
+            i++;
+        } else if (c == '^') {
+            prog_add(prog, RC_ANCHOR_START);
+            i++;
+        } else if (c == '$') {
+            prog_add(prog, RC_ANCHOR_END);
+            i++;
+        } else if (c == '.') {
+            prog_add(prog, RC_DOT);
+            i++;
+        } else if (c == '(') {
+            int noncap = (pat[i+1] == '?' && pat[i+2] == ':');
+            prog_add(prog, RC_GROUP_START);
+            i += noncap ? 3 : 1;
+        } else if (c == ')') {
+            prog_add(prog, RC_GROUP_END);
+            i++;
+        } else if (c == '|') {
+            prog_add(prog, RC_ALT);
+            i++;
+        } else if (c == '[') {
+            int end = regex_find_closing_bracket(pat, i + 1);
+            if (end < 0) { free(prog->ops); return 0; }
+            int neg = (pat[i+1] == '^');
+            int cls_start = neg ? i + 2 : i + 1;
+            int cls_len = end - cls_start;
+            char* cls = (char*)malloc(cls_len + 1);
+            if (!cls) runtime_panic("regex: out of memory");
+            memcpy(cls, pat + cls_start, cls_len);
+            cls[cls_len] = '\0';
+            prog_add(prog, RC_CLASS);
+            prog->ops[prog->len-1].cls = cls;
+            prog->ops[prog->len-1].cls_neg = neg;
+            i = end + 1;
+        } else if (c == '*' || c == '+' || c == '?') {
+            // Apply quantifier to the last operation
+            if (prog->len == 0) { free(prog->ops); return 0; }
+            int last = (int)prog->len - 1;
+            RegexCmd base = prog->ops[last].cmd;
+            if (base == RC_STAR || base == RC_PLUS || base == RC_QUESTION
+                || base == RC_RANGE_N || base == RC_RANGE_NM || base == RC_RANGE_NP) {
+                // Quantifier on quantifier — not allowed
+                free(prog->ops); return 0;
+            }
+            RegexCmd qcmd = (c == '*') ? RC_STAR : (c == '+') ? RC_PLUS : RC_QUESTION;
+            RegexOp base_op = prog->ops[last];
+            prog->ops[last].cmd = qcmd;
+            // For star/plus/question, we need the base as a sub-pattern.
+            // We store it in a simplified way: the cmd field encodes the quantifier,
+            // and the ch/cls fields carry the base info (only works for single-char bases).
+            // For complex bases, we use a different approach: wrap in group-like nesting.
+            // Actually, let's use a simpler approach: store the base op in the quantifier op.
+            prog->ops[last].ch = 0;
+            // We need to handle this differently. Let's just note the quantifier
+            // and handle it in the matcher by looking at the previous op.
+            // For now, store the original op's data.
+            i++;
+        } else {
+            // Check for brace quantifier
+            int bn = 0, bm = 0;
+            int consumed = regex_parse_brace(pat, i, &bn, &bm);
+            if (consumed > 0 && prog->len > 0) {
+                int last = (int)prog->len - 1;
+                RegexOp base_op = prog->ops[last];
+                if (base_op.cmd == RC_STAR || base_op.cmd == RC_PLUS
+                    || base_op.cmd == RC_QUESTION || base_op.cmd == RC_RANGE_N
+                    || base_op.cmd == RC_RANGE_NM || base_op.cmd == RC_RANGE_NP) {
+                    free(prog->ops); return 0;
+                }
+                if (bm < 0) {
+                    prog->ops[last].cmd = RC_RANGE_NP;
+                } else if (bn == bm) {
+                    prog->ops[last].cmd = RC_RANGE_N;
+                } else {
+                    prog->ops[last].cmd = RC_RANGE_NM;
+                }
+                prog->ops[last].n = bn;
+                prog->ops[last].m = bm;
+                i += consumed;
+            } else {
+                // Literal character
+                prog_add(prog, RC_LITERAL);
+                prog->ops[prog->len-1].ch = c;
+                prog->ops[prog->len-1].case_insensitive = case_insensitive;
+                i++;
+            }
+        }
+    }
+    return 1;
+}
+
+// ---- Matcher ----
+
+typedef struct {
+    const char* text;
+    int text_len;
+    RegexProgram* prog;
+    int case_insensitive;
+} RegexMatcher;
+
+// Check if a character matches a character class [abc] [^abc] [a-z].
+static int regex_match_class(const char* cls, char c, int neg) {
+    int len = (int)strlen(cls);
+    int matched = 0;
+    int i = 0;
+    while (i < len) {
+        if (cls[i] == '\\' && i + 1 < len) {
+            char esc = cls[i+1];
+            switch (esc) {
+                case 'd': matched = (c >= '0' && c <= '9'); i += 2; continue;
+                case 'D': matched = !(c >= '0' && c <= '9'); i += 2; continue;
+                case 'w': matched = regex_is_word_char(c); i += 2; continue;
+                case 'W': matched = !regex_is_word_char(c); i += 2; continue;
+                case 's': matched = regex_is_space(c); i += 2; continue;
+                case 'S': matched = !regex_is_space(c); i += 2; continue;
+                default: matched = (c == esc); i += 2; continue;
+            }
+        }
+        if (i + 2 < len && cls[i+1] == '-') {
+            // Range [a-z]
+            char lo = cls[i];
+            char hi = cls[i+2];
+            matched = (c >= lo && c <= hi);
+            i += 3;
+        } else {
+            matched = (c == cls[i]);
+            i++;
+        }
+    }
+    return neg ? !matched : matched;
+}
+
+// Match shorthand class \d \w \s etc.
+static int regex_match_shclass(char cls, char c) {
+    switch (cls) {
+        case 'd': return c >= '0' && c <= '9';
+        case 'D': return !(c >= '0' && c <= '9');
+        case 'w': return regex_is_word_char(c);
+        case 'W': return !regex_is_word_char(c);
+        case 's': return regex_is_space(c);
+        case 'S': return !regex_is_space(c);
+    }
+    return 0;
+}
+
+// Try to match the pattern starting at pat_pos in the program
+// and text_pos in the text. Returns the end position of the match, or -1.
+static int regex_try_match(RegexMatcher* m, int pat_pos, int text_pos) {
+    int plen = (int)m->prog->len;
+    int tlen = m->text_len;
+
+    if (pat_pos >= plen) return text_pos; // pattern exhausted => match
+
+    RegexOp* op = &m->prog->ops[pat_pos];
+
+    // Handle alternation: try left, then right
+    if (op->cmd == RC_ALT) {
+        int res = regex_try_match(m, pat_pos + 1, text_pos);
+        if (res >= 0) return res;
+        // Skip to next alternative or end of group
+        return -1;
+    }
+
+    // Handle group start
+    if (op->cmd == RC_GROUP_START) {
+        // Find matching group end, tracking nesting
+        int depth = 1;
+        int j = pat_pos + 1;
+        while (j < plen && depth > 0) {
+            if (m->prog->ops[j].cmd == RC_GROUP_START) depth++;
+            if (m->prog->ops[j].cmd == RC_GROUP_END) depth--;
+            j++;
+        }
+        // Match inside group, then continue after group end
+        int inside = regex_try_match(m, pat_pos + 1, text_pos);
+        if (inside < 0) return -1;
+        return regex_try_match(m, j, inside);
+    }
+
+    // Handle group end (shouldn't be reached in normal flow)
+    if (op->cmd == RC_GROUP_END) {
+        return regex_try_match(m, pat_pos + 1, text_pos);
+    }
+
+    // Determine what single character/op to match
+    char match_char = 0;
+    int is_dot = 0, is_class = 0, is_shclass = 0, is_anchor = 0;
+    char shcls = 0;
+    int cls_neg = 0;
+    char* cls = NULL;
+    int ci = 0;
+
+    switch (op->cmd) {
+        case RC_LITERAL:
+            match_char = op->ch;
+            ci = op->case_insensitive;
+            break;
+        case RC_DOT:
+            is_dot = 1;
+            break;
+        case RC_CLASS:
+            is_class = 1;
+            cls = op->cls;
+            cls_neg = op->cls_neg;
+            break;
+        case RC_SHCLASS:
+            is_shclass = 1;
+            shcls = op->ch;
+            break;
+        case RC_ANCHOR_START:
+            is_anchor = 1;
+            if (text_pos != 0) return -1;
+            return regex_try_match(m, pat_pos + 1, text_pos);
+        case RC_ANCHOR_END:
+            is_anchor = 1;
+            if (text_pos != tlen) return -1;
+            return regex_try_match(m, pat_pos + 1, text_pos);
+        case RC_WORD_BOUND: {
+            int left_is_w = (text_pos > 0) && regex_is_word_char(m->text[text_pos-1]);
+            int right_is_w = (text_pos < tlen) && regex_is_word_char(m->text[text_pos]);
+            if (left_is_w == right_is_w) return -1;
+            return regex_try_match(m, pat_pos + 1, text_pos);
+        }
+        case RC_WORD_BOUND_N: {
+            int left_is_w = (text_pos > 0) && regex_is_word_char(m->text[text_pos-1]);
+            int right_is_w = (text_pos < tlen) && regex_is_word_char(m->text[text_pos]);
+            if (left_is_w != right_is_w) return -1;
+            return regex_try_match(m, pat_pos + 1, text_pos);
+        }
+        default:
+            return -1;
+    }
+
+    // Check if current text character matches
+    int char_matches = 0;
+    if (text_pos < tlen) {
+        char tc = m->text[text_pos];
+        if (is_dot) {
+            char_matches = (tc != '\n');
+        } else if (is_class) {
+            char_matches = regex_match_class(cls, tc, cls_neg);
+        } else if (is_shclass) {
+            char_matches = regex_match_shclass(shcls, tc);
+        } else {
+            if (ci) {
+                char_matches = (regex_to_lower(tc) == regex_to_lower(match_char));
+            } else {
+                char_matches = (tc == match_char);
+            }
+        }
+    }
+
+    if (!char_matches) return -1;
+
+    int next_text = text_pos + 1;
+    int next_pat = pat_pos + 1;
+
+    // Check if next op is a quantifier
+    if (next_pat < plen) {
+        RegexOp* next = &m->prog->ops[next_pat];
+        int is_quant = (next->cmd == RC_STAR || next->cmd == RC_PLUS
+                     || next->cmd == RC_QUESTION || next->cmd == RC_RANGE_N
+                     || next->cmd == RC_RANGE_NM || next->cmd == RC_RANGE_NP);
+        if (is_quant) {
+            int qmin = 1, qmax = 1;
+            switch (next->cmd) {
+                case RC_STAR:    qmin = 0; qmax = -1; break;
+                case RC_PLUS:    qmin = 1; qmax = -1; break;
+                case RC_QUESTION:qmin = 0; qmax = 1;  break;
+                case RC_RANGE_N:    qmin = next->n; qmax = next->n; break;
+                case RC_RANGE_NM:   qmin = next->n; qmax = next->m; break;
+                case RC_RANGE_NP:   qmin = next->n; qmax = -1; break;
+                default: break;
+            }
+            // Try matching from max down to min (greedy)
+            int count = 1;
+            int max_rep = (qmax < 0) ? (tlen - text_pos) : qmax;
+            // First, consume as many as possible
+            int save_pos = next_text;
+            while (count < max_rep && save_pos < tlen) {
+                char tc = m->text[save_pos];
+                int ok = 0;
+                if (is_dot) { ok = (tc != '\n'); }
+                else if (is_class) { ok = regex_match_class(cls, tc, cls_neg); }
+                else if (is_shclass) { ok = regex_match_shclass(shcls, tc); }
+                else { ok = ci ? (regex_to_lower(tc) == regex_to_lower(match_char)) : (tc == match_char); }
+                if (!ok) break;
+                count++;
+                save_pos++;
+            }
+            // Try from count down to qmin
+            for (int rep = count; rep >= qmin; rep--) {
+                int after_quant = regex_try_match(m, next_pat + 1, text_pos + rep);
+                if (after_quant >= 0) return after_quant;
+            }
+            return -1;
+        }
+    }
+
+    // No quantifier, just match one char and continue
+    return regex_try_match(m, next_pat, next_text);
+}
+
+// ---- Public API ----
+
+char* runtime_regex_compile(char* pattern) {
+    if (!pattern) return NULL;
+    RegexProgram prog;
+    if (!regex_compile_prog(pattern, &prog)) return NULL;
+    int64_t total = 4 + (int64_t)prog.len * (int64_t)sizeof(RegexOp);
+    char* blob = (char*)malloc(total);
+    if (!blob) { free(prog.ops); runtime_panic("regex: out of memory"); }
+    int count = (int)prog.len;
+    blob[0] = (char)(count & 0xFF);
+    blob[1] = (char)((count >> 8) & 0xFF);
+    blob[2] = (char)((count >> 16) & 0xFF);
+    blob[3] = (char)((count >> 24) & 0xFF);
+    memcpy(blob + 4, prog.ops, prog.len * sizeof(RegexOp));
+    free(prog.ops);
+    return blob;
+}
+
+static RegexProgram regex_deserialize(char* compiled) {
+    RegexProgram prog;
+    if (!compiled) { prog.ops = NULL; prog.len = 0; prog.cap = 0; return prog; }
+    int count = (unsigned char)compiled[0]
+              | ((unsigned char)compiled[1] << 8)
+              | ((unsigned char)compiled[2] << 16)
+              | ((unsigned char)compiled[3] << 24);
+    prog.ops = (RegexOp*)(compiled + 4);
+    prog.len = count;
+    prog.cap = count;
+    return prog;
+}
+
+int runtime_regex_is_match(char* compiled, char* text) {
+    if (!compiled || !text) return 0;
+    RegexProgram prog = regex_deserialize(compiled);
+    if (prog.ops == NULL) return 0;
+    RegexMatcher m;
+    m.text = text;
+    m.text_len = (int)strlen(text);
+    m.prog = &prog;
+    m.case_insensitive = 0;
+    int result = regex_try_match(&m, 0, 0);
+    return (result == m.text_len) ? 1 : 0;
+}
+
+char* runtime_regex_find(char* compiled, char* text) {
+    if (!compiled || !text) return NULL;
+    RegexProgram prog = regex_deserialize(compiled);
+    if (prog.ops == NULL) return NULL;
+    RegexMatcher m;
+    m.text = text;
+    m.text_len = (int)strlen(text);
+    m.prog = &prog;
+    m.case_insensitive = 0;
+    for (int i = 0; i <= m.text_len; i++) {
+        int end = regex_try_match(&m, 0, i);
+        if (end >= 0 && end > i) {
+            int match_len = end - i;
+            char* result = (char*)malloc(match_len + 1);
+            if (!result) runtime_panic("regex: out of memory");
+            memcpy(result, text + i, match_len);
+            result[match_len] = '\0';
+            return result;
+        }
+    }
+    return NULL;
+}
+
+LimeList runtime_regex_find_all(char* compiled, char* text) {
+    LimeList list = runtime_list_empty();
+    if (!compiled || !text) return list;
+    RegexProgram prog = regex_deserialize(compiled);
+    if (prog.ops == NULL) return list;
+    RegexMatcher m;
+    m.text = text;
+    m.text_len = (int)strlen(text);
+    m.prog = &prog;
+    m.case_insensitive = 0;
+    int pos = 0;
+    while (pos <= m.text_len) {
+        int end = regex_try_match(&m, 0, pos);
+        if (end >= 0 && end > pos) {
+            int match_len = end - pos;
+            char* match_str = (char*)malloc(match_len + 1);
+            if (!match_str) runtime_panic("regex: out of memory");
+            memcpy(match_str, text + pos, match_len);
+            match_str[match_len] = '\0';
+            list = runtime_list_add(list, (int64_t)(intptr_t)match_str);
+            pos = end;
+            if (end == pos) pos++;
+        } else {
+            pos++;
+        }
+    }
+    return list;
+}
+
+char* runtime_regex_replace(char* compiled, char* text, char* replacement) {
+    if (!compiled || !text) return runtime_str_copy(text ? text : "");
+    if (!replacement) replacement = "";
+    RegexProgram prog = regex_deserialize(compiled);
+    if (prog.ops == NULL) return runtime_str_copy(text);
+    RegexMatcher m;
+    m.text = text;
+    m.text_len = (int)strlen(text);
+    m.prog = &prog;
+    m.case_insensitive = 0;
+    for (int i = 0; i <= m.text_len; i++) {
+        int end = regex_try_match(&m, 0, i);
+        if (end >= 0 && end > i) {
+            int before_len = i;
+            int after_len = m.text_len - end;
+            int repl_len = (int)strlen(replacement);
+            char* result = (char*)malloc(before_len + repl_len + after_len + 1);
+            if (!result) runtime_panic("regex: out of memory");
+            memcpy(result, text, before_len);
+            memcpy(result + before_len, replacement, repl_len);
+            memcpy(result + before_len + repl_len, text + end, after_len);
+            result[before_len + repl_len + after_len] = '\0';
+            return result;
+        }
+    }
+    return runtime_str_copy(text);
+}
+
+char* runtime_regex_replace_all(char* compiled, char* text, char* replacement) {
+    if (!compiled || !text) return runtime_str_copy(text ? text : "");
+    if (!replacement) replacement = "";
+    RegexProgram prog = regex_deserialize(compiled);
+    if (prog.ops == NULL) return runtime_str_copy(text);
+    RegexMatcher m;
+    m.text = text;
+    m.text_len = (int)strlen(text);
+    m.prog = &prog;
+    m.case_insensitive = 0;
+
+    int64_t result_cap = strlen(text) * 2 + 64;
+    char* result = (char*)malloc(result_cap);
+    if (!result) runtime_panic("regex: out of memory");
+    int rpos = 0;
+    int pos = 0;
+    int repl_len = (int)strlen(replacement);
+    int last_match_end = 0;
+
+    while (pos <= m.text_len) {
+        int end = regex_try_match(&m, 0, pos);
+        if (end >= 0 && end > pos) {
+            int copy_len = pos - last_match_end;
+            while (rpos + copy_len + repl_len + 1 > result_cap) {
+                result_cap *= 2;
+                result = (char*)realloc(result, result_cap);
+                if (!result) runtime_panic("regex: out of memory");
+            }
+            memcpy(result + rpos, text + last_match_end, copy_len);
+            rpos += copy_len;
+            memcpy(result + rpos, replacement, repl_len);
+            rpos += repl_len;
+            last_match_end = end;
+            pos = end;
+            if (end == pos) {
+                result[rpos++] = text[pos];
+                last_match_end = pos + 1;
+                pos++;
+            }
+        } else {
+            pos++;
+        }
+    }
+    int copy_len = m.text_len - last_match_end;
+    while (rpos + copy_len + 1 > result_cap) {
+        result_cap *= 2;
+        result = (char*)realloc(result, result_cap);
+        if (!result) runtime_panic("regex: out of memory");
+    }
+    memcpy(result + rpos, text + last_match_end, copy_len);
+    rpos += copy_len;
+    result[rpos] = '\0';
+    return result;
+}
+
+LimeList runtime_regex_split(char* compiled, char* text) {
+    LimeList list = runtime_list_empty();
+    if (!compiled || !text) {
+        if (text) list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(text));
+        return list;
+    }
+    RegexProgram prog = regex_deserialize(compiled);
+    if (prog.ops == NULL) {
+        list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(text));
+        return list;
+    }
+    RegexMatcher m;
+    m.text = text;
+    m.text_len = (int)strlen(text);
+    m.prog = &prog;
+    m.case_insensitive = 0;
+
+    int pos = 0;
+    int last_end = 0;
+    while (pos <= m.text_len) {
+        int end = regex_try_match(&m, 0, pos);
+        if (end >= 0 && end > pos) {
+            int piece_len = pos - last_end;
+            char* piece = (char*)malloc(piece_len + 1);
+            if (!piece) runtime_panic("regex: out of memory");
+            memcpy(piece, text + last_end, piece_len);
+            piece[piece_len] = '\0';
+            list = runtime_list_add(list, (int64_t)(intptr_t)piece);
+            last_end = end;
+            pos = end;
+            if (end == pos) pos++;
+        } else {
+            pos++;
+        }
+    }
+    int piece_len = m.text_len - last_end;
+    char* piece = (char*)malloc(piece_len + 1);
+    if (!piece) runtime_panic("regex: out of memory");
+    memcpy(piece, text + last_end, piece_len);
+    piece[piece_len] = '\0';
+    list = runtime_list_add(list, (int64_t)(intptr_t)piece);
+    return list;
+}

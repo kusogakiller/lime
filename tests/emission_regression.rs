@@ -848,7 +848,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
     fs::write(format!("{}/main.lime", dir), source).unwrap();
     fs::write(
         format!("{}/citrus.toml", dir),
-        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\nos = \"v0.1.0\"\nenv = \"v0.1.0\"\n",
+        "[package]\nname = \"emit_regression\"\nversion = \"v0.1.0\"\n\n[files]\nmain = \"main.lime\"\n\n[dependencies]\nio = \"v0.1.0\"\nstring = \"v0.1.0\"\nmath = \"v0.1.0\"\nfs = \"v0.1.0\"\ntime = \"v0.1.0\"\noption = \"v0.1.0\"\nresult = \"v0.1.0\"\ncollections = \"v0.1.0\"\npath = \"v0.1.0\"\nos = \"v0.1.0\"\nenv = \"v0.1.0\"\nregex = \"v0.1.0\"\n",
     )
     .unwrap();
 }
@@ -2625,4 +2625,44 @@ fn emit_object_env_builtins() {
         "env builtins mismatch\nfull output:\n{}",
         out
     );
+}
+
+/// Phase C-1.10: Regex builtins — interpreter + native parity.
+#[test]
+fn emit_object_regex_builtins() {
+    write_stdlib_project(
+        "target/test_regex_builtins",
+        "fn main():\n    println(regex.is_match(\"[0-9]+\", \"abc123\"))\n    println(regex.is_match(\"[0-9]+\", \"abc\"))\n    println(regex.find(\"[0-9]+\", \"abc123\"))\n    let all = regex.find_all(\"[0-9]+\", \"a1 b2 c3\")\n    println(len(all))\n    println(all[0])\n    println(all[1])\n    println(all[2])\n    println(regex.replace(\"[0-9]+\", \"abc123\", \"X\"))\n    println(regex.replace_all(\"[0-9]+\", \"a1 b2 c3\", \"X\"))\n    let parts = regex.split(\"[ ,]+\", \"hello, world  foo\")\n    println(len(parts))\n    println(parts[0])\n    println(parts[1])\n    println(parts[2])\n    println(regex.is_match(\"[\", \"test\"))\n    println(regex.is_match(\"^hello$\", \"hello\"))\n    println(regex.is_match(\"^hello$\", \"hello world\"))\n    println(regex.find(\"[a-z]+\", \"abc123\"))\n    println(regex.is_match(\"[a-z]+\\\\d*\", \"abc123\"))\n    println(regex.replace_all(\"a\", \"banana\", \"o\"))\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_regex_builtins/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    // Expected outputs:
+    assert!(interp.len() >= 16, "regex builtins: expected at least 16 outputs, got {:?}\nfull output:\n{}", interp, out);
+    assert_eq!(interp[0], "true", "is_match digit pattern\nfull output:\n{}", out);
+    assert_eq!(interp[1], "false", "is_match no match\nfull output:\n{}", out);
+    assert_eq!(interp[2], "Some(123)", "find digit pattern\nfull output:\n{}", out);
+    assert_eq!(interp[3], "3", "find_all count\nfull output:\n{}", out);
+    assert_eq!(interp[4], "1", "find_all[0]\nfull output:\n{}", out);
+    assert_eq!(interp[5], "2", "find_all[1]\nfull output:\n{}", out);
+    assert_eq!(interp[6], "3", "find_all[2]\nfull output:\n{}", out);
+    assert_eq!(interp[7], "abcX", "replace first match\nfull output:\n{}", out);
+    assert_eq!(interp[8], "aX bX cX", "replace all matches\nfull output:\n{}", out);
+    assert_eq!(interp[9], "3", "split count\nfull output:\n{}", out);
+    assert_eq!(interp[10], "hello", "split[0]\nfull output:\n{}", out);
+    assert_eq!(interp[11], "world", "split[1]\nfull output:\n{}", out);
+    assert_eq!(interp[12], "foo", "split[2]\nfull output:\n{}", out);
+    assert_eq!(interp[13], "false", "invalid pattern\nfull output:\n{}", out);
+    assert_eq!(interp[14], "true", "anchor match\nfull output:\n{}", out);
+    assert_eq!(interp[15], "false", "anchor no match\nfull output:\n{}", out);
 }

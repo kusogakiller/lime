@@ -3000,6 +3000,128 @@ impl<'a> Cg<'a> {
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
+            // ===== Regex operations (Phase C-1.10) =====
+            "regex_compile" => {
+                let pat = str_arg(self, &args[0])?;
+                let ptr_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_regex_compile(i8* {})\n", ptr_val, pat
+                ));
+                let is_null = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
+                ));
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %Option, align 8\n", slot
+                ));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                ));
+                let zext_temp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = zext i1 {} to i32\n", zext_temp, is_null
+                ));
+                let tag_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                ));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                ));
+                let ptr_as_i64 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                ));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                ));
+                Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
+            }
+            "regex_is_match" => {
+                let pat = str_arg(self, &args[0])?;
+                let text = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_regex_is_match", &[pat, text]);
+                Ok(Some((v, t)))
+            }
+            "regex_match" | "regex_find" => {
+                let pat = str_arg(self, &args[0])?;
+                let text = str_arg(self, &args[1])?;
+                let ptr_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_regex_find(i8* {}, i8* {})\n", ptr_val, pat, text
+                ));
+                let is_null = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
+                ));
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %Option, align 8\n", slot
+                ));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                ));
+                let tag_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                ));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                ));
+                let ptr_as_i64 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                ));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                ));
+                Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
+            }
+            "regex_find_all" => {
+                let pat = str_arg(self, &args[0])?;
+                let text = str_arg(self, &args[1])?;
+                let (v, t) = call_list(self, "runtime_regex_find_all", &[pat, text]);
+                Ok(Some((v, t)))
+            }
+            "regex_replace" => {
+                let pat = str_arg(self, &args[0])?;
+                let text = str_arg(self, &args[1])?;
+                let repl = str_arg(self, &args[2])?;
+                let (v, t) = call_str(self, "runtime_regex_replace", &[pat, text, repl]);
+                Ok(Some((v, t)))
+            }
+            "regex_replace_all" => {
+                let pat = str_arg(self, &args[0])?;
+                let text = str_arg(self, &args[1])?;
+                let repl = str_arg(self, &args[2])?;
+                let (v, t) = call_str(self, "runtime_regex_replace_all", &[pat, text, repl]);
+                Ok(Some((v, t)))
+            }
+            "regex_split" => {
+                let pat = str_arg(self, &args[0])?;
+                let text = str_arg(self, &args[1])?;
+                let (v, t) = call_list(self, "runtime_regex_split", &[pat, text]);
+                Ok(Some((v, t)))
+            }
             _ => Ok(None),
         }
     }

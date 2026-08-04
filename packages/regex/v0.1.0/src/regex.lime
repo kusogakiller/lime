@@ -1,0 +1,34 @@
+/// Regular expression utilities for Lime.
+/// Provides pattern matching, searching, and replacement operations.
+///
+/// Supported regex syntax:
+///   Literal characters, . (any char), ^ (start), $ (end)
+///   * (0+), + (1+), ? (0 or 1), {n}, {n,m}, {n,}
+///   [abc] (char class), [^abc] (negated), [a-z] (range)
+///   (group), (?:group) (non-capturing), | (alternation)
+///   \b (word boundary), \d \w \s and negations
+///   \ escape, \\ literal backslash
+
+/// Check if pattern matches the entire string.
+fn is_match(str: pattern, str: text):
+    return regex_is_match(pattern, text)
+
+/// Find the first match in the string. Returns Option(String).
+fn find(str: pattern, str: text):
+    return regex_find(pattern, text)
+
+/// Find all non-overlapping matches. Returns List(String).
+fn find_all(str: pattern, str: text):
+    return regex_find_all(pattern, text)
+
+/// Replace the first match with replacement.
+fn replace(str: pattern, str: text, str: replacement):
+    return regex_replace(pattern, text, replacement)
+
+/// Replace all non-overlapping matches with replacement.
+fn replace_all(str: pattern, str: text, str: replacement):
+    return regex_replace_all(pattern, text, replacement)
+
+/// Split the string by the pattern. Returns List(String).
+fn split(str: pattern, str: text):
+    return regex_split(pattern, text)

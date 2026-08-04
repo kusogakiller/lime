@@ -269,4 +269,20 @@ int runtime_env_set(char* key, char* value);
 int runtime_env_remove(char* key);
 LimeMap runtime_env_all(void);
 
+// -- Regex operations (Phase C-1.10) --
+// Returns the compiled pattern as a malloc'd string, or NULL on error.
+char* runtime_regex_compile(char* pattern);
+// Returns 1 if the compiled pattern matches the entire string.
+int runtime_regex_is_match(char* compiled, char* text);
+// Returns the first match as a malloc'd string, or NULL if no match.
+char* runtime_regex_find(char* compiled, char* text);
+// Returns all non-overlapping matches as a LimeList of strings.
+LimeList runtime_regex_find_all(char* compiled, char* text);
+// Replaces the first match. Returns a malloc'd string.
+char* runtime_regex_replace(char* compiled, char* text, char* replacement);
+// Replaces all non-overlapping matches. Returns a malloc'd string.
+char* runtime_regex_replace_all(char* compiled, char* text, char* replacement);
+// Splits the string by the pattern. Returns a LimeList of strings.
+LimeList runtime_regex_split(char* compiled, char* text);
+
 #endif // LIME_RUNTIME_H
