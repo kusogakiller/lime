@@ -35,7 +35,8 @@ pub fn llvm_type_name(ty: &Type) -> String {
         Type::Fn(_, _) => "i8*".to_string(), // function values are opaque pointers
         Type::Unit => "void".to_string(),
         Type::Unknown => "i64".to_string(), // Phase 0: placeholder
-        Type::Var(_) => "i64".to_string(), // Phase 0: monomorphization 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+        Type::Var(_) => "i64".to_string(), // Phase 0: monomorphization
+        Type::Json => "i8*".to_string(), // JSON values are opaque pointers 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
     }
 }
 
@@ -71,6 +72,7 @@ pub fn align_of(ty: &Type) -> usize {
         Type::Unit => 0,
         Type::Unknown => 8,
         Type::Var(_) => 8,
+        Type::Json => 8,
     }
 }
 

@@ -4399,6 +4399,59 @@ pub fn format_lime_source(source: &str) -> String {
 }
 
 // ===== Simple Interpreter =====
+
+// Runtime representation of a JSON value.
+// Used by Value::Json and the json_* builtin functions.
+#[derive(Debug, Clone)]
+enum JsonValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<JsonValue>),
+    Object(Vec<(String, JsonValue)>),
+}
+
+impl JsonValue {
+    fn deep_clone(&self) -> JsonValue {
+        match self {
+            JsonValue::Null => JsonValue::Null,
+            JsonValue::Bool(b) => JsonValue::Bool(*b),
+            JsonValue::Int(i) => JsonValue::Int(*i),
+            JsonValue::Float(f) => JsonValue::Float(*f),
+            JsonValue::String(s) => JsonValue::String(s.clone()),
+            JsonValue::Array(arr) => JsonValue::Array(arr.iter().map(|v| v.deep_clone()).collect()),
+            JsonValue::Object(pairs) => {
+                JsonValue::Object(pairs.iter().map(|(k, v)| (k.clone(), v.deep_clone())).collect())
+            }
+        }
+    }
+
+    fn display(&self) -> String {
+        match self {
+            JsonValue::Null => "null".to_string(),
+            JsonValue::Bool(b) => b.to_string(),
+            JsonValue::Int(i) => i.to_string(),
+            JsonValue::Float(f) => {
+                let s = format!("{}", f);
+                if s.contains('.') { s } else { format!("{}.0", s) }
+            }
+            JsonValue::String(s) => format!("\"{}\"", s),
+            JsonValue::Array(arr) => {
+                let items: Vec<String> = arr.iter().map(|v| v.display()).collect();
+                format!("[{}]", items.join(", "))
+            }
+            JsonValue::Object(pairs) => {
+                let items: Vec<String> = pairs.iter()
+                    .map(|(k, v)| format!("\"{}\": {}", k, v.display()))
+                    .collect();
+                format!("{{{}}}", items.join(", "))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum Value {
     Int(i64),
@@ -4433,6 +4486,7 @@ enum Value {
         body: Vec<Stmt>,
         env: HashMap<String, Value>,
     },
+    Json(JsonValue),
 }
 
 // 鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｦ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬮ｯ讖ｸ・ｽ・ｳ髯樊ｺ假ｽ代・・ｽ繝ｻ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｯ・ｮ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｰ繝ｻ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ
@@ -4772,6 +4826,7 @@ impl PartialEq for Value {
             (Value::Struct { name: an, fields: af }, Value::Struct { name: bn, fields: bf }) => an == bn && af == bf,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::FuncRef(a), Value::FuncRef(b)) => a == b,
+            (Value::Json(a), Value::Json(b)) => a.display() == b.display(),
             _ => false,
         }
     }
@@ -4827,6 +4882,11 @@ impl std::hash::Hash for Value {
                     h.finish()
                 });
                 elems.hash(state);
+            }
+            Value::Json(jv) => {
+                std::mem::discriminant(self).hash(state);
+                // Hash JSON by its display string for simplicity
+                jv.display().hash(state);
             }
             _ => std::mem::discriminant(self).hash(state),
         }
@@ -4887,6 +4947,7 @@ impl Value {
                 let strs: Vec<String> = elems.iter().map(|v| v.to_string()).collect();
                 format!("({})", strs.join(", "))
             }
+            Value::Json(jv) => jv.display(),
         }
     }
 
@@ -5002,6 +5063,7 @@ enum Type {
     Unit,
     Unknown,
     Var(String),
+    Json,
 }
 
 // 鬮ｯ讓奇ｽｺ・ｽ陋ｻ・､髴取ｺｷ・､鬆代・驛｢譎｢・ｽ・ｻ-> 鬮ｯ諛ｷ驕懊・・ｿ繝ｻ・ｽE鬩幢ｽ｢繝ｻ・ｧ髯懶ｽ｣繝ｻ・､郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｨ・ｾ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ髴托ｽ｢隴会ｽｦ繝ｻ・ｿ繝ｻ・ｽE鬮ｯ貅倥・郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
@@ -5110,6 +5172,7 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
         "bool" | "i1" | "b" => Type::Bool,
         "str" | "i8*" | "s" => Type::String,
         "void" | "unit" | "u" => Type::Unit,
+        "json" | "Json" => Type::Json,
         _ => {
             // 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴取ｨ費ｽｺ繧托ｽｾ蜿悶渚繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮陷夲ｽｱ鬨ｾ・ｶ繝ｻ・ｾ鬮ｴ雜｣・ｽ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ Base(Arg, ...) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主沁笳冗ｹ晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驍ｵ・ｲ陞ｳ螟ｲ・ｽ・ｾ繝ｻ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ驛｢譎｢・ｽ・ｻ
             let base = match s.find('(') {
@@ -5235,6 +5298,7 @@ fn type_to_string(ty: &Type) -> String {
             let param_strs: Vec<String> = params.iter().map(type_to_string).collect();
             format!("fn({}) -> {}", param_strs.join(", "), type_to_string(ret))
         }
+        Type::Json => "json".to_string(),
     }
 }
 
@@ -6026,6 +6090,76 @@ fn infer_type(
                 "stack_empty" => Ok(Type::List(Box::new(Type::Unknown))),
                 "stack_len" | "stack_size" => Ok(Type::Int),
                 "stack_is_empty" => Ok(Type::Bool),
+                "json_parse" => {
+                    if args.len() != 1 { return Err("json_parse() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Json)
+                }
+                "json_stringify" => {
+                    if args.len() != 1 { return Err("json_stringify() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "json_get" => {
+                    if args.len() != 2 { return Err("json_get() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Option(Box::new(Type::Json)))
+                }
+                "json_has" => {
+                    if args.len() != 2 { return Err("json_has() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "json_len" => {
+                    if args.len() != 1 { return Err("json_len() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Int)
+                }
+                "json_at" => {
+                    if args.len() != 2 { return Err("json_at() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Json)
+                }
+                "json_as_string" => {
+                    if args.len() != 1 { return Err("json_as_string() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "json_as_int" => {
+                    if args.len() != 1 { return Err("json_as_int() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Int)
+                }
+                "json_as_float" => {
+                    if args.len() != 1 { return Err("json_as_float() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Float)
+                }
+                "json_as_bool" => {
+                    if args.len() != 1 { return Err("json_as_bool() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "json_null" | "json_object" | "json_array" => {
+                    if !args.is_empty() { return Err(format!("{}() takes no arguments", func)); }
+                    Ok(Type::Json)
+                }
+                "json_set" => {
+                    if args.len() != 3 { return Err("json_set() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Json)
+                }
+                "json_push" => {
+                    if args.len() != 2 { return Err("json_push() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Json)
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -6881,6 +7015,114 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 "stack_empty" => Ok(Type::List(Box::new(Type::Unknown))),
                 _ => Ok(Type::Unknown),
             }
+        }
+        "json_parse" => {
+            if args.len() != 1 {
+                return Err("json_parse() takes exactly 1 argument (str)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::Json)
+        }
+        "json_stringify" => {
+            if args.len() != 1 {
+                return Err("json_stringify() takes exactly 1 argument (Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::String)
+        }
+        "json_get" => {
+            if args.len() != 2 {
+                return Err("json_get() takes exactly 2 arguments (Json, str)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            check_expr(&args[1], env, defs)?;
+            Ok(Type::Option(Box::new(Type::Json)))
+        }
+        "json_has" => {
+            if args.len() != 2 {
+                return Err("json_has() takes exactly 2 arguments (Json, str)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "json_len" => {
+            if args.len() != 1 {
+                return Err("json_len() takes exactly 1 argument (Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::Int)
+        }
+        "json_at" => {
+            if args.len() != 2 {
+                return Err("json_at() takes exactly 2 arguments (Json, int)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            check_expr(&args[1], env, defs)?;
+            Ok(Type::Json)
+        }
+        "json_as_string" => {
+            if args.len() != 1 {
+                return Err("json_as_string() takes exactly 1 argument (Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::String)
+        }
+        "json_as_int" => {
+            if args.len() != 1 {
+                return Err("json_as_int() takes exactly 1 argument (Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::Int)
+        }
+        "json_as_float" => {
+            if args.len() != 1 {
+                return Err("json_as_float() takes exactly 1 argument (Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::Float)
+        }
+        "json_as_bool" => {
+            if args.len() != 1 {
+                return Err("json_as_bool() takes exactly 1 argument (Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "json_null" => {
+            if !args.is_empty() {
+                return Err("json_null() takes no arguments".to_string());
+            }
+            Ok(Type::Json)
+        }
+        "json_object" => {
+            if !args.is_empty() {
+                return Err("json_object() takes no arguments".to_string());
+            }
+            Ok(Type::Json)
+        }
+        "json_array" => {
+            if !args.is_empty() {
+                return Err("json_array() takes no arguments".to_string());
+            }
+            Ok(Type::Json)
+        }
+        "json_set" => {
+            if args.len() != 3 {
+                return Err("json_set() takes exactly 3 arguments (Json, str, Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            check_expr(&args[1], env, defs)?;
+            check_expr(&args[2], env, defs)?;
+            Ok(Type::Json)
+        }
+        "json_push" => {
+            if args.len() != 2 {
+                return Err("json_push() takes exactly 2 arguments (Json, Json)".to_string());
+            }
+            check_expr(&args[0], env, defs)?;
+            check_expr(&args[1], env, defs)?;
+            Ok(Type::Json)
         }
         other => {
                     // Function reference in env (e.g. `let f = add; f(3, 4)`)
@@ -10128,7 +10370,214 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "set_len" | "set_is_empty" | "set_add" | "set_remove" | "set_contains" | "set_clear" | "set_clone" | "set_empty"
              | "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_len" | "queue_is_empty" | "queue_clear" | "queue_empty"
              | "stack_push" | "stack_pop" | "stack_peek" | "stack_len" | "stack_is_empty" | "stack_clear" | "stack_empty"
+             | "json_parse" | "json_stringify"
+             | "json_get" | "json_has" | "json_len" | "json_at"
+             | "json_as_string" | "json_as_int" | "json_as_float" | "json_as_bool"
+             | "json_null" | "json_object" | "json_array"
+             | "json_set" | "json_push"
     )
+}
+
+/// Minimal recursive-descent JSON parser.
+/// Converts a JSON string into a `JsonValue`.
+fn json_parse_str(input: &str) -> Result<JsonValue, String> {
+    let bytes = input.as_bytes();
+    let mut pos = 0;
+
+    fn skip_ws(bytes: &[u8], pos: &mut usize) {
+        while *pos < bytes.len() {
+            match bytes[*pos] {
+                b' ' | b'\t' | b'\n' | b'\r' => *pos += 1,
+                _ => break,
+            }
+        }
+    }
+
+    fn parse_value(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        skip_ws(bytes, pos);
+        if *pos >= bytes.len() {
+            return Err("JSON parse error: unexpected end of input".to_string());
+        }
+        match bytes[*pos] {
+            b'{' => parse_object(bytes, pos),
+            b'[' => parse_array(bytes, pos),
+            b'"' => parse_string(bytes, pos),
+            b't' | b'f' => parse_bool(bytes, pos),
+            b'n' => parse_null(bytes, pos),
+            b'-' | b'0'..=b'9' => parse_number(bytes, pos),
+            _ => Err(format!("JSON parse error: unexpected character '{}' at position {}", bytes[*pos] as char, *pos)),
+        }
+    }
+
+    fn parse_string(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        if bytes[*pos] != b'"' {
+            return Err("JSON parse error: expected '\"'".to_string());
+        }
+        *pos += 1;
+        let mut s = String::new();
+        loop {
+            if *pos >= bytes.len() {
+                return Err("JSON parse error: unterminated string".to_string());
+            }
+            match bytes[*pos] {
+                b'"' => { *pos += 1; break; }
+                b'\\' => {
+                    *pos += 1;
+                    if *pos >= bytes.len() {
+                        return Err("JSON parse error: unterminated escape".to_string());
+                    }
+                    match bytes[*pos] {
+                        b'"' => s.push('"'),
+                        b'\\' => s.push('\\'),
+                        b'/' => s.push('/'),
+                        b'b' => s.push('\x08'),
+                        b'f' => s.push('\x0C'),
+                        b'n' => s.push('\n'),
+                        b'r' => s.push('\r'),
+                        b't' => s.push('\t'),
+                        b'u' => {
+                            *pos += 1;
+                            if *pos + 4 > bytes.len() {
+                                return Err("JSON parse error: incomplete unicode escape".to_string());
+                            }
+                            let hex = std::str::from_utf8(&bytes[*pos..*pos + 4])
+                                .map_err(|_| "JSON parse error: invalid unicode escape".to_string())?;
+                            let code = u32::from_str_radix(hex, 16)
+                                .map_err(|_| "JSON parse error: invalid unicode hex".to_string())?;
+                            if let Some(c) = char::from_u32(code) {
+                                s.push(c);
+                            }
+                            *pos += 3; // +1 from the loop
+                        }
+                        c => return Err(format!("JSON parse error: invalid escape '\\{}'", c as char)),
+                    }
+                }
+                c => s.push(c as char),
+            }
+            *pos += 1;
+        }
+        Ok(JsonValue::String(s))
+    }
+
+    fn parse_number(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        let start = *pos;
+        if bytes[*pos] == b'-' { *pos += 1; }
+        while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+        let mut is_float = false;
+        if *pos < bytes.len() && bytes[*pos] == b'.' {
+            is_float = true;
+            *pos += 1;
+            while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+        }
+        if *pos < bytes.len() && (bytes[*pos] == b'e' || bytes[*pos] == b'E') {
+            is_float = true;
+            *pos += 1;
+            if *pos < bytes.len() && (bytes[*pos] == b'+' || bytes[*pos] == b'-') { *pos += 1; }
+            while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+        }
+        let num_str = std::str::from_utf8(&bytes[start..*pos])
+            .map_err(|_| "JSON parse error: invalid number".to_string())?;
+        if is_float {
+            let f: f64 = num_str.parse().map_err(|_| format!("JSON parse error: invalid float '{}'", num_str))?;
+            Ok(JsonValue::Float(f))
+        } else {
+            let i: i64 = num_str.parse().map_err(|_| format!("JSON parse error: invalid integer '{}'", num_str))?;
+            Ok(JsonValue::Int(i))
+        }
+    }
+
+    fn parse_bool(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        if bytes[*pos..].starts_with(b"true") {
+            *pos += 4;
+            Ok(JsonValue::Bool(true))
+        } else if bytes[*pos..].starts_with(b"false") {
+            *pos += 5;
+            Ok(JsonValue::Bool(false))
+        } else {
+            Err("JSON parse error: expected boolean".to_string())
+        }
+    }
+
+    fn parse_null(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        if bytes[*pos..].starts_with(b"null") {
+            *pos += 4;
+            Ok(JsonValue::Null)
+        } else {
+            Err("JSON parse error: expected null".to_string())
+        }
+    }
+
+    fn parse_array(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        *pos += 1; // skip '['
+        skip_ws(bytes, pos);
+        let mut arr = Vec::new();
+        if *pos < bytes.len() && bytes[*pos] == b']' {
+            *pos += 1;
+            return Ok(JsonValue::Array(arr));
+        }
+        loop {
+            let val = parse_value(bytes, pos)?;
+            arr.push(val);
+            skip_ws(bytes, pos);
+            if *pos >= bytes.len() {
+                return Err("JSON parse error: unterminated array".to_string());
+            }
+            if bytes[*pos] == b']' {
+                *pos += 1;
+                break;
+            }
+            if bytes[*pos] != b',' {
+                return Err(format!("JSON parse error: expected ',' or ']' at position {}", *pos));
+            }
+            *pos += 1;
+        }
+        Ok(JsonValue::Array(arr))
+    }
+
+    fn parse_object(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
+        *pos += 1; // skip '{'
+        skip_ws(bytes, pos);
+        let mut pairs = Vec::new();
+        if *pos < bytes.len() && bytes[*pos] == b'}' {
+            *pos += 1;
+            return Ok(JsonValue::Object(pairs));
+        }
+        loop {
+            skip_ws(bytes, pos);
+            let key = parse_string(bytes, pos)?;
+            let key_str = match key {
+                JsonValue::String(s) => s,
+                _ => return Err("JSON parse error: object key must be a string".to_string()),
+            };
+            skip_ws(bytes, pos);
+            if *pos >= bytes.len() || bytes[*pos] != b':' {
+                return Err("JSON parse error: expected ':'".to_string());
+            }
+            *pos += 1;
+            let val = parse_value(bytes, pos)?;
+            pairs.push((key_str, val));
+            skip_ws(bytes, pos);
+            if *pos >= bytes.len() {
+                return Err("JSON parse error: unterminated object".to_string());
+            }
+            if bytes[*pos] == b'}' {
+                *pos += 1;
+                break;
+            }
+            if bytes[*pos] != b',' {
+                return Err(format!("JSON parse error: expected ',' or '}}' at position {}", *pos));
+            }
+            *pos += 1;
+        }
+        Ok(JsonValue::Object(pairs))
+    }
+
+    let result = parse_value(bytes, &mut pos)?;
+    skip_ws(bytes, &mut pos);
+    if pos < bytes.len() {
+        return Err(format!("JSON parse error: trailing content at position {}", pos));
+    }
+    Ok(result)
 }
 
 fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Result<Value, String> {
@@ -10913,6 +11362,205 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 return Err("stack_empty() takes no arguments".to_string());
             }
             Ok(Value::Array(Vec::new()))
+        }
+        // ===== JSON builtins =====
+        "json_parse" => {
+            let s = eval_expr(&args[0], env, defs)?;
+            if let Value::String(text) = s {
+                let jv = json_parse_str(&text)?;
+                Ok(Value::Json(jv))
+            } else {
+                Err("json_parse() expects a string".to_string())
+            }
+        }
+        "json_stringify" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            if let Value::Json(jv) = v {
+                Ok(Value::String(jv.display()))
+            } else {
+                Err("json_stringify() expects a Json value".to_string())
+            }
+        }
+        "json_get" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let k = eval_expr(&args[1], env, defs)?;
+            if let (Value::Json(jv), Value::String(key)) = (v, k) {
+                match &jv {
+                    JsonValue::Object(pairs) => {
+                        for (pk, pv) in pairs {
+                            if pk == &key {
+                                return Ok(Value::Option(Some(Box::new(Value::Json(pv.deep_clone())))));
+                            }
+                        }
+                        Ok(Value::Option(None))
+                    }
+                    _ => Ok(Value::Option(None)),
+                }
+            } else {
+                Err("json_get() expects (Json, string)".to_string())
+            }
+        }
+        "json_has" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let k = eval_expr(&args[1], env, defs)?;
+            if let (Value::Json(jv), Value::String(key)) = (v, k) {
+                match &jv {
+                    JsonValue::Object(pairs) => {
+                        Ok(Value::Bool(pairs.iter().any(|(pk, _)| pk == &key)))
+                    }
+                    _ => Ok(Value::Bool(false)),
+                }
+            } else {
+                Err("json_has() expects (Json, string)".to_string())
+            }
+        }
+        "json_len" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            if let Value::Json(jv) = v {
+                let len = match &jv {
+                    JsonValue::Array(arr) => arr.len() as i64,
+                    JsonValue::Object(pairs) => pairs.len() as i64,
+                    JsonValue::String(s) => s.len() as i64,
+                    _ => return Err("json_len() expects an array, object, or string".to_string()),
+                };
+                Ok(Value::Int(len))
+            } else {
+                Err("json_len() expects a Json value".to_string())
+            }
+        }
+        "json_at" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let idx = eval_expr(&args[1], env, defs)?;
+            if let (Value::Json(jv), Value::Int(i)) = (v, idx) {
+                match &jv {
+                    JsonValue::Array(arr) => {
+                        if i >= 0 && (i as usize) < arr.len() {
+                            Ok(Value::Json(arr[i as usize].deep_clone()))
+                        } else {
+                            Err(format!("json_at(): index {} out of bounds (len {})", i, arr.len()))
+                        }
+                    }
+                    _ => Err("json_at() expects a Json array".to_string()),
+                }
+            } else {
+                Err("json_at() expects (Json, int)".to_string())
+            }
+        }
+        "json_as_string" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let jv = match v {
+                Value::Json(jv) => jv,
+                Value::Option(Some(inner)) => match *inner {
+                    Value::Json(jv) => jv,
+                    _ => return Err("json_as_string() expects a Json or Option(Json) value".to_string()),
+                },
+                Value::Option(None) => return Ok(Value::String("".to_string())),
+                _ => return Err("json_as_string() expects a Json value".to_string()),
+            };
+            match &jv {
+                JsonValue::String(s) => Ok(Value::String(s.clone())),
+                JsonValue::Null => Ok(Value::String("".to_string())),
+                other => Ok(Value::String(other.display())),
+            }
+        }
+        "json_as_int" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let jv = match v {
+                Value::Json(jv) => jv,
+                Value::Option(Some(inner)) => match *inner {
+                    Value::Json(jv) => jv,
+                    _ => return Err("json_as_int() expects a Json or Option(Json) value".to_string()),
+                },
+                Value::Option(None) => return Ok(Value::Int(0)),
+                _ => return Err("json_as_int() expects a Json value".to_string()),
+            };
+            match &jv {
+                JsonValue::Int(i) => Ok(Value::Int(*i)),
+                JsonValue::Float(f) => Ok(Value::Int(*f as i64)),
+                JsonValue::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
+                JsonValue::Null => Ok(Value::Int(0)),
+                _ => Err("json_as_int(): cannot convert to int".to_string()),
+            }
+        }
+        "json_as_float" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let jv = match v {
+                Value::Json(jv) => jv,
+                Value::Option(Some(inner)) => match *inner {
+                    Value::Json(jv) => jv,
+                    _ => return Err("json_as_float() expects a Json or Option(Json) value".to_string()),
+                },
+                Value::Option(None) => return Ok(Value::Float(0.0)),
+                _ => return Err("json_as_float() expects a Json value".to_string()),
+            };
+            match &jv {
+                JsonValue::Float(f) => Ok(Value::Float(*f)),
+                JsonValue::Int(i) => Ok(Value::Float(*i as f64)),
+                JsonValue::Null => Ok(Value::Float(0.0)),
+                _ => Err("json_as_float(): cannot convert to float".to_string()),
+            }
+        }
+        "json_as_bool" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let jv = match v {
+                Value::Json(jv) => jv,
+                Value::Option(Some(inner)) => match *inner {
+                    Value::Json(jv) => jv,
+                    _ => return Err("json_as_bool() expects a Json or Option(Json) value".to_string()),
+                },
+                Value::Option(None) => return Ok(Value::Bool(false)),
+                _ => return Err("json_as_bool() expects a Json value".to_string()),
+            };
+            match &jv {
+                JsonValue::Bool(b) => Ok(Value::Bool(*b)),
+                JsonValue::Null => Ok(Value::Bool(false)),
+                JsonValue::Int(i) => Ok(Value::Bool(*i != 0)),
+                JsonValue::Float(f) => Ok(Value::Bool(*f != 0.0)),
+                JsonValue::String(s) => Ok(Value::Bool(!s.is_empty())),
+                JsonValue::Array(arr) => Ok(Value::Bool(!arr.is_empty())),
+                JsonValue::Object(pairs) => Ok(Value::Bool(!pairs.is_empty())),
+            }
+        }
+        "json_null" => {
+            Ok(Value::Json(JsonValue::Null))
+        }
+        "json_object" => {
+            Ok(Value::Json(JsonValue::Object(Vec::new())))
+        }
+        "json_array" => {
+            Ok(Value::Json(JsonValue::Array(Vec::new())))
+        }
+        "json_set" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let k = eval_expr(&args[1], env, defs)?;
+            let val = eval_expr(&args[2], env, defs)?;
+            if let (Value::Json(mut jv), Value::String(key), Value::Json(new_val)) = (v, k, val) {
+                match &mut jv {
+                    JsonValue::Object(pairs) => {
+                        pairs.retain(|(pk, _)| pk != &key);
+                        pairs.push((key, new_val));
+                        Ok(Value::Json(jv))
+                    }
+                    _ => Err("json_set() expects the first argument to be a Json object".to_string()),
+                }
+            } else {
+                Err("json_set() expects (Json, string, Json)".to_string())
+            }
+        }
+        "json_push" => {
+            let v = eval_expr(&args[0], env, defs)?;
+            let elem = eval_expr(&args[1], env, defs)?;
+            if let (Value::Json(mut jv), Value::Json(elem_jv)) = (v, elem) {
+                match &mut jv {
+                    JsonValue::Array(arr) => {
+                        arr.push(elem_jv);
+                        Ok(Value::Json(jv))
+                    }
+                    _ => Err("json_push() expects the first argument to be a Json array".to_string()),
+                }
+            } else {
+                Err("json_push() expects (Json, Json)".to_string())
+            }
         }
         // String: case helpers.
         "to_upper" => {

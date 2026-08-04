@@ -1,0 +1,7 @@
+[package]
+name = "json"
+version = "v0.1.0"
+description = "JSON parsing, serialization, and manipulation"
+
+[files]
+main = "src/json.lime"

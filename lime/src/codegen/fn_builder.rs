@@ -1256,6 +1256,14 @@ impl<'a> Cg<'a> {
                         t
                     ));
                 }
+                Type::Json => {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i8* @runtime_json_stringify(i8* {})\n",
+                        tmp, self.fmt_call_arg(&v, &Type::Json)
+                    ));
+                    return Ok((tmp, Type::String));
+                }
                 _ => return Err(format!(
                     "str() cannot convert {:?} to a string in codegen",
                     t
@@ -1820,6 +1828,64 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_f64(self, "runtime_math_round", &[x]);
                 Ok(Some((v, t)))
             }
+            "trunc" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_trunc", &[x]);
+                Ok(Some((v, t)))
+            }
+            "exp" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_exp", &[x]);
+                Ok(Some((v, t)))
+            }
+            "log" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_log", &[x]);
+                Ok(Some((v, t)))
+            }
+            "log10" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_log10", &[x]);
+                Ok(Some((v, t)))
+            }
+            "sin" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_sin", &[x]);
+                Ok(Some((v, t)))
+            }
+            "cos" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_cos", &[x]);
+                Ok(Some((v, t)))
+            }
+            "tan" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_tan", &[x]);
+                Ok(Some((v, t)))
+            }
+            "asin" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_asin", &[x]);
+                Ok(Some((v, t)))
+            }
+            "acos" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_acos", &[x]);
+                Ok(Some((v, t)))
+            }
+            "atan" => {
+                let x = f64_arg(self, &args[0])?;
+                let (v, t) = call_f64(self, "runtime_math_atan", &[x]);
+                Ok(Some((v, t)))
+            }
+            "math_pi" => {
+                let (v, t) = call_f64(self, "runtime_math_pi", &[]);
+                Ok(Some((v, t)))
+            }
+            "math_e" => {
+                let (v, t) = call_f64(self, "runtime_math_e", &[]);
+                Ok(Some((v, t)))
+            }
             // ---- time builtins ----
             "time_now" => {
                 let (v, t) = call_f64(self, "runtime_time_now", &[]);
@@ -2317,6 +2383,110 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
+            // ---- JSON builtins ----
+            "json_parse" => {
+                let a = str_arg(self, &args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_parse(i8* {})\n", tmp, a));
+                Ok(Some((tmp, Type::Json)))
+            }
+            "json_stringify" => {
+                let a = arg(self, &args[0], &Type::Json)?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_stringify(i8* {})\n", tmp, a));
+                Ok(Some((tmp, Type::String)))
+            }
+            "json_get" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let k = str_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_get(i8* {}, i8* {})\n", tmp, j, k));
+                // Wrap as Option(Json): check if result is null
+                let is_null = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, tmp));
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!("  {} = alloca %LimeOption, align 8\n", slot));
+                // Store has_value
+                let has_val_ptr = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr %LimeOption, %LimeOption* {}, i32 0, i32 0\n", has_val_ptr, slot));
+                let i1_flag = self.fresh_temp();
+                self.out.push_str(&format!("  {} = xor i1 {}, true\n", i1_flag, is_null));
+                self.out.push_str(&format!("  store i1 {}, i1* {}\n", i1_flag, has_val_ptr));
+                // Store value
+                let val_ptr = self.fresh_temp();
+                self.out.push_str(&format!("  {} = getelementptr %LimeOption, %LimeOption* {}, i32 0, i32 1\n", val_ptr, slot));
+                self.out.push_str(&format!("  store i8* {}, i8** {}\n", tmp, val_ptr));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!("  {} = load %LimeOption, %LimeOption* {}\n", loaded, slot));
+                Ok(Some((loaded, Type::Option(Box::new(Type::Json)))))
+            }
+            "json_has" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let k = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_json_has", &[j, k]);
+                Ok(Some((v, t)))
+            }
+            "json_len" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let (v, t) = call_i64(self, "runtime_json_len", &[j]);
+                Ok(Some((v, t)))
+            }
+            "json_at" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let i = i64_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_at(i8* {}, i64 {})\n", tmp, j, i));
+                Ok(Some((tmp, Type::Json)))
+            }
+            "json_as_string" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_as_string(i8* {})\n", tmp, j));
+                Ok(Some((tmp, Type::String)))
+            }
+            "json_as_int" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let (v, t) = call_i64(self, "runtime_json_as_int", &[j]);
+                Ok(Some((v, t)))
+            }
+            "json_as_float" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let (v, t) = call_f64(self, "runtime_json_as_float", &[j]);
+                Ok(Some((v, t)))
+            }
+            "json_as_bool" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let (v, t) = call_bool(self, "runtime_json_as_bool", &[j]);
+                Ok(Some((v, t)))
+            }
+            "json_null" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_null()\n", tmp));
+                Ok(Some((tmp, Type::Json)))
+            }
+            "json_object" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_object()\n", tmp));
+                Ok(Some((tmp, Type::Json)))
+            }
+            "json_array" => {
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!("  {} = call i8* @runtime_json_array()\n", tmp));
+                Ok(Some((tmp, Type::Json)))
+            }
+            "json_set" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let k = str_arg(self, &args[1])?;
+                let v = arg(self, &args[2], &Type::Json)?;
+                let (r, t) = call_bool(self, "runtime_json_set", &[j, k, v]);
+                Ok(Some((r, t)))
+            }
+            "json_push" => {
+                let j = arg(self, &args[0], &Type::Json)?;
+                let e = arg(self, &args[1], &Type::Json)?;
+                let (r, t) = call_bool(self, "runtime_json_push", &[j, e]);
+                Ok(Some((r, t)))
+            }
             _ => Ok(None),
         }
     }
@@ -2530,6 +2700,24 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!(
                     "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.str{}, i64 0, i64 0), {})\n",
                     arr_size, nl_suffix, arg_str
+                ));
+            }
+            Type::Json => {
+                // JSON: stringify first, then print the resulting string
+                let json_str = self.fresh_temp();
+                let arg_str = if v.starts_with('%') {
+                    format!("i8* {}", v)
+                } else {
+                    v.clone()
+                };
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_json_stringify(i8* {})\n",
+                    json_str, arg_str
+                ));
+                let arr_size = if add_nl { "4" } else { "3" };
+                self.out.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.str{}, i64 0, i64 0), i8* {})\n",
+                    arr_size, nl_suffix, json_str
                 ));
             }
             _ => {

@@ -202,4 +202,45 @@ int64_t runtime_call_closure_i64(LimeClosure* closure, void* packed_args);
 void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args);
 LimeClosure* runtime_make_fn_ref(void* fn_ptr);
 
+// -- JSON --
+// Tagged union for JSON values.
+// All values are passed as opaque i8* (LimeJson*) across the ABI.
+typedef enum {
+    JSON_NULL   = 0,
+    JSON_BOOL   = 1,
+    JSON_INT    = 2,
+    JSON_FLOAT  = 3,
+    JSON_STRING = 4,
+    JSON_ARRAY  = 5,
+    JSON_OBJECT = 6,
+} LimeJsonTag;
+
+typedef struct LimeJson {
+    LimeJsonTag tag;
+    union {
+        int8_t   bool_val;
+        int64_t  int_val;
+        double   float_val;
+        char*    string_val;
+        struct { struct LimeJson** items; int64_t len; int64_t cap; } array_val;
+        struct { char** keys; struct LimeJson** values; int64_t len; int64_t cap; } object_val;
+    } data;
+} LimeJson;
+
+char*     runtime_json_stringify(LimeJson* j);
+LimeJson* runtime_json_parse(char* s);
+LimeJson* runtime_json_get(LimeJson* j, char* key);
+int8_t    runtime_json_has(LimeJson* j, char* key);
+int64_t   runtime_json_len(LimeJson* j);
+LimeJson* runtime_json_at(LimeJson* j, int64_t index);
+char*     runtime_json_as_string(LimeJson* j);
+int64_t   runtime_json_as_int(LimeJson* j);
+double    runtime_json_as_float(LimeJson* j);
+int8_t    runtime_json_as_bool(LimeJson* j);
+LimeJson* runtime_json_null(void);
+LimeJson* runtime_json_object(void);
+LimeJson* runtime_json_array(void);
+int8_t    runtime_json_set(LimeJson* j, char* key, LimeJson* val);
+int8_t    runtime_json_push(LimeJson* j, LimeJson* elem);
+
 #endif // LIME_RUNTIME_H

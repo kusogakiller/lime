@@ -2273,3 +2273,165 @@ fn emit_object_io_read_line() {
         stdout
     );
 }
+
+/// Phase C-1.6: Json type and builtins.
+/// Tests parsing, serialization, access, conversion, mutation, and variable storage.
+#[test]
+fn emit_object_json_type_and_builtins() {
+    let dir = "target/test_emit_json";
+    write_stdlib_project(
+        dir,
+        // Parse various JSON types
+        "fn main():\n\
+         \x20   let obj = json_parse(\"{\\\"name\\\": \\\"lime\\\", \\\"version\\\": 1, \\\"pi\\\": 3.14, \\\"ok\\\": true, \\\"data\\\": null}\")\n\
+         \x20   println(json_stringify(obj))\n\
+         \x20   println(json_has(obj, \"name\"))\n\
+         \x20   println(json_has(obj, \"missing\"))\n\
+         \x20   let name_val = json_get(obj, \"name\")\n\
+         \x20   println(json_as_string(name_val))\n\
+         \x20   println(json_as_int(json_get(obj, \"version\")))\n\
+         \x20   println(json_as_float(json_get(obj, \"pi\")))\n\
+         \x20   println(json_as_bool(json_get(obj, \"ok\")))\n\
+         \x20   let arr = json_parse(\"[10, 20, 30]\")\n\
+         \x20   println(json_len(arr))\n\
+         \x20   println(json_as_int(json_at(arr, 1)))\n\
+         \x20   let empty_obj = json_object()\n\
+         \x20   let empty_obj = json_set(empty_obj, \"key\", json_parse(\"\\\"value\\\"\"))\n\
+         \x20   println(json_stringify(empty_obj))\n\
+         \x20   let empty_arr = json_array()\n\
+         \x20   let empty_arr = json_push(empty_arr, json_parse(\"42\"))\n\
+         \x20   let empty_arr = json_push(empty_arr, json_parse(\"\\\"hello\\\"\"))\n\
+         \x20   println(json_stringify(empty_arr))\n\
+         \x20   let null_val = json_null()\n\
+         \x20   println(json_as_string(null_val))\n\
+         \x20   println(json_len(json_parse(\"\\\"abc\\\"\")))\n\
+         \x20   return\n",
+    );
+
+    // Interpreter run
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[")
+        })
+        .collect();
+    let expected = [
+        "{\"name\": \"lime\", \"version\": 1, \"pi\": 3.14, \"ok\": true, \"data\": null}",
+        "true",
+        "false",
+        "lime",
+        "1",
+        "3.14",
+        "true",
+        "3",
+        "20",
+        "{\"key\": \"value\"}",
+        "[42, \"hello\"]",
+        "",
+        "3",
+    ];
+    assert_eq!(
+        interp, expected,
+        "interpreter json builtins mismatch\nexpected: {:?}\ngot: {:?}\nfull output:\n{}",
+        expected, interp, out
+    );
+
+    // Native run
+    if !llvm_toolchain_available() {
+        return;
+    }
+    let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+    if !build_out.contains("ok:") || !std::path::Path::new(&format!("{}.exe", dir)).exists() {
+        eprintln!("native build skipped: {}", build_out);
+        return;
+    }
+    let exe = format!("{}.exe", dir);
+    let run = Command::new(&exe).output().unwrap();
+    let stdout_lossy = String::from_utf8_lossy(&run.stdout);
+    let native: Vec<&str> = stdout_lossy.lines().collect();
+    assert_eq!(
+        native, expected,
+        "native json builtins mismatch\nexpected: {:?}\ngot: {:?}\nstderr: {}",
+        expected, native,
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        interp, native,
+        "interpreter and native output must match for json builtins"
+    );
+}
+
+/// Phase C-1.6: Json stored in variables and passed to functions.
+#[test]
+fn emit_object_json_variable_and_function_passing() {
+    let dir = "target/test_emit_json_vars";
+    write_stdlib_project(
+        dir,
+        "fn get_name(json: obj):\n\
+         \x20   return json_as_string(json_get(obj, \"name\"))\n\
+         \n\
+         fn main():\n\
+         \x20   let data = json_parse(\"{\\\"name\\\": \\\"test\\\", \\\"value\\\": 99}\")\n\
+         \x20   let name = get_name(data)\n\
+         \x20   println(name)\n\
+         \x20   println(json_as_int(json_get(data, \"value\")))\n\
+         \x20   let arr = json_parse(\"[1, 2, 3]\")\n\
+         \x20   println(json_len(arr))\n\
+         \x20   println(json_as_int(json_at(arr, 0)))\n\
+         \x20   return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[")
+        })
+        .collect();
+    let expected = ["test", "99", "3", "1"];
+    assert_eq!(
+        interp, expected,
+        "interpreter json vars mismatch\nexpected: {:?}\ngot: {:?}\nfull output:\n{}",
+        expected, interp, out
+    );
+}
+
+/// Phase C-1.6: Option(Json) works correctly.
+#[test]
+fn emit_object_json_option_type() {
+    let dir = "target/test_emit_json_option";
+    write_stdlib_project(
+        dir,
+        "fn main():\n\
+         \x20   let data = json_parse(\"{\\\"a\\\": 1}\")\n\
+         \x20   let result = json_get(data, \"a\")\n\
+         \x20   println(json_as_int(result))\n\
+         \x20   let missing = json_get(data, \"b\")\n\
+         \x20   println(json_as_string(missing))\n\
+         \x20   return\n",
+    );
+
+    let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[")
+        })
+        .collect();
+    let expected = ["1", ""];
+    assert_eq!(
+        interp, expected,
+        "interpreter json option mismatch\nexpected: {:?}\ngot: {:?}\nfull output:\n{}",
+        expected, interp, out
+    );
+}

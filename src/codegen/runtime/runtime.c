@@ -1333,3 +1333,421 @@ void* runtime_call_closure_ptr(LimeClosure* closure, void* packed_args) {
 LimeClosure* runtime_make_fn_ref(void* fn_ptr) {
     return runtime_make_closure(fn_ptr, NULL);
 }
+
+// ===== JSON runtime =====
+
+static LimeJson* json_alloc(LimeJsonTag tag) {
+    LimeJson* j = (LimeJson*)malloc(sizeof(LimeJson));
+    if (!j) runtime_panic("json: out of memory");
+    j->tag = tag;
+    memset(&j->data, 0, sizeof(j->data));
+    return j;
+}
+
+static void json_free(LimeJson* j) {
+    if (!j) return;
+    switch (j->tag) {
+        case JSON_STRING: free(j->data.string_val); break;
+        case JSON_ARRAY:
+            for (int64_t i = 0; i < j->data.array_val.len; i++)
+                json_free(j->data.array_val.items[i]);
+            free(j->data.array_val.items);
+            break;
+        case JSON_OBJECT:
+            for (int64_t i = 0; i < j->data.object_val.len; i++) {
+                free(j->data.object_val.keys[i]);
+                json_free(j->data.object_val.values[i]);
+            }
+            free(j->data.object_val.keys);
+            free(j->data.object_val.values);
+            break;
+        default: break;
+    }
+    free(j);
+}
+
+static char* json_strdup(const char* s) {
+    size_t len = strlen(s);
+    char* d = (char*)malloc(len + 1);
+    if (!d) runtime_panic("json: out of memory");
+    memcpy(d, s, len + 1);
+    return d;
+}
+
+// Forward declaration for recursive stringify
+static void json_stringify_impl(LimeJson* j, char** buf, int64_t* len, int64_t* cap);
+
+static void json_ensure(char** buf, int64_t* len, int64_t* cap, int64_t needed) {
+    while (*len + needed >= *cap) {
+        *cap = (*cap) * 2 + 256;
+        *buf = (char*)realloc(*buf, *cap);
+        if (!*buf) runtime_panic("json: out of memory");
+    }
+}
+
+static void json_push_str(char** buf, int64_t* len, int64_t* cap, const char* s) {
+    int64_t slen = (int64_t)strlen(s);
+    json_ensure(buf, len, cap, slen);
+    memcpy(*buf + *len, s, slen);
+    *len += slen;
+}
+
+static void json_push_char(char** buf, int64_t* len, int64_t* cap, char c) {
+    json_ensure(buf, len, cap, 1);
+    (*buf)[(*len)++] = c;
+}
+
+static void json_stringify_string(const char* s, char** buf, int64_t* len, int64_t* cap) {
+    json_push_char(buf, len, cap, '"');
+    for (const char* p = s; *p; p++) {
+        switch (*p) {
+            case '"':  json_push_str(buf, len, cap, "\\\""); break;
+            case '\\': json_push_str(buf, len, cap, "\\\\"); break;
+            case '\b': json_push_str(buf, len, cap, "\\b"); break;
+            case '\f': json_push_str(buf, len, cap, "\\f"); break;
+            case '\n': json_push_str(buf, len, cap, "\\n"); break;
+            case '\r': json_push_str(buf, len, cap, "\\r"); break;
+            case '\t': json_push_str(buf, len, cap, "\\t"); break;
+            default: json_push_char(buf, len, cap, *p); break;
+        }
+    }
+    json_push_char(buf, len, cap, '"');
+}
+
+static void json_stringify_impl(LimeJson* j, char** buf, int64_t* len, int64_t* cap) {
+    if (!j) { json_push_str(buf, len, cap, "null"); return; }
+    char num[64];
+    switch (j->tag) {
+        case JSON_NULL:   json_push_str(buf, len, cap, "null"); break;
+        case JSON_BOOL:   json_push_str(buf, len, cap, j->data.bool_val ? "true" : "false"); break;
+        case JSON_INT:
+            snprintf(num, sizeof(num), "%lld", (long long)j->data.int_val);
+            json_push_str(buf, len, cap, num);
+            break;
+        case JSON_FLOAT:
+            snprintf(num, sizeof(num), "%.17g", j->data.float_val);
+            json_push_str(buf, len, cap, num);
+            break;
+        case JSON_STRING:
+            json_stringify_string(j->data.string_val, buf, len, cap);
+            break;
+        case JSON_ARRAY:
+            json_push_char(buf, len, cap, '[');
+            for (int64_t i = 0; i < j->data.array_val.len; i++) {
+                if (i > 0) json_push_char(buf, len, cap, ',');
+                json_stringify_impl(j->data.array_val.items[i], buf, len, cap);
+            }
+            json_push_char(buf, len, cap, ']');
+            break;
+        case JSON_OBJECT:
+            json_push_char(buf, len, cap, '{');
+            for (int64_t i = 0; i < j->data.object_val.len; i++) {
+                if (i > 0) json_push_char(buf, len, cap, ',');
+                json_stringify_string(j->data.object_val.keys[i], buf, len, cap);
+                json_push_char(buf, len, cap, ':');
+                json_stringify_impl(j->data.object_val.values[i], buf, len, cap);
+            }
+            json_push_char(buf, len, cap, '}');
+            break;
+    }
+}
+
+char* runtime_json_stringify(LimeJson* j) {
+    char* buf = (char*)malloc(256);
+    int64_t len = 0, cap = 256;
+    if (!buf) runtime_panic("json: out of memory");
+    json_stringify_impl(j, &buf, &len, &cap);
+    buf[len] = '\0';
+    return buf;
+}
+
+// JSON parser
+static const char* jp_input;
+static int64_t jp_pos;
+
+static void jp_skip_ws(void) {
+    while (jp_input[jp_pos] == ' ' || jp_input[jp_pos] == '\t' ||
+           jp_input[jp_pos] == '\n' || jp_input[jp_pos] == '\r')
+        jp_pos++;
+}
+
+static LimeJson* jp_parse_value(void);
+
+static LimeJson* jp_parse_string_raw(void) {
+    jp_pos++; // skip '"'
+    char buf[4096];
+    int64_t blen = 0;
+    while (jp_input[jp_pos] != '"' && jp_input[jp_pos] != '\0') {
+        if (jp_input[jp_pos] == '\\') {
+            jp_pos++;
+            char esc = jp_input[jp_pos];
+            switch (esc) {
+                case '"': case '\\': case '/': buf[blen++] = esc; break;
+                case 'b': buf[blen++] = '\b'; break;
+                case 'f': buf[blen++] = '\f'; break;
+                case 'n': buf[blen++] = '\n'; break;
+                case 'r': buf[blen++] = '\r'; break;
+                case 't': buf[blen++] = '\t'; break;
+                case 'u': {
+                    jp_pos++;
+                    char hex[5] = {0};
+                    for (int i = 0; i < 4 && jp_input[jp_pos]; i++, jp_pos++)
+                        hex[i] = jp_input[jp_pos];
+                    jp_pos--; // loop will increment
+                    unsigned long code = strtoul(hex, NULL, 16);
+                    if (code < 0x80) { buf[blen++] = (char)code; }
+                    else if (code < 0x800) { buf[blen++] = (char)(0xC0|(code>>6)); buf[blen++] = (char)(0x80|(code&0x3F)); }
+                    else { buf[blen++] = (char)(0xE0|(code>>12)); buf[blen++] = (char)(0x80|((code>>6)&0x3F)); buf[blen++] = (char)(0x80|(code&0x3F)); }
+                    break;
+                }
+                default: buf[blen++] = esc; break;
+            }
+        } else {
+            buf[blen++] = jp_input[jp_pos];
+        }
+        jp_pos++;
+    }
+    jp_pos++; // skip closing '"'
+    buf[blen] = '\0';
+    LimeJson* j = json_alloc(JSON_STRING);
+    j->data.string_val = json_strdup(buf);
+    return j;
+}
+
+static LimeJson* jp_parse_number(void) {
+    int64_t start = jp_pos;
+    int is_float = 0;
+    if (jp_input[jp_pos] == '-') jp_pos++;
+    while (jp_input[jp_pos] >= '0' && jp_input[jp_pos] <= '9') jp_pos++;
+    if (jp_input[jp_pos] == '.') { is_float = 1; jp_pos++; while (jp_input[jp_pos] >= '0' && jp_input[jp_pos] <= '9') jp_pos++; }
+    if (jp_input[jp_pos] == 'e' || jp_input[jp_pos] == 'E') { is_float = 1; jp_pos++; if (jp_input[jp_pos]=='+'||jp_input[jp_pos]=='-') jp_pos++; while (jp_input[jp_pos] >= '0' && jp_input[jp_pos] <= '9') jp_pos++; }
+    int64_t slen = jp_pos - start;
+    char* s = (char*)malloc(slen + 1);
+    memcpy(s, jp_input + start, slen);
+    s[slen] = '\0';
+    LimeJson* j;
+    if (is_float) {
+        j = json_alloc(JSON_FLOAT);
+        j->data.float_val = atof(s);
+    } else {
+        j = json_alloc(JSON_INT);
+        j->data.int_val = strtoll(s, NULL, 10);
+    }
+    free(s);
+    return j;
+}
+
+static LimeJson* jp_parse_object(void) {
+    jp_pos++; // skip '{'
+    jp_skip_ws();
+    LimeJson* j = json_alloc(JSON_OBJECT);
+    int64_t cap = 8;
+    j->data.object_val.keys = (char**)malloc(cap * sizeof(char*));
+    j->data.object_val.values = (LimeJson**)malloc(cap * sizeof(LimeJson*));
+    j->data.object_val.len = 0;
+    j->data.object_val.cap = cap;
+    jp_skip_ws();
+    if (jp_input[jp_pos] == '}') { jp_pos++; return j; }
+    for (;;) {
+        jp_skip_ws();
+        LimeJson* key = jp_parse_string_raw();
+        char* key_str = key->data.string_val;
+        key->data.string_val = NULL;
+        json_free(key);
+        jp_skip_ws();
+        jp_pos++; // skip ':'
+        LimeJson* val = jp_parse_value();
+        if (j->data.object_val.len >= j->data.object_val.cap) {
+            j->data.object_val.cap *= 2;
+            j->data.object_val.keys = (char**)realloc(j->data.object_val.keys, j->data.object_val.cap * sizeof(char*));
+            j->data.object_val.values = (LimeJson**)realloc(j->data.object_val.values, j->data.object_val.cap * sizeof(LimeJson*));
+        }
+        j->data.object_val.keys[j->data.object_val.len] = key_str;
+        j->data.object_val.values[j->data.object_val.len] = val;
+        j->data.object_val.len++;
+        jp_skip_ws();
+        if (jp_input[jp_pos] == '}') { jp_pos++; break; }
+        jp_pos++; // skip ','
+    }
+    return j;
+}
+
+static LimeJson* jp_parse_array(void) {
+    jp_pos++; // skip '['
+    jp_skip_ws();
+    LimeJson* j = json_alloc(JSON_ARRAY);
+    int64_t cap = 8;
+    j->data.array_val.items = (LimeJson**)malloc(cap * sizeof(LimeJson*));
+    j->data.array_val.len = 0;
+    j->data.array_val.cap = cap;
+    if (jp_input[jp_pos] == ']') { jp_pos++; return j; }
+    for (;;) {
+        LimeJson* val = jp_parse_value();
+        if (j->data.array_val.len >= j->data.array_val.cap) {
+            j->data.array_val.cap *= 2;
+            j->data.array_val.items = (LimeJson**)realloc(j->data.array_val.items, j->data.array_val.cap * sizeof(LimeJson*));
+        }
+        j->data.array_val.items[j->data.array_val.len++] = val;
+        jp_skip_ws();
+        if (jp_input[jp_pos] == ']') { jp_pos++; break; }
+        jp_pos++; // skip ','
+    }
+    return j;
+}
+
+static LimeJson* jp_parse_value(void) {
+    jp_skip_ws();
+    char c = jp_input[jp_pos];
+    if (c == '{') return jp_parse_object();
+    if (c == '[') return jp_parse_array();
+    if (c == '"') return jp_parse_string_raw();
+    if (c == 't' || c == 'f') {
+        LimeJson* j = json_alloc(JSON_BOOL);
+        j->data.bool_val = (c == 't') ? 1 : 0;
+        if (c == 't') jp_pos += 4; else jp_pos += 5;
+        return j;
+    }
+    if (c == 'n') {
+        jp_pos += 4;
+        return json_alloc(JSON_NULL);
+    }
+    if (c == '-' || (c >= '0' && c <= '9')) return jp_parse_number();
+    runtime_panic("json: unexpected character");
+    return NULL;
+}
+
+LimeJson* runtime_json_parse(char* s) {
+    jp_input = s;
+    jp_pos = 0;
+    LimeJson* result = jp_parse_value();
+    return result;
+}
+
+LimeJson* runtime_json_get(LimeJson* j, char* key) {
+    if (!j || j->tag != JSON_OBJECT) return NULL;
+    for (int64_t i = 0; i < j->data.object_val.len; i++) {
+        if (strcmp(j->data.object_val.keys[i], key) == 0)
+            return j->data.object_val.values[i];
+    }
+    return NULL;
+}
+
+int8_t runtime_json_has(LimeJson* j, char* key) {
+    if (!j || j->tag != JSON_OBJECT) return 0;
+    for (int64_t i = 0; i < j->data.object_val.len; i++) {
+        if (strcmp(j->data.object_val.keys[i], key) == 0) return 1;
+    }
+    return 0;
+}
+
+int64_t runtime_json_len(LimeJson* j) {
+    if (!j) return 0;
+    switch (j->tag) {
+        case JSON_ARRAY:  return j->data.array_val.len;
+        case JSON_OBJECT: return j->data.object_val.len;
+        case JSON_STRING: return (int64_t)strlen(j->data.string_val);
+        default: return 0;
+    }
+}
+
+LimeJson* runtime_json_at(LimeJson* j, int64_t index) {
+    if (!j || j->tag != JSON_ARRAY) return NULL;
+    if (index < 0 || index >= j->data.array_val.len) return NULL;
+    return j->data.array_val.items[index];
+}
+
+char* runtime_json_as_string(LimeJson* j) {
+    if (!j) return json_strdup("");
+    if (j->tag == JSON_STRING) return json_strdup(j->data.string_val);
+    char* result = runtime_json_stringify(j);
+    return result;
+}
+
+int64_t runtime_json_as_int(LimeJson* j) {
+    if (!j) return 0;
+    switch (j->tag) {
+        case JSON_INT:   return j->data.int_val;
+        case JSON_FLOAT: return (int64_t)j->data.float_val;
+        case JSON_BOOL:  return j->data.bool_val ? 1 : 0;
+        default: return 0;
+    }
+}
+
+double runtime_json_as_float(LimeJson* j) {
+    if (!j) return 0.0;
+    switch (j->tag) {
+        case JSON_FLOAT: return j->data.float_val;
+        case JSON_INT:   return (double)j->data.int_val;
+        default: return 0.0;
+    }
+}
+
+int8_t runtime_json_as_bool(LimeJson* j) {
+    if (!j) return 0;
+    switch (j->tag) {
+        case JSON_BOOL:  return j->data.bool_val;
+        case JSON_INT:   return j->data.int_val != 0 ? 1 : 0;
+        case JSON_FLOAT: return j->data.float_val != 0.0 ? 1 : 0;
+        case JSON_STRING: return j->data.string_val[0] != '\0' ? 1 : 0;
+        case JSON_ARRAY:  return j->data.array_val.len > 0 ? 1 : 0;
+        case JSON_OBJECT: return j->data.object_val.len > 0 ? 1 : 0;
+        default: return 0;
+    }
+}
+
+LimeJson* runtime_json_null(void) {
+    return json_alloc(JSON_NULL);
+}
+
+LimeJson* runtime_json_object(void) {
+    LimeJson* j = json_alloc(JSON_OBJECT);
+    j->data.object_val.keys = NULL;
+    j->data.object_val.values = NULL;
+    j->data.object_val.len = 0;
+    j->data.object_val.cap = 0;
+    return j;
+}
+
+LimeJson* runtime_json_array(void) {
+    LimeJson* j = json_alloc(JSON_ARRAY);
+    j->data.array_val.items = NULL;
+    j->data.array_val.len = 0;
+    j->data.array_val.cap = 0;
+    return j;
+}
+
+int8_t runtime_json_set(LimeJson* j, char* key, LimeJson* val) {
+    if (!j || j->tag != JSON_OBJECT) return 0;
+    // Remove existing key
+    for (int64_t i = 0; i < j->data.object_val.len; i++) {
+        if (strcmp(j->data.object_val.keys[i], key) == 0) {
+            free(j->data.object_val.keys[i]);
+            json_free(j->data.object_val.values[i]);
+            j->data.object_val.keys[i] = json_strdup(key);
+            j->data.object_val.values[i] = val;
+            return 1;
+        }
+    }
+    // Add new key
+    if (j->data.object_val.len >= j->data.object_val.cap) {
+        int64_t new_cap = j->data.object_val.cap ? j->data.object_val.cap * 2 : 8;
+        j->data.object_val.keys = (char**)realloc(j->data.object_val.keys, new_cap * sizeof(char*));
+        j->data.object_val.values = (LimeJson**)realloc(j->data.object_val.values, new_cap * sizeof(LimeJson*));
+        j->data.object_val.cap = new_cap;
+    }
+    j->data.object_val.keys[j->data.object_val.len] = json_strdup(key);
+    j->data.object_val.values[j->data.object_val.len] = val;
+    j->data.object_val.len++;
+    return 1;
+}
+
+int8_t runtime_json_push(LimeJson* j, LimeJson* elem) {
+    if (!j || j->tag != JSON_ARRAY) return 0;
+    if (j->data.array_val.len >= j->data.array_val.cap) {
+        int64_t new_cap = j->data.array_val.cap ? j->data.array_val.cap * 2 : 8;
+        j->data.array_val.items = (LimeJson**)realloc(j->data.array_val.items, new_cap * sizeof(LimeJson*));
+        j->data.array_val.cap = new_cap;
+    }
+    j->data.array_val.items[j->data.array_val.len++] = elem;
+    return 1;
+}
