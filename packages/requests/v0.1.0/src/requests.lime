@@ -7,6 +7,7 @@ type Session = struct { inner: opaque }
 type Response = struct { inner: opaque }
 type RequestError = struct { variant: str, message: str }
 type CookieJar = struct { inner: opaque }
+type RedirectHistory = struct { inner: opaque }
 
 // -- Central request function --
 
@@ -71,6 +72,27 @@ fn Session.head(Session: self, str: url): RequestBuilder:
 
 fn Session.options(Session: self, str: url): RequestBuilder:
     return requests_session_request(self, "OPTIONS", url)
+
+// Session configuration (Python requests compatible)
+
+fn Session.headers(Session: self, list(tuple(str,str)): hdrs):
+    requests_session_set_default_headers(self, hdrs)
+    return
+
+fn Session.params(Session: self, list(tuple(str,str)): params):
+    requests_session_set_default_params(self, params)
+    return
+
+fn Session.timeout(Session: self, int: seconds):
+    requests_session_set_timeout(self, seconds)
+    return
+
+fn Session.verify(Session: self, bool: verify):
+    requests_session_set_verify(self, verify)
+    return
+
+fn Session.cookies(Session: self): list(tuple(str,str)):
+    return requests_session_cookies(self)
 
 // -- RequestBuilder (fluent API) --
 
@@ -154,3 +176,6 @@ fn Response.content_length(Response: self): int:
 
 fn Response.copy_to(Response: self, str: file_path): int:
     return requests_response_copy_to(self, file_path)
+
+fn Response.history(Response: self): list(str):
+    return requests_response_redirect_history(self)

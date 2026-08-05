@@ -323,7 +323,28 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i32 @runtime_requests_request_builder_set_headers(i8*, %LimeList)\n");
     out.push_str("declare i32 @runtime_requests_request_builder_verify(i8*, i32)\n");
     // Response headers as list
-    out.push_str("declare %LimeList @runtime_requests_response_headers_list(i8*)\n\n");
+    out.push_str("declare %LimeList @runtime_requests_response_headers_list(i8*)\n");
+    // Cookie jar extended operations
+    out.push_str("declare i32 @runtime_requests_cookie_jar_add_parsed(i8*, i8*)\n");
+    out.push_str("declare void @runtime_requests_cookie_jar_update_from_response(i8*, i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_cookie_jar_get_cookie_header(i8*, i8*)\n");
+    out.push_str("declare %LimeList @runtime_requests_cookie_jar_get_all(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_cookie_jar_get(i8*, i8*)\n");
+    // Session setters
+    out.push_str("declare i32 @runtime_requests_session_set_default_headers(i8*, %LimeList)\n");
+    out.push_str("declare i32 @runtime_requests_session_set_default_params(i8*, %LimeList)\n");
+    out.push_str("declare i32 @runtime_requests_session_set_timeout(i8*, i64)\n");
+    out.push_str("declare i32 @runtime_requests_session_set_verify(i8*, i32)\n");
+    out.push_str("declare i32 @runtime_requests_session_set_redirect_limit(i8*, i64)\n");
+    out.push_str("declare i32 @runtime_requests_session_set_disable_redirects(i8*, i32)\n");
+    out.push_str("declare %LimeList @runtime_requests_session_cookies(i8*)\n");
+    // Redirect history
+    out.push_str("declare i8* @runtime_requests_redirect_history_new()\n");
+    out.push_str("declare void @runtime_requests_redirect_history_add(i8*, i64, i8*, i8*)\n");
+    out.push_str("declare %LimeList @runtime_requests_redirect_history_list(i8*)\n");
+    out.push_str("declare void @runtime_requests_redirect_history_free(i8*)\n");
+    // Response redirect history
+    out.push_str("declare %LimeList @runtime_requests_response_redirect_history(i8*)\n\n");
 
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");

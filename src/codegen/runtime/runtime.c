@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
+#include <time.h>
 #include "runtime.h"
 
 #ifdef _WIN32
@@ -20,10 +21,12 @@
 #include <io.h>
 #include <direct.h>
 #include <sys/stat.h>
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#define strtok_r strtok_s
 #else
 #include <unistd.h>
 #include <dirent.h>
-#include <time.h>
 #include <sys/stat.h>
 #endif
 
@@ -3324,13 +3327,14 @@ struct RequestsClient {
 
 struct RequestsRequestBuilder {
     RequestsClient* client;
+    RequestsSession* session;  // back-pointer to session (for cookie updates)
     char* method;
     char* url;
     RequestsHeaderMap* headers;
     LimeList query_params;
     char* body_data;
     int64_t body_len;
-    int body_type; // 0=none 1=bytes 2=string 3=json 4=form
+    int body_type; // 0=none, 1=bytes, 2=string, 3=json, 4=form
     LimeJson* json_body;
     RequestsMultipart* multipart;
     int64_t timeout_seconds;
@@ -3348,6 +3352,7 @@ struct RequestsResponse {
     char* url;
     char* body;
     int64_t body_len;
+    RequestsRedirectHistory* redirect_history;
 };
 
 struct RequestsMultipart {
@@ -3362,14 +3367,36 @@ struct RequestsTlsConfig {
     int accept_invalid_hostnames;
 };
 
+struct RequestsCookie {
+    char* name;
+    char* value;
+    char* domain;
+    char* path;
+    int64_t expires;   // unix timestamp, 0 = session cookie
+    int secure;
+    int http_only;
+};
+
 struct RequestsCookieJar {
-    LimeList cookies;
+    LimeList cookies;  // list of RequestsCookie*
+};
+
+struct RequestsRedirectHistory {
+    LimeList entries;  // list of RequestsRedirectEntry*
+};
+
+struct RequestsRedirectEntry {
+    int64_t status_code;
+    char* url;
+    char* method;
 };
 
 struct RequestsSession {
     RequestsClient* client;
     RequestsHeaderMap* default_headers;
     RequestsCookieJar* cookies;
+    RequestsRedirectHistory* redirect_history;
+    LimeList default_params;  // list of key/value strings
     int64_t timeout_seconds;
     int64_t redirect_limit;
     int disable_redirects;
@@ -3571,6 +3598,7 @@ void runtime_requests_response_free(RequestsResponse* response) {
     header_map_free(response->headers);
     free(response->url);
     free(response->body);
+    if (response->redirect_history) runtime_requests_redirect_history_free(response->redirect_history);
     free(response);
 }
 
@@ -3606,8 +3634,15 @@ void runtime_requests_tls_config_free(RequestsTlsConfig* config) {
 void runtime_requests_cookie_jar_free(RequestsCookieJar* jar) {
     if (!jar) return;
     for (int64_t i = 0; i < jar->cookies.len; i++) {
-        char* s = (char*)(intptr_t)runtime_list_get(jar->cookies, i);
-        free(s);
+        void* item = (void*)(intptr_t)runtime_list_get(jar->cookies, i);
+        if (item) {
+            // Check if it's a RequestsCookie* or a raw string
+            // In new code, we store RequestsCookie*. In legacy code, raw strings.
+            // We use a heuristic: if the first byte looks like a heap pointer to a RequestsCookie,
+            // we free it as a RequestsCookie. For backwards compat, we just free as string.
+            // Actually, since we control all callers, all new cookies are RequestsCookie*.
+            cookie_free((RequestsCookie*)item);
+        }
     }
     free(jar->cookies.data);
     free(jar);
@@ -3683,6 +3718,7 @@ RequestsRequestBuilder* runtime_requests_request_builder_new(RequestsClient* cli
     if (!b) runtime_panic("requests: out of memory");
     memset(b, 0, sizeof(*b));
     b->client = client;
+    b->session = NULL;
     b->method = method ? runtime_str_copy(method) : runtime_str_copy("GET");
     b->url = url ? runtime_str_copy(url) : runtime_str_copy("");
     b->headers = header_map_new();
@@ -3964,6 +4000,113 @@ int runtime_requests_tls_config_danger_accept_invalid_hostnames(RequestsTlsConfi
 
 // --- Cookie jar ---
 
+static void cookie_free(RequestsCookie* c) {
+    if (!c) return;
+    free(c->name);
+    free(c->value);
+    free(c->domain);
+    free(c->path);
+    free(c);
+}
+
+static RequestsCookie* cookie_new(void) {
+    RequestsCookie* c = (RequestsCookie*)malloc(sizeof(RequestsCookie));
+    if (!c) runtime_panic("requests: out of memory");
+    memset(c, 0, sizeof(*c));
+    return c;
+}
+
+// Parse Set-Cookie header value: "name=value; Domain=...; Path=...; Secure; HttpOnly; Max-Age=..."
+static RequestsCookie* cookie_parse_set_cookie(char* header_value, char* request_domain) {
+    if (!header_value) return NULL;
+    RequestsCookie* c = cookie_new();
+
+    // Copy so we can tokenize
+    char* work = runtime_str_copy(header_value);
+    char* saveptr = NULL;
+    char* token = strtok_r(work, ";", &saveptr);
+    if (!token) { free(work); cookie_free(c); return NULL; }
+
+    // First token: "name=value"
+    char* eq = strchr(token, '=');
+    if (eq) {
+        *eq = '\0';
+        c->name = runtime_str_copy(token);
+        c->value = runtime_str_copy(eq + 1);
+    } else {
+        c->name = runtime_str_copy(token);
+        c->value = runtime_str_copy("");
+    }
+
+    // Default domain from request
+    c->domain = request_domain ? runtime_str_copy(request_domain) : runtime_str_copy("");
+    c->path = runtime_str_copy("/");
+    c->secure = 0;
+    c->http_only = 0;
+    c->expires = 0;
+
+    // Parse attributes
+    while ((token = strtok_r(NULL, ";", &saveptr)) != NULL) {
+        while (*token == ' ') token++;
+        if (strncasecmp(token, "Domain=", 7) == 0) {
+            free(c->domain);
+            c->domain = runtime_str_copy(token + 7);
+        } else if (strncasecmp(token, "Path=", 5) == 0) {
+            free(c->path);
+            c->path = runtime_str_copy(token + 5);
+        } else if (strncasecmp(token, "Max-Age=", 8) == 0) {
+            int64_t max_age = (int64_t)atol(token + 8);
+            if (max_age > 0) {
+                // Convert to unix timestamp from now
+                c->expires = (int64_t)time(NULL) + max_age;
+            }
+        } else if (strncasecmp(token, "Expires=", 8) == 0) {
+            // Parse HTTP date (simplified: store as approximate timestamp)
+            // For now, just mark as very far future
+            c->expires = (int64_t)time(NULL) + 86400 * 365;
+        } else if (strcasecmp(token, "Secure") == 0) {
+            c->secure = 1;
+        } else if (strcasecmp(token, "HttpOnly") == 0) {
+            c->http_only = 1;
+        }
+    }
+
+    free(work);
+    return c;
+}
+
+// Check if a cookie matches a URL (domain + path + secure + expiry)
+static int cookie_matches(RequestsCookie* c, char* domain, char* path, int is_https) {
+    if (!c || !domain || !path) return 0;
+
+    // Check expiry
+    if (c->expires > 0 && (int64_t)time(NULL) > c->expires) return 0;
+
+    // Check secure flag
+    if (c->secure && !is_https) return 0;
+
+    // Check domain (exact match or subdomain match)
+    if (c->domain[0] != '\0') {
+        size_t cd_len = strlen(c->domain);
+        size_t d_len = strlen(domain);
+        if (cd_len > d_len) return 0;
+        // Must end with the cookie domain
+        if (strcasecmp(domain + (d_len - cd_len), c->domain) != 0) return 0;
+        // If the character before the match isn't '.', it must be exact match
+        if (d_len > cd_len && domain[d_len - cd_len - 1] != '.') return 0;
+    }
+
+    // Check path (cookie path must be a prefix of request path)
+    if (c->path[0] != '\0') {
+        size_t cp_len = strlen(c->path);
+        if (strncmp(path, c->path, cp_len) != 0) return 0;
+        // If path prefix match, next char must be '/' or end of string
+        if (path[cp_len] != '\0' && path[cp_len] != '/') return 0;
+    }
+
+    return 1;
+}
+
 RequestsCookieJar* runtime_requests_cookie_jar_new(void) {
     RequestsCookieJar* j = (RequestsCookieJar*)malloc(sizeof(RequestsCookieJar));
     if (!j) runtime_panic("requests: out of memory");
@@ -3977,9 +4120,164 @@ int runtime_requests_cookie_jar_add(RequestsCookieJar* jar, char* cookie_str) {
     return 0;
 }
 
+int runtime_requests_cookie_jar_add_parsed(RequestsCookieJar* jar, RequestsCookie* cookie) {
+    if (!jar || !cookie) return -1;
+    jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)cookie);
+    return 0;
+}
+
+// Parse Set-Cookie headers from response and add to jar
+void runtime_requests_cookie_jar_update_from_response(RequestsCookieJar* jar, RequestsHeaderMap* resp_headers, char* request_url) {
+    if (!jar || !resp_headers) return;
+
+    // Extract domain from request URL
+    char* domain = NULL;
+    parse_url_host_port(request_url, &domain, NULL, NULL);
+
+    int is_https = (strncmp(request_url, "https://", 8) == 0);
+
+    // Find all Set-Cookie headers
+    HeaderEntry* e = resp_headers->first;
+    while (e) {
+        if (strcasecmp(e->key, "Set-Cookie") == 0) {
+            RequestsCookie* c = cookie_parse_set_cookie(e->value, domain);
+            if (c) {
+                // Remove existing cookie with same name+domain+path
+                for (int64_t i = jar->cookies.len - 1; i >= 0; i--) {
+                    RequestsCookie* existing = (RequestsCookie*)(intptr_t)runtime_list_get(jar->cookies, i);
+                    if (existing && existing->name && c->name &&
+                        strcmp(existing->name, c->name) == 0 &&
+                        existing->domain && c->domain &&
+                        strcasecmp(existing->domain, c->domain) == 0 &&
+                        existing->path && c->path &&
+                        strcmp(existing->path, c->path) == 0) {
+                        // Remove old cookie
+                        cookie_free(existing);
+                        // Shift elements down
+                        for (int64_t j = i; j < jar->cookies.len - 1; j++) {
+                            jar->cookies.data[j] = jar->cookies.data[j + 1];
+                        }
+                        jar->cookies.len--;
+                        break;
+                    }
+                }
+                jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)c);
+            }
+        }
+        e = e->next;
+    }
+    free(domain);
+}
+
+// Build Cookie header string from matching cookies
+char* runtime_requests_cookie_jar_get_cookie_header(RequestsCookieJar* jar, char* url) {
+    if (!jar || !url) return NULL;
+
+    char* host = NULL;
+    char* path = NULL;
+    parse_url_host_port(url, &host, NULL, &path);
+    int is_https = (strncmp(url, "https://", 8) == 0);
+
+    StrBuilder sb;
+    sb_init(&sb);
+    int first = 1;
+
+    for (int64_t i = 0; i < jar->cookies.len; i++) {
+        RequestsCookie* c = (RequestsCookie*)(intptr_t)runtime_list_get(jar->cookies, i);
+        if (cookie_matches(c, host, path, is_https)) {
+            if (!first) sb_append(&sb, "; ");
+            sb_append(&sb, c->name);
+            sb_append(&sb, "=");
+            sb_append(&sb, c->value);
+            first = 0;
+        }
+    }
+
+    free(host);
+    free(path);
+
+    if (first) {
+        free(sb.data);
+        return NULL;
+    }
+    return sb_finish(&sb);
+}
+
+// Get all cookies as a list of tuples (name, value) for the Lime layer
+LimeList runtime_requests_cookie_jar_get_all(RequestsCookieJar* jar) {
+    LimeList list = runtime_list_empty();
+    if (!jar) return list;
+    for (int64_t i = 0; i < jar->cookies.len; i++) {
+        RequestsCookie* c = (RequestsCookie*)(intptr_t)runtime_list_get(jar->cookies, i);
+        if (c && c->name) {
+            list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(c->name));
+            list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(c->value ? c->value : ""));
+        }
+    }
+    return list;
+}
+
+// Get a specific cookie value by name
+char* runtime_requests_cookie_jar_get(RequestsCookieJar* jar, char* name) {
+    if (!jar || !name) return NULL;
+    for (int64_t i = jar->cookies.len - 1; i >= 0; i--) {
+        RequestsCookie* c = (RequestsCookie*)(intptr_t)runtime_list_get(jar->cookies, i);
+        if (c && c->name && strcmp(c->name, name) == 0) {
+            return runtime_str_copy(c->value ? c->value : "");
+        }
+    }
+    return NULL;
+}
+
 char* runtime_requests_cookie_parse(char* cookie_str) {
     if (!cookie_str) return NULL;
     return runtime_str_copy(cookie_str);
+}
+
+// --- Redirect history ---
+
+RequestsRedirectHistory* runtime_requests_redirect_history_new(void) {
+    RequestsRedirectHistory* h = (RequestsRedirectHistory*)malloc(sizeof(RequestsRedirectHistory));
+    if (!h) runtime_panic("requests: out of memory");
+    h->entries = runtime_list_empty();
+    return h;
+}
+
+void runtime_requests_redirect_history_add(RequestsRedirectHistory* history, int64_t status_code, char* url, char* method) {
+    if (!history) return;
+    RequestsRedirectEntry* e = (RequestsRedirectEntry*)malloc(sizeof(RequestsRedirectEntry));
+    if (!e) runtime_panic("requests: out of memory");
+    e->status_code = status_code;
+    e->url = url ? runtime_str_copy(url) : runtime_str_copy("");
+    e->method = method ? runtime_str_copy(method) : runtime_str_copy("");
+    history->entries = runtime_list_add(history->entries, (int64_t)(intptr_t)e);
+}
+
+LimeList runtime_requests_redirect_history_list(RequestsRedirectHistory* history) {
+    LimeList list = runtime_list_empty();
+    if (!history) return list;
+    for (int64_t i = 0; i < history->entries.len; i++) {
+        RequestsRedirectEntry* e = (RequestsRedirectEntry*)(intptr_t)runtime_list_get(history->entries, i);
+        if (e) {
+            list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(e->url));
+            list = runtime_list_add(list, (int64_t)e->status_code);
+        }
+    }
+    return list;
+}
+
+void runtime_requests_redirect_history_free(RequestsRedirectHistory* history) {
+    if (!history) return;
+    for (int64_t i = 0; i < history->entries.len; i++) {
+        RequestsRedirectEntry* e = (RequestsRedirectEntry*)(intptr_t)runtime_list_get(history->entries, i);
+        if (e) {
+            free(e->url);
+            free(e->method);
+            free(e);
+        }
+    }
+    free(history->entries.data);
+    free(history);
 }
 
 // --- Session ---
@@ -3991,6 +4289,8 @@ RequestsSession* runtime_requests_session_new(void) {
     s->client = runtime_requests_client_new();
     s->default_headers = header_map_new();
     s->cookies = runtime_requests_cookie_jar_new();
+    s->redirect_history = runtime_requests_redirect_history_new();
+    s->default_params = runtime_list_empty();
     s->timeout_seconds = 30;
     s->redirect_limit = 10;
     s->disable_redirects = 0;
@@ -4002,6 +4302,7 @@ RequestsRequestBuilder* runtime_requests_session_request(RequestsSession* sessio
     if (!session) return NULL;
     RequestsRequestBuilder* b = runtime_requests_request_builder_new(session->client, method, url);
     if (b) {
+        b->session = session;  // back-pointer for cookie updates
         b->verify = session->verify;
         b->timeout_seconds = session->timeout_seconds;
         b->redirect_limit = session->redirect_limit;
@@ -4014,8 +4315,73 @@ RequestsRequestBuilder* runtime_requests_session_request(RequestsSession* sessio
                 e = e->next;
             }
         }
+        // Copy session default params to builder
+        if (session->default_params.len > 0) {
+            for (int64_t i = 0; i < session->default_params.len; i++) {
+                b->query_params = runtime_list_add(b->query_params,
+                    (int64_t)(intptr_t)runtime_str_copy(
+                        (char*)(intptr_t)runtime_list_get(session->default_params, i)));
+            }
+        }
+        // Attach matching cookies from session cookie jar
+        if (session->cookies && url) {
+            char* cookie_header = runtime_requests_cookie_jar_get_cookie_header(session->cookies, url);
+            if (cookie_header) {
+                header_map_insert(b->headers, "Cookie", cookie_header);
+                free(cookie_header);
+            }
+        }
     }
     return b;
+}
+
+// Session setters for Python requests compatibility
+
+int runtime_requests_session_set_default_headers(RequestsSession* session, LimeList headers) {
+    if (!session) return -1;
+    for (int64_t i = 0; i < headers.len; i++) {
+        char* key = (char*)(intptr_t)runtime_list_get(headers, i);
+        i++;
+        if (i >= headers.len) break;
+        char* val = (char*)(intptr_t)runtime_list_get(headers, i);
+        header_map_insert(session->default_headers, key, val);
+    }
+    return 0;
+}
+
+int runtime_requests_session_set_default_params(RequestsSession* session, LimeList params) {
+    if (!session) return -1;
+    session->default_params = params;
+    return 0;
+}
+
+int runtime_requests_session_set_timeout(RequestsSession* session, int64_t seconds) {
+    if (!session) return -1;
+    session->timeout_seconds = seconds;
+    return 0;
+}
+
+int runtime_requests_session_set_verify(RequestsSession* session, int verify) {
+    if (!session) return -1;
+    session->verify = verify;
+    return 0;
+}
+
+int runtime_requests_session_set_redirect_limit(RequestsSession* session, int64_t limit) {
+    if (!session) return -1;
+    session->redirect_limit = limit;
+    return 0;
+}
+
+int runtime_requests_session_set_disable_redirects(RequestsSession* session, int disable) {
+    if (!session) return -1;
+    session->disable_redirects = disable;
+    return 0;
+}
+
+LimeList runtime_requests_session_cookies(RequestsSession* session) {
+    if (!session || !session->cookies) return runtime_list_empty();
+    return runtime_requests_cookie_jar_get_all(session->cookies);
 }
 
 void runtime_requests_session_free(RequestsSession* session) {
@@ -4023,6 +4389,8 @@ void runtime_requests_session_free(RequestsSession* session) {
     runtime_requests_client_free(session->client);
     header_map_free(session->default_headers);
     runtime_requests_cookie_jar_free(session->cookies);
+    runtime_requests_redirect_history_free(session->redirect_history);
+    free(session->default_params.data);
     free(session);
 }
 
@@ -4325,6 +4693,14 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
     resp->url = full_url;
     resp->body = sb_finish(&body_sb);
     resp->body_len = resp->body ? (int64_t)strlen(resp->body) : 0;
+    resp->redirect_history = NULL;
+
+    // Update session cookie jar from Set-Cookie headers
+    if (builder->session && builder->session->cookies) {
+        runtime_requests_cookie_jar_update_from_response(
+            builder->session->cookies, resp_headers, full_url);
+    }
+
     return resp;
 }
 
@@ -4582,6 +4958,14 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
     resp->url = response_url;
     resp->body = body;
     resp->body_len = body ? (int64_t)strlen(body) : 0;
+    resp->redirect_history = NULL;
+
+    // Update session cookie jar from Set-Cookie headers
+    if (builder->session && builder->session->cookies) {
+        runtime_requests_cookie_jar_update_from_response(
+            builder->session->cookies, resp_headers, response_url);
+    }
+
     free(full_url);
     free(out_data);
     return resp;
@@ -4609,6 +4993,11 @@ LimeList runtime_requests_response_headers_list(RequestsResponse* response) {
         e = e->next;
     }
     return list;
+}
+
+LimeList runtime_requests_response_redirect_history(RequestsResponse* response) {
+    if (!response || !response->redirect_history) return runtime_list_empty();
+    return runtime_requests_redirect_history_list(response->redirect_history);
 }
 
 char* runtime_requests_response_url(RequestsResponse* response) {

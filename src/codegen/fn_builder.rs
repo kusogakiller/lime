@@ -3654,6 +3654,111 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_list(self, "runtime_requests_response_headers_list", &[a0]);
                 Ok(Some((v, t)))
             }
+            // Cookie jar extended operations
+            "requests_cookie_jar_add_parsed" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_i32(self, "runtime_requests_cookie_jar_add_parsed", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_cookie_jar_update_from_response" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                self.out.push_str(&format!("  call void @runtime_requests_cookie_jar_update_from_response(i8* {}, i8* {}, i8* {})\n", a0, a1, a2));
+                Ok(Some((self.fresh_temp(), Type::Unit)))
+            }
+            "requests_cookie_jar_get_cookie_header" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_requests_cookie_jar_get_cookie_header", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_cookie_jar_get_all" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_requests_cookie_jar_get_all", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_cookie_jar_get" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_requests_cookie_jar_get", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            // Session setters
+            "requests_session_set_default_headers" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = list_arg(self, &args[1])?;
+                let (v, t) = call_i32(self, "runtime_requests_session_set_default_headers", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_set_default_params" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = list_arg(self, &args[1])?;
+                let (v, t) = call_i32(self, "runtime_requests_session_set_default_params", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_set_timeout" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_i32(self, "runtime_requests_session_set_timeout", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_set_verify" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (val, _ty) = self.codegen_expr(&args[1])?;
+                let bool_val = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
+                let (v, t) = call_i32(self, "runtime_requests_session_set_verify", &[a0, bool_val]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_set_redirect_limit" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_i32(self, "runtime_requests_session_set_redirect_limit", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_set_disable_redirects" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (val, _ty) = self.codegen_expr(&args[1])?;
+                let bool_val = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
+                let (v, t) = call_i32(self, "runtime_requests_session_set_disable_redirects", &[a0, bool_val]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_cookies" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_requests_session_cookies", &[a0]);
+                Ok(Some((v, t)))
+            }
+            // Redirect history
+            "requests_redirect_history_new" => {
+                let (v, t) = call_str(self, "runtime_requests_redirect_history_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_redirect_history_add" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let a3 = str_arg(self, &args[3])?;
+                self.out.push_str(&format!("  call void @runtime_requests_redirect_history_add(i8* {}, i64 {}, i8* {}, i8* {})\n", a0, a1, a2, a3));
+                Ok(Some((self.fresh_temp(), Type::Unit)))
+            }
+            "requests_redirect_history_list" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_requests_redirect_history_list", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_redirect_history_free" => {
+                let a0 = str_arg(self, &args[0])?;
+                self.out.push_str(&format!("  call void @runtime_requests_redirect_history_free(i8* {})\n", a0));
+                Ok(Some((self.fresh_temp(), Type::Unit)))
+            }
+            "requests_response_redirect_history" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_requests_response_redirect_history", &[a0]);
+                Ok(Some((v, t)))
+            }
             _ => Ok(None),
         }
     }

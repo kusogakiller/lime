@@ -2829,3 +2829,91 @@ fn emit_object_requests_basic_auth() {
         .collect();
     assert!(interp.len() >= 1, "requests basic_auth: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
 }
+
+#[test]
+fn emit_object_requests_session_config() {
+    write_stdlib_project(
+        "target/test_requests_session_config",
+        "fn main():\n    let s = requests_session_new()\n    requests_session_set_default_headers(s, [\"User-Agent\", \"Lime/1.0\"])\n    requests_session_set_timeout(s, 60)\n    requests_session_set_verify(s, false)\n    requests_session_set_redirect_limit(s, 5)\n    requests_session_set_default_params(s, [\"key\", \"value\"])\n    requests_session_free(s)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_session_config/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests session_config: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_cookie_jar() {
+    write_stdlib_project(
+        "target/test_requests_cookie_jar",
+        "fn main():\n    let jar = requests_cookie_jar_new()\n    requests_cookie_jar_add(jar, \"session=abc123\")\n    let hdr = requests_cookie_jar_get_cookie_header(jar, \"http://example.com\")\n    let val = requests_cookie_jar_get(jar, \"session\")\n    requests_cookie_jar_free(jar)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_cookie_jar/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests cookie_jar: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_redirect_history() {
+    write_stdlib_project(
+        "target/test_requests_redirect_history",
+        "fn main():\n    let hist = requests_redirect_history_new()\n    requests_redirect_history_add(hist, 302, \"http://example.com/new\", \"GET\")\n    let lst = requests_redirect_history_list(hist)\n    requests_redirect_history_free(hist)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_redirect_history/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests redirect_history: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_session_cookies() {
+    write_stdlib_project(
+        "target/test_requests_session_cookies",
+        "fn main():\n    let s = requests_session_new()\n    let cookies = requests_session_cookies(s)\n    requests_session_free(s)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_session_cookies/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests session_cookies: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}

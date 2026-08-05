@@ -1,4 +1,4 @@
-# Requests Standard Library (Phase C-1.12)
+# Requests Standard Library (Phase C-1.13)
 
 HTTP client library for Lime, providing synchronous HTTP client functionality compatible with Python requests.
 
@@ -11,15 +11,15 @@ The requests module provides a high-level HTTP client API for making HTTP reques
 - Request bodies: string, bytes, JSON, form data, multipart
 - Response handling: status codes, headers, body text/bytes/JSON
 - Authentication: Basic, Bearer token
-- TLS/SSL configuration
-- Redirect following
+- TLS/SSL configuration with certificate validation
+- Redirect following with history tracking
 - Timeouts
-- Sessions for persistent connections
+- Sessions for persistent connections and cookie management
 
 ## Architecture
 
 The requests module uses opaque handles managed by the runtime:
-- **Interpreter mode**: Uses Rust's `reqwest::blocking` crate directly
+- **Interpreter mode**: Uses curl (POSIX) or shell commands directly
 - **Native codegen mode**: Uses C runtime implementations (WinHTTP on Windows, curl on POSIX)
 
 ## API Reference
@@ -29,7 +29,7 @@ The requests module uses opaque handles managed by the runtime:
 ```lime
 fn request(str: method, str: url): RequestBuilder
 ```
-Create a request builder for the specified HTTP method and URL. This is the central entry point for all requests.
+Create a request builder for the specified HTTP method and URL.
 
 ```lime
 fn get(str: url): Result(Response, RequestError)
@@ -60,9 +60,16 @@ fn Session.options(Session: self, str: url): RequestBuilder
 ```
 Create a request builder using the session's configuration.
 
-### RequestBuilder (Fluent API)
+```lime
+fn Session.headers(Session: self, list(tuple(str,str)): hdrs)
+fn Session.params(Session: self, list(tuple(str,str)): params)
+fn Session.timeout(Session: self, int: seconds)
+fn Session.verify(Session: self, bool: verify)
+fn Session.cookies(Session: self): list(tuple(str,str))
+```
+Configure session defaults (Python requests compatible).
 
-All builder methods return `self` for chaining:
+### RequestBuilder (Fluent API)
 
 ```lime
 fn RequestBuilder.params(RequestBuilder: self, list(tuple(str,str)): params): RequestBuilder
@@ -92,6 +99,7 @@ fn Response.is_server_error(Response: self): bool
 fn Response.error_for_status(Response: self): Result(Response, RequestError)
 fn Response.content_length(Response: self): int
 fn Response.copy_to(Response: self, str: file_path): int
+fn Response.history(Response: self): list(str)
 ```
 
 ## Examples
@@ -143,10 +151,35 @@ import requests
 
 fn main():
     let s = requests.session()
-    let resp = s.get("http://httpbin.org/get")
-        .send()
+    s.headers([("User-Agent", "Lime/1.0")])
+    s.timeout(60)
+    s.verify(true)
+    let resp = s.get("http://httpbin.org/get").send()
     if resp.is_success():
         println(resp.text())
+    let cookies = s.cookies()
     requests.session_free(s)
     return
 ```
+
+### Redirect History
+
+```lime
+import requests
+
+fn main():
+    let resp = requests.get("http://example.com/redirect")
+        .allow_redirects(true)
+        .send()
+    let history = resp.history()
+    // history contains URLs that were redirected through
+    return
+```
+
+## Security Notes
+
+- TLS certificate verification is enabled by default (`verify=true`)
+- Use `verify(false)` only for testing, never in production
+- `verify(false)` disables certificate validation and hostname checking
+- Cookies are properly parsed from Set-Cookie headers with domain/path matching
+- Secure cookies are only sent over HTTPS

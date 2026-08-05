@@ -313,6 +313,8 @@ typedef struct RequestsCookieJar RequestsCookieJar;
 typedef struct RequestsStream RequestsStream;
 // Opaque handle for HTTP session
 typedef struct RequestsSession RequestsSession;
+// Opaque handle for redirect history
+typedef struct RequestsRedirectHistory RequestsRedirectHistory;
 
 // Creates a new HTTP client with default configuration.
 // Returns opaque pointer or NULL on error.
@@ -526,6 +528,22 @@ RequestsCookieJar* runtime_requests_cookie_jar_new(void);
 // Returns 0 on success, -1 on error.
 int runtime_requests_cookie_jar_add(RequestsCookieJar* jar, char* cookie_str);
 
+// Adds a parsed cookie to the jar.
+// Returns 0 on success, -1 on error.
+int runtime_requests_cookie_jar_add_parsed(RequestsCookieJar* jar, void* cookie);
+
+// Update cookie jar from response Set-Cookie headers.
+void runtime_requests_cookie_jar_update_from_response(RequestsCookieJar* jar, RequestsHeaderMap* resp_headers, char* request_url);
+
+// Build Cookie header string from matching cookies. Returns malloc'd string or NULL.
+char* runtime_requests_cookie_jar_get_cookie_header(RequestsCookieJar* jar, char* url);
+
+// Get all cookies as list of alternating name, value strings.
+LimeList runtime_requests_cookie_jar_get_all(RequestsCookieJar* jar);
+
+// Get a specific cookie value by name. Returns malloc'd string or NULL.
+char* runtime_requests_cookie_jar_get(RequestsCookieJar* jar, char* name);
+
 // Parses a cookie from string.
 // Returns malloc'd cookie string or NULL on error.
 char* runtime_requests_cookie_parse(char* cookie_str);
@@ -533,6 +551,9 @@ char* runtime_requests_cookie_parse(char* cookie_str);
 // Streams the response body to a file.
 // Returns bytes written or -1 on error.
 int64_t runtime_requests_response_copy_to(RequestsResponse* response, char* file_path);
+
+// Returns redirect history as LimeList of alternating url, status_code.
+LimeList runtime_requests_response_redirect_history(RequestsResponse* response);
 
 // Streams the response body in chunks.
 // Returns LimeList of byte buffers or NULL on error.
@@ -557,6 +578,23 @@ RequestsSession* runtime_requests_session_new(void);
 // Creates a request builder from a session.
 // Returns opaque pointer or NULL on error.
 RequestsRequestBuilder* runtime_requests_session_request(RequestsSession* session, char* method, char* url);
+
+// Session setters for Python requests compatibility
+int runtime_requests_session_set_default_headers(RequestsSession* session, LimeList headers);
+int runtime_requests_session_set_default_params(RequestsSession* session, LimeList params);
+int runtime_requests_session_set_timeout(RequestsSession* session, int64_t seconds);
+int runtime_requests_session_set_verify(RequestsSession* session, int verify);
+int runtime_requests_session_set_redirect_limit(RequestsSession* session, int64_t limit);
+int runtime_requests_session_set_disable_redirects(RequestsSession* session, int disable);
+
+// Get session cookies as list of alternating name, value strings.
+LimeList runtime_requests_session_cookies(RequestsSession* session);
+
+// Redirect history
+RequestsRedirectHistory* runtime_requests_redirect_history_new(void);
+void runtime_requests_redirect_history_add(RequestsRedirectHistory* history, int64_t status_code, char* url, char* method);
+LimeList runtime_requests_redirect_history_list(RequestsRedirectHistory* history);
+void runtime_requests_redirect_history_free(RequestsRedirectHistory* history);
 
 // Sets headers from a flat list of key/value string pairs.
 // list is a LimeList of char* strings in alternating key, value order.

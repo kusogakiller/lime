@@ -6699,6 +6699,107 @@ fn infer_type(
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
+                // Cookie jar operations
+                "requests_cookie_jar_add_parsed" => {
+                    if args.len() != 2 { return Err("requests_cookie_jar_add_parsed() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_cookie_jar_update_from_response" => {
+                    if args.len() != 3 { return Err("requests_cookie_jar_update_from_response() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_cookie_jar_get_cookie_header" => {
+                    if args.len() != 2 { return Err("requests_cookie_jar_get_cookie_header() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "requests_cookie_jar_get_all" => {
+                    if args.len() != 1 { return Err("requests_cookie_jar_get_all() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown) // list(str)
+                }
+                "requests_cookie_jar_get" => {
+                    if args.len() != 2 { return Err("requests_cookie_jar_get() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                // Session setters
+                "requests_session_set_default_headers" => {
+                    if args.len() != 2 { return Err("requests_session_set_default_headers() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_set_default_params" => {
+                    if args.len() != 2 { return Err("requests_session_set_default_params() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_set_timeout" => {
+                    if args.len() != 2 { return Err("requests_session_set_timeout() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_set_verify" => {
+                    if args.len() != 2 { return Err("requests_session_set_verify() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_set_redirect_limit" => {
+                    if args.len() != 2 { return Err("requests_session_set_redirect_limit() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_set_disable_redirects" => {
+                    if args.len() != 2 { return Err("requests_session_set_disable_redirects() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_cookies" => {
+                    if args.len() != 1 { return Err("requests_session_cookies() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown) // list(str)
+                }
+                // Redirect history
+                "requests_redirect_history_new" => {
+                    if !args.is_empty() { return Err("requests_redirect_history_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_redirect_history_add" => {
+                    if args.len() != 4 { return Err("requests_redirect_history_add() takes exactly 4 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    infer_type(&args[3], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_redirect_history_list" => {
+                    if args.len() != 1 { return Err("requests_redirect_history_list() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown) // list(str)
+                }
+                "requests_redirect_history_free" => {
+                    if args.len() != 1 { return Err("requests_redirect_history_free() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_response_redirect_history" => {
+                    if args.len() != 1 { return Err("requests_response_redirect_history() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown) // list(str)
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -11535,6 +11636,15 @@ fn is_runtime_builtin(name: &str) -> bool {
               | "requests_session_new" | "requests_session_request"
               | "requests_request_builder_set_headers" | "requests_request_builder_verify"
               | "requests_response_headers_list" | "requests_session_free"
+              | "requests_cookie_jar_add_parsed" | "requests_cookie_jar_update_from_response"
+              | "requests_cookie_jar_get_cookie_header" | "requests_cookie_jar_get_all" | "requests_cookie_jar_get"
+              | "requests_session_set_default_headers" | "requests_session_set_default_params"
+              | "requests_session_set_timeout" | "requests_session_set_verify"
+              | "requests_session_set_redirect_limit" | "requests_session_set_disable_redirects"
+              | "requests_session_cookies"
+              | "requests_redirect_history_new" | "requests_redirect_history_add"
+              | "requests_redirect_history_list" | "requests_redirect_history_free"
+              | "requests_response_redirect_history"
     )
 }
 
@@ -12684,6 +12794,252 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
                         Ok(Value::Array(list))
                     }
                     _ => Err("requests_response_headers_list() expects Response struct".to_string()),
+                }
+            }
+            // Cookie jar operations (interpreter mode)
+            "requests_cookie_jar_add_parsed" => {
+                if args.len() != 2 { return Err("requests_cookie_jar_add_parsed() takes exactly 2 arguments".to_string()); }
+                let jar = eval_expr(&args[0], env, defs)?;
+                let cookie = eval_expr(&args[1], env, defs)?;
+                match (jar, cookie) {
+                    (Value::Array(mut arr), c) => {
+                        arr.push(c);
+                        Ok(Value::Array(arr))
+                    }
+                    _ => Err("requests_cookie_jar_add_parsed() expects (Array, value)".to_string()),
+                }
+            }
+            "requests_cookie_jar_update_from_response" => {
+                if args.len() != 3 { return Err("requests_cookie_jar_update_from_response() takes exactly 3 arguments".to_string()); }
+                let _jar = eval_expr(&args[0], env, defs)?;
+                let _resp_headers = eval_expr(&args[1], env, defs)?;
+                let _url = eval_expr(&args[2], env, defs)?;
+                // In interpreter mode, cookie handling is done at the Lime level
+                Ok(Value::Option(None))
+            }
+            "requests_cookie_jar_get_cookie_header" => {
+                if args.len() != 2 { return Err("requests_cookie_jar_get_cookie_header() takes exactly 2 arguments".to_string()); }
+                let jar = eval_expr(&args[0], env, defs)?;
+                let _url = eval_expr(&args[1], env, defs)?;
+                match &jar {
+                    Value::Array(arr) => {
+                        // Build cookie header from array of alternating name, value strings
+                        let mut parts = Vec::new();
+                        let mut i = 0;
+                        while i + 1 < arr.len() {
+                            if let (Value::String(name), Value::String(val)) = (&arr[i], &arr[i+1]) {
+                                parts.push(format!("{}={}", name, val));
+                            }
+                            i += 2;
+                        }
+                        if parts.is_empty() {
+                            Ok(Value::Option(None))
+                        } else {
+                            Ok(Value::Option(Some(Box::new(Value::String(parts.join("; "))))))
+                        }
+                    }
+                    _ => Ok(Value::Option(None)),
+                }
+            }
+            "requests_cookie_jar_get_all" => {
+                if args.len() != 1 { return Err("requests_cookie_jar_get_all() takes exactly 1 argument".to_string()); }
+                let jar = eval_expr(&args[0], env, defs)?;
+                match jar {
+                    Value::Array(arr) => Ok(Value::Array(arr)),
+                    _ => Ok(Value::Array(vec![])),
+                }
+            }
+            "requests_cookie_jar_get" => {
+                if args.len() != 2 { return Err("requests_cookie_jar_get() takes exactly 2 arguments".to_string()); }
+                let jar = eval_expr(&args[0], env, defs)?;
+                let name = eval_expr(&args[1], env, defs)?;
+                match (&jar, &name) {
+                    (Value::Array(arr), Value::String(n)) => {
+                        let mut i = 0;
+                        while i + 1 < arr.len() {
+                            if let Value::String(k) = &arr[i] {
+                                if k == n {
+                                    return Ok(Some(arr[i+1].clone()));
+                                }
+                            }
+                            i += 2;
+                        }
+                        Ok(Value::Option(None))
+                    }
+                    _ => Ok(Value::Option(None)),
+                }
+            }
+            // Session setters (interpreter mode)
+            "requests_session_set_default_headers" => {
+                if args.len() != 2 { return Err("requests_session_set_default_headers() takes exactly 2 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let hdrs = eval_expr(&args[1], env, defs)?;
+                match (session, hdrs) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        // Merge headers into session
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "default_headers") {
+                            if let Value::Map(mut m) = fields[pos].1.clone() {
+                                let mut i = 0;
+                                while i + 1 < arr.len() {
+                                    if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
+                                        m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                                    }
+                                    i += 2;
+                                }
+                                fields[pos].1 = Value::Map(m);
+                            }
+                        } else {
+                            let mut m = HashMap::new();
+                            let mut i = 0;
+                            while i + 1 < arr.len() {
+                                if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
+                                    m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                                }
+                                i += 2;
+                            }
+                            fields.push(("default_headers".to_string(), Value::Map(m)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_session_set_default_headers() expects (Session, list)".to_string()),
+                }
+            }
+            "requests_session_set_default_params" => {
+                if args.len() != 2 { return Err("requests_session_set_default_params() takes exactly 2 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let params = eval_expr(&args[1], env, defs)?;
+                match (session, params) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "default_params") {
+                            fields[pos].1 = Value::Array(arr);
+                        } else {
+                            fields.push(("default_params".to_string(), Value::Array(arr)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_session_set_default_params() expects (Session, list)".to_string()),
+                }
+            }
+            "requests_session_set_timeout" => {
+                if args.len() != 2 { return Err("requests_session_set_timeout() takes exactly 2 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let timeout = eval_expr(&args[1], env, defs)?;
+                match (session, timeout) {
+                    (Value::Struct { mut fields, name }, Value::Int(t)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "timeout") {
+                            fields[pos].1 = Value::Int(t);
+                        } else {
+                            fields.push(("timeout".to_string(), Value::Int(t)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_session_set_timeout() expects (Session, int)".to_string()),
+                }
+            }
+            "requests_session_set_verify" => {
+                if args.len() != 2 { return Err("requests_session_set_verify() takes exactly 2 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let verify = eval_expr(&args[1], env, defs)?;
+                match (session, verify) {
+                    (Value::Struct { mut fields, name }, Value::Bool(v)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "verify") {
+                            fields[pos].1 = Value::Bool(v);
+                        } else {
+                            fields.push(("verify".to_string(), Value::Bool(v)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_session_set_verify() expects (Session, bool)".to_string()),
+                }
+            }
+            "requests_session_set_redirect_limit" => {
+                if args.len() != 2 { return Err("requests_session_set_redirect_limit() takes exactly 2 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let limit = eval_expr(&args[1], env, defs)?;
+                match (session, limit) {
+                    (Value::Struct { mut fields, name }, Value::Int(l)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "redirect_limit") {
+                            fields[pos].1 = Value::Int(l);
+                        } else {
+                            fields.push(("redirect_limit".to_string(), Value::Int(l)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_session_set_redirect_limit() expects (Session, int)".to_string()),
+                }
+            }
+            "requests_session_set_disable_redirects" => {
+                if args.len() != 2 { return Err("requests_session_set_disable_redirects() takes exactly 2 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let disable = eval_expr(&args[1], env, defs)?;
+                match (session, disable) {
+                    (Value::Struct { mut fields, name }, Value::Bool(d)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "disable_redirects") {
+                            fields[pos].1 = Value::Bool(d);
+                        } else {
+                            fields.push(("disable_redirects".to_string(), Value::Bool(d)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_session_set_disable_redirects() expects (Session, bool)".to_string()),
+                }
+            }
+            "requests_session_cookies" => {
+                if args.len() != 1 { return Err("requests_session_cookies() takes exactly 1 argument".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                match &session {
+                    Value::Struct { fields, .. } => {
+                        let cookies = fields.iter().find(|(k, _)| k == "cookies")
+                            .and_then(|(_, v)| match v { Value::Array(a) => Some(a.clone()), _ => None })
+                            .unwrap_or_default();
+                        Ok(Value::Array(cookies))
+                    }
+                    _ => Err("requests_session_cookies() expects Session struct".to_string()),
+                }
+            }
+            // Redirect history (interpreter mode)
+            "requests_redirect_history_new" => {
+                if !args.is_empty() { return Err("requests_redirect_history_new() takes no arguments".to_string()); }
+                Ok(Value::Array(vec![]))
+            }
+            "requests_redirect_history_add" => {
+                if args.len() != 4 { return Err("requests_redirect_history_add() takes exactly 4 arguments".to_string()); }
+                let history = eval_expr(&args[0], env, defs)?;
+                let _status_code = eval_expr(&args[1], env, defs)?;
+                let url = eval_expr(&args[2], env, defs)?;
+                let _method = eval_expr(&args[3], env, defs)?;
+                match (history, url) {
+                    (Value::Array(mut arr), Value::String(u)) => {
+                        arr.push(Value::String(u));
+                        Ok(Value::Array(arr))
+                    }
+                    _ => Err("requests_redirect_history_add() expects (Array, int, str, str)".to_string()),
+                }
+            }
+            "requests_redirect_history_list" => {
+                if args.len() != 1 { return Err("requests_redirect_history_list() takes exactly 1 argument".to_string()); }
+                let history = eval_expr(&args[0], env, defs)?;
+                match history {
+                    Value::Array(arr) => Ok(Value::Array(arr)),
+                    _ => Ok(Value::Array(vec![])),
+                }
+            }
+            "requests_redirect_history_free" => {
+                if args.len() != 1 { return Err("requests_redirect_history_free() takes exactly 1 argument".to_string()); }
+                let _ = eval_expr(&args[0], env, defs)?;
+                Ok(Value::Option(None))
+            }
+            "requests_response_redirect_history" => {
+                if args.len() != 1 { return Err("requests_response_redirect_history() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let history = fields.iter().find(|(k, _)| k == "redirect_history")
+                            .and_then(|(_, v)| match v { Value::Array(a) => Some(a.clone()), _ => None })
+                            .unwrap_or_default();
+                        Ok(Value::Array(history))
+                    }
+                    _ => Err("requests_response_redirect_history() expects Response struct".to_string()),
                 }
             }
             _ => return Ok(None),
