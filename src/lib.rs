@@ -234,6 +234,11 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
         }
 
         // 鬮ｫ・ｰ繝ｻ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｯ繝ｻ・ｦ驛｢譎｢・ｽ・ｻ
+        // Skip carriage returns so CRLF line endings are handled correctly.
+        if ch == '\r' {
+            i += 1;
+            continue;
+        }
         if ch == '\n' {
             emit(Token::Newline, line, col);
             line += 1;
