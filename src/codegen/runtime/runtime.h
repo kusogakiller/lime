@@ -10,6 +10,14 @@
 //
 // Functions taking/returning these structs by value follow the platform C ABI
 // (on x86_64-windows-msvc the result is returned through a hidden pointer).
+//
+// MEMORY MANAGEMENT FOUNDATION (Pre-Challenger Stabilization):
+// - No Garbage Collection (GC): Lime relies on deterministic, explicit lifetime management.
+// - Strings: Heap-allocated null-terminated `char*` managed via runtime string helpers.
+// - LimeList: Heap-allocated element buffers (`data`) with explicit length and capacity.
+// - Closures (LimeClosure): Captured environments (`env_ptr`) are heap-allocated and released upon closure destruction.
+// - Runtime Objects (RequestsSession, CookieJar, etc.): Opaque handles managed via explicit constructor/destructor pairs (e.g. `session_free`, `cookie_jar_free`).
+// - Ownership: Single-owner containers with explicit transfer or copy semantics; prevention of double-free and use-after-free through strict runtime boundaries.
 
 #ifndef LIME_RUNTIME_H
 #define LIME_RUNTIME_H
@@ -309,6 +317,10 @@ typedef struct RequestsMultipart RequestsMultipart;
 typedef struct RequestsTlsConfig RequestsTlsConfig;
 // Opaque handle for cookie jar
 typedef struct RequestsCookieJar RequestsCookieJar;
+// Internal: a single parsed cookie (not opaque)
+typedef struct RequestsCookie RequestsCookie;
+// Internal: a redirect history entry
+typedef struct RequestsRedirectEntry RequestsRedirectEntry;
 // Opaque handle for stream
 typedef struct RequestsStream RequestsStream;
 // Opaque handle for HTTP session

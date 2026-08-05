@@ -16,6 +16,14 @@
 //!   emitted as bare LLVM operands (e.g. `add i64 %t, 1`, `store i64 5,
 //!   i64* %t`), never as `add i64 %t, i64 1` or `store i64 i64 5, ...`.
 
+
+fn unique_test_dir(name: &str) -> &'static str {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+    Box::leak(format!("target/test_reg_{}_{}_{}", std::process::id(), count, name).into_boxed_str())
+}
+
 use std::process::Command;
 
 /// Run a `lime` subcommand against a `citrus.toml` and return combined
@@ -62,7 +70,7 @@ fn llvm_toolchain_available() -> bool {
 #[test]
 fn emit_object_bare_return_compiles_and_runs() {
     use std::fs;
-    let dir = "target/test_emit_bare_return";
+    let dir = unique_test_dir("emit_bare_return");
     write_project(dir, "fn main():\n    println(\"hi\")\n    return\n");
 
     let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
@@ -115,7 +123,7 @@ fn emit_object_bare_return_compiles_and_runs() {
 #[test]
 fn emit_object_list_add_set_runs() {
     use std::fs;
-    let dir = "target/test_emit_list_add_set";
+    let dir = unique_test_dir("emit_list_add_set");
     write_project(
         dir,
         "fn main():\n    let nums = [1, 2, 3]\n    nums.add(4)\n    println(nums.len())\n    nums.set(0, 9)\n    println(nums.get(0))\n    return\n",
@@ -164,7 +172,7 @@ fn emit_object_list_add_set_runs() {
 #[test]
 fn emit_object_option_result_runs() {
     use std::fs;
-    let dir = "target/test_emit_option_result";
+    let dir = unique_test_dir("emit_option_result");
     write_stdlib_project(
         dir,
         "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.is_some(some))\n    println(option.is_none(some))\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, 0))\n    println(option.unwrap(some))\n    let ok = Success(10)\n    let err = Error(\"boom\")\n    println(result.is_ok(ok))\n    println(result.is_err(ok))\n    println(result.is_err(err))\n    println(result.unwrap_or(ok, 0))\n    println(result.unwrap_or(err, 0))\n    println(result.unwrap(ok))\n    return\n",
@@ -250,7 +258,7 @@ fn emit_object_option_result_runs() {
 #[test]
 fn emit_object_str_option_result() {
     use std::fs;
-    let dir = "target/test_emit_str_option_result";
+    let dir = unique_test_dir("emit_str_option_result");
     write_stdlib_project(
         dir,
         "fn main():\n    let some = Some(5)\n    let none = None\n    let ok = Success(10)\n    let err = Error(42)\n    println(str(some))\n    println(str(none))\n    println(str(ok))\n    println(str(err))\n    return\n",
@@ -308,7 +316,7 @@ fn emit_object_str_option_result() {
 #[test]
 fn emit_object_nested_generic_mangling() {
     use std::fs;
-    let dir = "target/test_emit_nested_mangling";
+    let dir = unique_test_dir("emit_nested_mangling");
     write_stdlib_project(
         dir,
         "fn main():\n    let nested = Some(Some(5))\n    println(option.unwrap(option.unwrap(nested)))\n    println(option.unwrap_or(option.unwrap(nested), 0))\n    return\n",
@@ -358,13 +366,13 @@ fn emit_object_repeated_build_is_symbol_stable() {
     let src = "fn main():\n    let some = Some(5)\n    let none = None\n    println(option.unwrap_or(some, 0))\n    println(option.unwrap_or(none, \"d\"))\n    println(option.unwrap(Some(Some(5))))\n    return\n";
 
     // Build the identical source twice into fresh project dirs.
-    let dir = "target/test_emit_repeat_build";
+    let dir = unique_test_dir("emit_repeat_build");
     write_stdlib_project(dir, src);
     let _ = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
     let ir1 = fs::read_to_string(&format!("{}.ll", dir)).unwrap_or_default();
     assert!(!ir1.is_empty(), "first build must emit IR");
 
-    let dir2 = "target/test_emit_repeat_build2";
+    let dir2 = unique_test_dir("emit_repeat_build2");
     write_stdlib_project(dir2, src);
     let _ = lime_cmd("build", &format!("{}/citrus.toml", dir2), &["--emit-ll"]);
     let ir2 = fs::read_to_string(&format!("{}.ll", dir2)).unwrap_or_default();
@@ -411,7 +419,7 @@ fn emit_object_repeated_build_is_symbol_stable() {
 #[test]
 fn emit_object_math_floor_ceil_round_negatives() {
     use std::fs;
-    let dir = "target/test_emit_math_negatives";
+    let dir = unique_test_dir("emit_math_negatives");
     write_stdlib_project(
         dir,
         "fn main():\n    println(math.floor(1.8))\n    println(math.floor(-1.8))\n    println(math.ceil(1.2))\n    println(math.ceil(-1.2))\n    println(math.round(1.5))\n    println(math.round(-1.5))\n    println(math.round(2.5))\n    println(math.round(-2.5))\n    println(math.round(0.5))\n    println(math.round(-0.5))\n    println(math.round(1.4))\n    println(math.round(-1.6))\n    return\n",
@@ -464,7 +472,7 @@ fn emit_object_math_floor_ceil_round_negatives() {
 /// must lower correctly through interpreter, type-checker, codegen, and C runtime.
 #[test]
 fn emit_object_math_new_builtins_trig_exp_log_constants() {
-    let dir = "target/test_emit_math_new";
+    let dir = unique_test_dir("emit_math_new");
     write_stdlib_project(
         dir,
         "fn main():\n    println(math.trunc(3.7))\n    println(math.trunc(-3.7))\n    println(math.trunc(0.0))\n    println(math.exp(0.0))\n    println(math.exp(1.0))\n    println(math.log(1.0))\n    println(math.log(math.e()))\n    println(math.log10(100.0))\n    println(math.log10(1.0))\n    println(math.sin(0.0))\n    println(math.cos(0.0))\n    println(math.tan(0.0))\n    println(math.asin(0.0))\n    println(math.acos(1.0))\n    println(math.atan(0.0))\n    println(math.pi() > 3.14)\n    println(math.pi() < 3.15)\n    println(math.e() > 2.71)\n    println(math.e() < 2.72)\n    return\n",
@@ -532,7 +540,7 @@ fn emit_object_math_new_builtins_trig_exp_log_constants() {
 #[test]
 fn emit_object_display_println_option_result() {
     use std::fs;
-    let dir = "target/test_display_println_state";
+    let dir = unique_test_dir("display_println_state");
     write_stdlib_project(
         dir,
         "fn main():\n    println(Some(1))\n    println(None)\n    println(Success(42))\n    println(Error(7))\n    println(str(Some(5)))\n    println(str(Success(10)))\n    println(str(Error(42)))\n    return\n",
@@ -596,7 +604,7 @@ fn emit_object_display_println_option_result() {
 #[test]
 fn emit_object_unwrap_panic_and_fallback() {
     use std::fs;
-    let dir = "target/test_unwrap_panic";
+    let dir = unique_test_dir("unwrap_panic");
     write_stdlib_project(
         dir,
         "fn main():\n    println(option.unwrap_or(None, 99))\n    println(result.unwrap_or(Error(42), 77))\n    println(option.unwrap(Some(5)))\n    println(result.unwrap(Success(10)))\n    println(\"before_panic\")\n    panic(\"test_panic_message\")\n    println(\"after_panic\")\n    return\n",
@@ -671,7 +679,7 @@ fn emit_object_unwrap_panic_and_fallback() {
 #[test]
 fn emit_object_unwrap_or_parity() {
     use std::fs;
-    let dir = "target/test_unwrap_or_parity";
+    let dir = unique_test_dir("unwrap_or_parity");
     write_stdlib_project(
         dir,
         "fn main():\n    println(option.unwrap_or(Some(1), 0))\n    println(option.unwrap_or(None, 0))\n    println(result.unwrap_or(Success(2), 0))\n    println(result.unwrap_or(Error(3), 0))\n    println(option.unwrap(Some(4)))\n    println(result.unwrap(Success(5)))\n    return\n",
@@ -726,7 +734,7 @@ fn emit_object_unwrap_or_parity() {
 #[test]
 fn emit_object_stdlib_all_packages_smoke() {
     use std::fs;
-    let dir = "target/test_stdlib_all_packages";
+    let dir = unique_test_dir("stdlib_all_packages");
     write_stdlib_project(
         dir,
         "fn main():\n    // string\n    println(string.len(\"hello\"))\n    println(string.trim(\"  x  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.contains(\"hello\", \"ell\"))\n    // math\n    println(math.abs(-3.0))\n    println(math.sqrt(9.0))\n    println(math.floor(2.7))\n    println(math.ceil(2.3))\n    println(math.round(2.5))\n    // option\n    let o = Some(42)\n    println(option.is_some(o))\n    println(option.unwrap_or(o, 0))\n    // result\n    let r = Success(99)\n    println(result.is_ok(r))\n    println(result.unwrap_or(r, 0))\n    // time\n    println(time.now().secs >= 0.0)\n    // io\n    io.println(\"io_ok\")\n    // fs\n    println(fs.write(\"target/test_smoke_io.txt\", \"hi\"))\n    println(fs.read(\"target/test_smoke_io.txt\"))\n    println(fs.exists(\"target/test_smoke_io.txt\"))\n    println(fs.remove(\"target/test_smoke_io.txt\"))\n    return\n",
@@ -801,12 +809,12 @@ fn emit_object_stdlib_build_reproducibility() {
     use std::fs;
     let src = "fn main():\n    println(math.sqrt(16.0))\n    println(option.unwrap_or(Some(1), 0))\n    println(option.unwrap_or(None, -1))\n    return\n";
 
-    let dir1 = "target/test_stdlib_repro1";
+    let dir1 = unique_test_dir("stdlib_repro1");
     write_stdlib_project(dir1, src);
     let _ = lime_cmd("build", &format!("{}/citrus.toml", dir1), &["--emit-ll"]);
     let ir1 = fs::read_to_string(format!("{}.ll", dir1)).unwrap_or_default();
 
-    let dir2 = "target/test_stdlib_repro2";
+    let dir2 = unique_test_dir("stdlib_repro2");
     write_stdlib_project(dir2, src);
     let _ = lime_cmd("build", &format!("{}/citrus.toml", dir2), &["--emit-ll"]);
     let ir2 = fs::read_to_string(format!("{}.ll", dir2)).unwrap_or_default();
@@ -861,7 +869,7 @@ fn write_stdlib_project(dir: &str, source: &str) {
 #[test]
 fn emit_object_stdlib_builtins_lower_and_run() {
     use std::fs;
-    let dir = "target/test_emit_stdlib_native";
+    let dir = unique_test_dir("emit_stdlib_native");
     write_stdlib_project(
         dir,
         "fn main():\n    println(string.trim(\"  hi  \"))\n    println(string.to_upper(\"abc\"))\n    println(string.to_lower(\"AbC\"))\n    println(string.replace(\"aaa\", \"a\", \"b\"))\n    println(string.len(\"hello\"))\n    println(string.byte_len(\"hello\"))\n    println(string.contains(\"hello\", \"ell\"))\n    println(string.starts_with(\"hello\", \"he\"))\n    println(string.ends_with(\"hello\", \"lo\"))\n    println(string.repeat(\"ab\", 3))\n    println(string.slice(\"hello\", 1, 3))\n    let parts = string.split(\"a,b,c\", \",\")\n    println(math.sqrt(16.0))\n    println(math.abs(-3.0))\n    println(math.max(1.0, 7.0))\n    println(math.min(1.0, 7.0))\n    println(math.clamp(5.0, 0.0, 2.0))\n    println(math.pow(2.0, 3.0))\n    println(math.floor(3.7))\n    println(math.ceil(3.2))\n    println(math.round(3.5))\n    println(time.now().secs > 0.0)\n    println(time.elapsed(time.now()).secs >= 0.0)\n    println(time.sleep(0.01))\n    io.println(\"io test\")\n    let entries = fs.list_dir(\"target\")\n    println(fs.write(\"target/test_stdlib_native_io.txt\", \"lime fs ok\"))\n    println(fs.read(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    println(fs.size(\"target/test_stdlib_native_io.txt\") == 10)\n    println(fs.metadata(\"target/test_stdlib_native_io.txt\").is_file)\n    println(fs.remove(\"target/test_stdlib_native_io.txt\"))\n    println(fs.exists(\"target/test_stdlib_native_io.txt\"))\n    return\n",
@@ -977,7 +985,7 @@ fn emit_object_stdlib_builtins_lower_and_run() {
 #[test]
 fn emit_object_let_literal_runs() {
     use std::fs;
-    let dir = "target/test_emit_let_literal";
+    let dir = unique_test_dir("emit_let_literal");
     write_project(
         dir,
         "fn main():\n    let a = 5\n    let b = a + 1\n    println(b)\n    return\n",
@@ -1035,7 +1043,7 @@ fn emit_object_let_literal_runs() {
 #[test]
 fn emit_object_let_literal_binop_runs() {
     use std::fs;
-    let dir = "target/test_emit_let_literal_binop";
+    let dir = unique_test_dir("emit_let_literal_binop");
     write_project(dir, "fn main():\n    let x = 10\n    println(x + 20)\n    return\n");
 
     let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
@@ -1086,7 +1094,7 @@ fn emit_object_let_literal_binop_runs() {
 #[test]
 fn emit_object_nested_literal_binop_runs() {
     use std::fs;
-    let dir = "target/test_emit_nested_literal_binop";
+    let dir = unique_test_dir("emit_nested_literal_binop");
     write_project(
         dir,
         "fn main():\n    println((1 + 2) * (3 + 4))\n    return\n",
@@ -1141,7 +1149,7 @@ fn emit_object_nested_literal_binop_runs() {
 #[test]
 fn emit_object_mixed_literal_binop_runs() {
     use std::fs;
-    let dir = "target/test_emit_mixed_literal_binop";
+    let dir = unique_test_dir("emit_mixed_literal_binop");
     write_project(
         dir,
         "fn add(int: x):\n    return x + 1\n\nfn main():\n    println(add(41))\n    return\n",
@@ -1194,7 +1202,7 @@ fn emit_object_mixed_literal_binop_runs() {
 #[test]
 fn emit_object_reassignment_runs() {
     use std::fs;
-    let dir = "target/test_emit_reassignment";
+    let dir = unique_test_dir("emit_reassignment");
     write_project(
         dir,
         "fn main():\n    let mut x = 1\n    x = x + 1\n    println(x)\n    return\n",
@@ -1248,7 +1256,7 @@ fn emit_object_reassignment_runs() {
 #[test]
 fn emit_object_refuses_unlowered_function() {
     use std::fs;
-    let dir = "target/test_emit_refuse_unlowered";
+    let dir = unique_test_dir("emit_refuse_unlowered");
     write_project(
         dir,
         "fn main():\n    let strs = [\"a\", \"b\"]\n    println(strs.get(0))\n    return\n",
@@ -1279,7 +1287,7 @@ fn emit_object_refuses_unlowered_function() {
 #[test]
 fn emit_object_await_int_runs() {
     use std::fs;
-    let dir = "target/test_emit_await_int";
+    let dir = unique_test_dir("emit_await_int");
     write_project(
         dir,
         "lime add1(int: n):\n    return n + n\n\nfn main():\n    let x = await add1(21)\n    println(x)\n    return\n",
@@ -1343,7 +1351,7 @@ fn emit_object_await_int_runs() {
 #[test]
 fn emit_object_await_string_runs() {
     use std::fs;
-    let dir = "target/test_emit_await_string";
+    let dir = unique_test_dir("emit_await_string");
     write_project(
         dir,
         "lime greet(str: name):\n    return \"hi \" + name\n\nfn main():\n    let g = await greet(\"lime\")\n    println(g)\n    return\n",
@@ -1407,7 +1415,7 @@ fn emit_object_await_string_runs() {
 #[test]
 fn emit_object_await_nested_runs() {
     use std::fs;
-    let dir = "target/test_emit_await_nested";
+    let dir = unique_test_dir("emit_await_nested");
     write_project(
         dir,
         "lime inner(int: n):\n    return n * n\n\nlime outer(int: n):\n    return await inner(n) + n\n\nfn main():\n    let x = await outer(6)\n    println(x)\n    return\n",
@@ -1476,7 +1484,7 @@ fn emit_object_await_nested_runs() {
 #[test]
 fn emit_object_fn_reference() {
     use std::fs;
-    let dir = "target/test_fn_reference";
+    let dir = unique_test_dir("fn_reference");
     write_project(
         dir,
         "fn add(int: a, int: b):\n    return a + b\nfn main():\n    let f = add\n    println(f(3, 4))\n    return\n",
@@ -1501,7 +1509,7 @@ fn emit_object_fn_reference() {
 #[test]
 fn emit_object_anonymous_fn() {
     use std::fs;
-    let dir = "target/test_anonymous_fn";
+    let dir = unique_test_dir("anonymous_fn");
     write_project(
         dir,
         "fn main():\n    let f = fn(int: a, int: b):\n        return a + b\n    println(f(10, 20))\n    let g = fn(int: x):\n        return x * 2\n    println(g(5))\n    return\n",
@@ -1526,7 +1534,7 @@ fn emit_object_anonymous_fn() {
 #[test]
 fn emit_object_closure_capture() {
     use std::fs;
-    let dir = "target/test_closure_capture";
+    let dir = unique_test_dir("closure_capture");
     write_project(
         dir,
         "fn make_adder(int: x):\n    return fn(int: y):\n        return x + y\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    let add10 = make_adder(10)\n    println(add10(7))\n    println(add5(100))\n    return\n",
@@ -1553,7 +1561,7 @@ fn emit_object_closure_capture() {
 #[test]
 fn emit_object_fn_reference_native() {
     use std::fs;
-    let dir = "target/test_fn_reference_native";
+    let dir = unique_test_dir("fn_reference_native");
     write_project(
         dir,
         "fn add(int: a, int: b):\n    return a + b\nfn main():\n    let f = add\n    println(f(3, 4))\n    return\n",
@@ -1591,7 +1599,7 @@ fn emit_object_fn_reference_native() {
 #[test]
 fn emit_object_anonymous_fn_native() {
     use std::fs;
-    let dir = "target/test_anonymous_fn_native";
+    let dir = unique_test_dir("anonymous_fn_native");
     write_project(
         dir,
         "fn main():\n    let f = fn(int: a, int: b):\n        return a + b\n    println(f(10, 20))\n    let g = fn(int: x):\n        return x * 2\n    println(g(5))\n    return\n",
@@ -1628,7 +1636,7 @@ fn emit_object_anonymous_fn_native() {
 /// Phase B-2.3: untyped anonymous function params — fn(x) syntax.
 #[test]
 fn emit_object_untyped_anonymous_fn() {
-    let dir = "target/test_untyped_anonymous_fn";
+    let dir = unique_test_dir("untyped_anonymous_fn");
     write_project(
         dir,
         "fn main():\n    let f = fn(x):\n        return x * 2\n    println(f(4))\n    return\n",
@@ -1651,7 +1659,7 @@ fn emit_object_untyped_anonymous_fn() {
 /// Phase B-2.3: untyped function params in fn definition.
 #[test]
 fn emit_object_untyped_fn_params() {
-    let dir = "target/test_untyped_fn_params";
+    let dir = unique_test_dir("untyped_fn_params");
     write_project(
         dir,
         "fn apply(f, x):\n    return f(x)\nfn add_one(x):\n    return x + 1\nfn main():\n    println(apply(add_one, 10))\n    return\n",
@@ -1675,7 +1683,7 @@ fn emit_object_untyped_fn_params() {
 /// Native limitation: untyped function parameters lose Type::Fn in codegen env.
 #[test]
 fn emit_object_higher_order_fn() {
-    let dir = "target/test_higher_order_fn";
+    let dir = unique_test_dir("higher_order_fn");
     write_project(
         dir,
         "fn apply(f, x):\n    return f(x)\nfn add_one(x):\n    return x + 1\nfn main():\n    println(apply(add_one, 10))\n    return\n",
@@ -1699,7 +1707,7 @@ fn emit_object_higher_order_fn() {
 #[test]
 fn emit_object_closure_return_native() {
     use std::fs;
-    let dir = "target/test_closure_capture";
+    let dir = unique_test_dir("closure_capture");
     write_project(
         dir,
         "fn make_adder(n):\n    return fn(x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    let add10 = make_adder(10)\n    println(add5(3))\n    println(add10(7))\n    println(add5(100))\n    return\n",
@@ -1735,7 +1743,7 @@ fn emit_object_closure_return_native() {
 #[test]
 fn emit_object_nested_closure_native() {
     use std::fs;
-    let dir = "target/test_nested_closure";
+    let dir = unique_test_dir("nested_closure");
     write_project(
         dir,
         "fn make_multiplier(n):\n    return fn(x):\n        return x * n\nfn main():\n    let triple = make_multiplier(3)\n    let double = make_multiplier(2)\n    println(triple(5))\n    println(double(5))\n    return\n",
@@ -1770,7 +1778,7 @@ fn emit_object_nested_closure_native() {
 /// Phase B-2.3: repeat build symbol stability — same source produces identical IR.
 #[test]
 fn emit_object_closure_symbol_stability() {
-    let dir = "target/test_closure_symbol_stability";
+    let dir = unique_test_dir("closure_symbol_stability");
     write_project(
         dir,
         "fn make_adder(n):\n    return fn(x):\n        return x + n\nfn main():\n    let add5 = make_adder(5)\n    println(add5(3))\n    return\n",
@@ -1784,7 +1792,7 @@ fn emit_object_closure_symbol_stability() {
 #[test]
 fn emit_object_string_is_empty() {
     use std::fs;
-    let dir = "target/test_string_is_empty";
+    let dir = unique_test_dir("string_is_empty");
     write_stdlib_project(
         dir,
         "fn main():\n    println(string.is_empty(\"\"))\n    println(string.is_empty(\"a\"))\n    return\n",
@@ -1820,7 +1828,7 @@ fn emit_object_string_is_empty() {
 #[test]
 fn emit_object_string_find() {
     use std::fs;
-    let dir = "target/test_string_find";
+    let dir = unique_test_dir("string_find");
     write_stdlib_project(
         dir,
         "fn main():\n    println(string.find(\"hello\", \"ll\"))\n    println(string.find(\"hello\", \"xyz\"))\n    return\n",
@@ -1856,7 +1864,7 @@ fn emit_object_string_find() {
 #[test]
 fn emit_object_string_count() {
     use std::fs;
-    let dir = "target/test_string_count";
+    let dir = unique_test_dir("string_count");
     write_stdlib_project(
         dir,
         "fn main():\n    println(string.count(\"hello\", \"l\"))\n    println(string.count(\"hello\", \"x\"))\n    return\n",
@@ -1892,7 +1900,7 @@ fn emit_object_string_count() {
 #[test]
 fn emit_object_string_trim_start_end() {
     use std::fs;
-    let dir = "target/test_string_trim_start_end";
+    let dir = unique_test_dir("string_trim_start_end");
     write_stdlib_project(
         dir,
         "fn main():\n    let s = \"  abc  \"\n    println(string.trim_start(s))\n    println(string.trim_end(s))\n    return\n",
@@ -1928,7 +1936,7 @@ fn emit_object_string_trim_start_end() {
 #[test]
 fn emit_object_string_join() {
     use std::fs;
-    let dir = "target/test_string_join";
+    let dir = unique_test_dir("string_join");
     write_stdlib_project(
         dir,
         "fn main():\n    let parts = string.split(\"a,b,c\", \",\")\n    println(string.join(\"-\", parts))\n    return\n",
@@ -1964,7 +1972,7 @@ fn emit_object_string_join() {
 #[test]
 fn emit_object_string_to_int_float() {
     use std::fs;
-    let dir = "target/test_string_to_int_float";
+    let dir = unique_test_dir("string_to_int_float");
     write_stdlib_project(
         dir,
         "fn main():\n    println(string.to_int(\"42\"))\n    println(string.to_int(\"abc\"))\n    println(string.to_float(\"3.14\"))\n    println(string.to_float(\"xyz\"))\n    return\n",
@@ -2000,7 +2008,7 @@ fn emit_object_string_to_int_float() {
 #[test]
 fn emit_object_string_equals_compare() {
     use std::fs;
-    let dir = "target/test_string_equals_compare";
+    let dir = unique_test_dir("string_equals_compare");
     write_stdlib_project(
         dir,
         "fn main():\n    println(string.equals(\"a\", \"a\"))\n    println(string.equals(\"a\", \"b\"))\n    println(string.compare(\"a\", \"b\"))\n    println(string.compare(\"b\", \"a\"))\n    println(string.compare(\"a\", \"a\"))\n    return\n",
@@ -2036,7 +2044,7 @@ fn emit_object_string_equals_compare() {
 #[test]
 fn emit_object_list_builtins() {
     use std::fs;
-    let dir = "target/test_list_builtins";
+    let dir = unique_test_dir("list_builtins");
     write_stdlib_project(
         dir,
         "fn main():\n    let xs = [1, 2, 3]\n    println(list_insert(xs, 1, 99))\n    println(list_get(xs, 0))\n    println(list_get(list_insert(xs, 1, 99), 2))\n    println(len(list_clear(xs)))\n    println(list_sort([3, 1, 2]))\n    println(len(list_clone([1, 2, 3])))\n    return\n",
@@ -2061,7 +2069,7 @@ fn emit_object_list_builtins() {
 #[test]
 fn emit_object_map_builtins() {
     use std::fs;
-    let dir = "target/test_map_builtins";
+    let dir = unique_test_dir("map_builtins");
     write_stdlib_project(
         dir,
         "fn main():\n    let m = map_insert(map_empty(), 1, 100)\n    println(map_get(m, 1))\n    println(map_len(m))\n    println(map_contains_key(m, 1))\n    println(map_is_empty(map_clear(m)))\n    return\n",
@@ -2086,7 +2094,7 @@ fn emit_object_map_builtins() {
 #[test]
 fn emit_object_set_builtins() {
     use std::fs;
-    let dir = "target/test_set_builtins";
+    let dir = unique_test_dir("set_builtins");
     write_stdlib_project(
         dir,
         "fn main():\n    let s = set_add(set_empty(), 1)\n    let s2 = set_add(s, 2)\n    println(set_len(s2))\n    println(set_contains(s2, 1))\n    println(set_contains(s2, 3))\n    println(set_is_empty(set_clear(s2)))\n    return\n",
@@ -2111,7 +2119,7 @@ fn emit_object_set_builtins() {
 #[test]
 fn emit_object_queue_builtins() {
     use std::fs;
-    let dir = "target/test_queue_builtins";
+    let dir = unique_test_dir("queue_builtins");
     write_stdlib_project(
         dir,
         "fn main():\n    let q = queue_push(queue_empty(), 1)\n    let q2 = queue_push(q, 2)\n    println(queue_front(q2))\n    println(queue_back(q2))\n    println(queue_pop(q2))\n    println(queue_len(q2))\n    println(queue_is_empty(q2))\n    return\n",
@@ -2136,7 +2144,7 @@ fn emit_object_queue_builtins() {
 #[test]
 fn emit_object_stack_builtins() {
     use std::fs;
-    let dir = "target/test_stack_builtins";
+    let dir = unique_test_dir("stack_builtins");
     write_stdlib_project(
         dir,
         "fn main():\n    let s = stack_push(stack_empty(), 1)\n    let s2 = stack_push(s, 2)\n    println(stack_peek(s2))\n    println(stack_pop(s2))\n    println(stack_len(s2))\n    println(stack_is_empty(s2))\n    return\n",
@@ -2161,7 +2169,7 @@ fn emit_object_stack_builtins() {
 #[test]
 fn emit_object_fs_copy_rename_isfile_isdir_rmdir() {
     use std::fs;
-    let dir = "target/test_fs_copy_rename";
+    let dir = unique_test_dir("fs_copy_rename");
     let _ = fs::remove_dir_all(dir);
     write_stdlib_project(
         dir,
@@ -2187,7 +2195,7 @@ fn emit_object_fs_copy_rename_isfile_isdir_rmdir() {
 #[test]
 fn emit_object_fs_read_write_lines() {
     use std::fs;
-    let dir = "target/test_fs_lines";
+    let dir = unique_test_dir("fs_lines");
     let _ = fs::remove_dir_all(dir);
     write_stdlib_project(
         dir,
@@ -2213,7 +2221,7 @@ fn emit_object_fs_read_write_lines() {
 #[test]
 fn emit_object_io_eprintln_write_stdout() {
     use std::fs;
-    let dir = "target/test_io_eprintln";
+    let dir = unique_test_dir("io_eprintln");
     let _ = fs::remove_dir_all(dir);
     write_stdlib_project(
         dir,
@@ -2240,7 +2248,7 @@ fn emit_object_io_eprintln_write_stdout() {
 fn emit_object_io_read_line() {
     use std::fs;
     use std::io::Write;
-    let dir = "target/test_io_read_line";
+    let dir = unique_test_dir("io_read_line");
     let _ = fs::remove_dir_all(dir);
     write_stdlib_project(
         dir,
@@ -2278,7 +2286,7 @@ fn emit_object_io_read_line() {
 /// Tests parsing, serialization, access, conversion, mutation, and variable storage.
 #[test]
 fn emit_object_json_type_and_builtins() {
-    let dir = "target/test_emit_json";
+    let dir = unique_test_dir("emit_json");
     write_stdlib_project(
         dir,
         // Parse various JSON types
@@ -2368,7 +2376,7 @@ fn emit_object_json_type_and_builtins() {
 /// Phase C-1.6: Json stored in variables and passed to functions.
 #[test]
 fn emit_object_json_variable_and_function_passing() {
-    let dir = "target/test_emit_json_vars";
+    let dir = unique_test_dir("emit_json_vars");
     write_stdlib_project(
         dir,
         "fn get_name(json: obj):\n\
@@ -2406,7 +2414,7 @@ fn emit_object_json_variable_and_function_passing() {
 /// Phase C-1.6: Option(Json) works correctly.
 #[test]
 fn emit_object_json_option_type() {
-    let dir = "target/test_emit_json_option";
+    let dir = unique_test_dir("emit_json_option");
     write_stdlib_project(
         dir,
         "fn main():\n\
@@ -2440,7 +2448,7 @@ fn emit_object_json_option_type() {
 /// Covers construction, extraction, equality, and, or, map, and nested types.
 #[test]
 fn emit_object_option_result_builtins_comprehensive() {
-    let dir = "target/test_emit_option_result_comprehensive";
+    let dir = unique_test_dir("emit_option_result_comprehensive");
     write_stdlib_project(
         dir,
         "fn main():\n\

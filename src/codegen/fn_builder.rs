@@ -2527,9 +2527,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
                 let cmp = self.fresh_temp();
                 self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
-                let ext = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
-                Ok(Some((ext, Type::Bool)))
+                Ok(Some((cmp, Type::Bool)))
             }
             "option_is_none" => {
                 let v = any_arg(self, &args[0])?;
@@ -2537,9 +2535,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
                 let cmp = self.fresh_temp();
                 self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
-                let ext = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
-                Ok(Some((ext, Type::Bool)))
+                Ok(Some((cmp, Type::Bool)))
             }
             "option_extract" => {
                 let v = any_arg(self, &args[0])?;
@@ -2552,7 +2548,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_none, panic_bb, ok_bb));
                 self.out.push_str(&format!("{}:\n", panic_bb));
                 let msg = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds [35 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
+                self.out.push_str(&format!("  {} = getelementptr inbounds [31 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
                 self.out.push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
                 self.out.push_str("  unreachable\n");
                 self.out.push_str(&format!("{}:\n", ok_bb));
@@ -2571,7 +2567,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload, self.bare_value(&v)));
                 let result = self.fresh_temp();
                 self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", result, is_some, payload, self.bare_value(&default)));
-                Ok(Some((result, Type::Unknown)))
+                Ok(Some((result, Type::Int)))
             }
             "option_and" => {
                 let a = any_arg(self, &args[0])?;
@@ -2654,9 +2650,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = and i1 {}, {}\n", payload_check, both_some_and_eq, payloads_eq));
                 let result = self.fresh_temp();
                 self.out.push_str(&format!("  {} = or i1 {}, {}\n", result, both_none_and_eq, payload_check));
-                let ext = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, result));
-                Ok(Some((ext, Type::Bool)))
+                Ok(Some((result, Type::Bool)))
             }
             // ===== Result builtins =====
             "result_success" => {
@@ -2695,9 +2689,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
                 let cmp = self.fresh_temp();
                 self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
-                let ext = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
-                Ok(Some((ext, Type::Bool)))
+                Ok(Some((cmp, Type::Bool)))
             }
             "result_is_error" => {
                 let v = any_arg(self, &args[0])?;
@@ -2705,9 +2697,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
                 let cmp = self.fresh_temp();
                 self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
-                let ext = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, cmp));
-                Ok(Some((ext, Type::Bool)))
+                Ok(Some((cmp, Type::Bool)))
             }
             "result_extract" => {
                 let v = any_arg(self, &args[0])?;
@@ -2720,7 +2710,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_error, panic_bb, ok_bb));
                 self.out.push_str(&format!("{}:\n", panic_bb));
                 let msg = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds [35 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
+                self.out.push_str(&format!("  {} = getelementptr inbounds [31 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
                 self.out.push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
                 self.out.push_str("  unreachable\n");
                 self.out.push_str(&format!("{}:\n", ok_bb));
@@ -2739,7 +2729,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload, self.bare_value(&v)));
                 let result = self.fresh_temp();
                 self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", result, is_success, payload, self.bare_value(&default)));
-                Ok(Some((result, Type::Unknown)))
+                Ok(Some((result, Type::Int)))
             }
             "result_and" => {
                 let a = any_arg(self, &args[0])?;
@@ -2814,9 +2804,7 @@ impl<'a> Cg<'a> {
                 self.out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", payloads_eq, payload_a, payload_b));
                 let result = self.fresh_temp();
                 self.out.push_str(&format!("  {} = and i1 {}, {}\n", result, tags_eq, payloads_eq));
-                let ext = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext i1 {} to i32\n", ext, result));
-                Ok(Some((ext, Type::Bool)))
+                Ok(Some((result, Type::Bool)))
             }
             // ===== Path operations (Phase C-1.8) =====
             "path_join" => {
@@ -3943,7 +3931,7 @@ impl<'a> Cg<'a> {
                 } else {
                     v.clone()
                 };
-                let arr_size = if add_nl { "4" } else { "3" };
+                let arr_size = if add_nl { "7" } else { "6" };
                 self.out.push_str(&format!(
                     "  call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([{} x i8], ptr @.str.float{}, i64 0, i64 0), {})\n",
                     arr_size, nl_suffix, arg_str

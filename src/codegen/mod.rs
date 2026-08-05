@@ -112,8 +112,8 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_input(i8*)\n");
     out.push_str("declare void @runtime_eprint(i8*)\n");
     out.push_str("declare void @runtime_eprintln(i8*)\n");
-    out.push_str("declare i8* @runtime_read_line(void)\n");
-    out.push_str("declare i8* @runtime_read_all(void)\n");
+    out.push_str("declare i8* @runtime_read_line()\n");
+    out.push_str("declare i8* @runtime_read_all()\n");
     out.push_str("declare i32 @runtime_write_stdout(i8*)\n");
     out.push_str("declare i32 @runtime_write_stderr(i8*)\n");
     out.push_str("declare i8* @runtime_read_file(i8*)\n");
@@ -349,13 +349,13 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.str.int_nl = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");
-    out.push_str("@.str.float  = private unnamed_addr constant [3 x i8] c\"%g\\00\"\n");
-    out.push_str("@.str.float_nl = private unnamed_addr constant [4 x i8] c\"%g\\0A\\00\"\n");
+    out.push_str("@.str.float  = private unnamed_addr constant [6 x i8] c\"%.16g\\00\"\n");
+    out.push_str("@.str.float_nl = private unnamed_addr constant [7 x i8] c\"%.16g\\0A\\00\"\n");
     out.push_str("@.str.str    = private unnamed_addr constant [3 x i8] c\"%s\\00\"\n");
     out.push_str("@.str.str_nl = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\"\n");
     out.push_str("@.str.true   = private unnamed_addr constant [5 x i8] c\"true\\00\"\n");
     out.push_str("@.str.false  = private unnamed_addr constant [6 x i8] c\"false\\00\"\n");
-    out.push_str("@.str.panic_msg = private unnamed_addr constant [35 x i8] c\"extract() called on None/Error\\00\"\n\n");
+    out.push_str("@.str.panic_msg = private unnamed_addr constant [31 x i8] c\"extract() called on None/Error\\00\"\n\n");
 
     // Aggregate type declarations
     emit_aggregate_decls(&mut out, defs);

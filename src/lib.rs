@@ -3783,14 +3783,21 @@ pub fn compile_pipeline(
                                 // Compile runtime.c on the fly and link it.
                                 let runtime_obj = compile_runtime_c()?;
 
-                                let link_result = std::process::Command::new(llvm_tool("lld-link"))
-                                    .arg(&obj_path)
-                                    .arg(&runtime_obj)
-                                    .arg(&format!("/out:{}", exe_path))
-                                    .arg("/subsystem:console")
-                                    .arg("/defaultlib:libcmt")
-                                    .arg("/defaultlib:oldnames")
-                                    .status();
+                                 let link_result = std::process::Command::new(llvm_tool("lld-link"))
+                                     .arg(&obj_path)
+                                     .arg(&runtime_obj)
+                                     .arg(&format!("/out:{}", exe_path))
+                                     .arg("/subsystem:console")
+                                     .arg("/defaultlib:libcmt")
+                                     .arg("/defaultlib:oldnames")
+                                     .arg("/defaultlib:Winhttp")
+                                     .arg("/defaultlib:Shell32")
+                                     .arg("/defaultlib:Userenv")
+                                     .arg("/defaultlib:Advapi32")
+                                     .arg("/defaultlib:Ws2_32")
+                                     .arg("/defaultlib:Mswsock")
+                                     .arg("/defaultlib:Kernel32")
+                                     .status();
                                 match link_result {
                                     Ok(s) if s.success() => {
                                         report.emitted_exe = Some(exe_path);
@@ -6181,14 +6188,16 @@ fn infer_type(
                 }
                 "option_extract" => {
                     if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
-                    infer_type(&args[0], env, defs, constraints)?;
-                    Ok(Type::Unknown)
+                    let opt_ty = infer_type(&args[0], env, defs, constraints)?;
+                    match opt_ty {
+                        Type::Option(inner) => Ok(*inner),
+                        _ => Ok(Type::Unknown),
+                    }
                 }
                 "option_extract_or" => {
                     if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
                     infer_type(&args[0], env, defs, constraints)?;
-                    infer_type(&args[1], env, defs, constraints)?;
-                    Ok(Type::Unknown)
+                    infer_type(&args[1], env, defs, constraints)
                 }
                 "option_map" => {
                     if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
@@ -6231,14 +6240,21 @@ fn infer_type(
                 }
                 "result_extract" => {
                     if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
-                    infer_type(&args[0], env, defs, constraints)?;
-                    Ok(Type::Unknown)
+                    let res_ty = infer_type(&args[0], env, defs, constraints)?;
+                    match res_ty {
+                        Type::State(s) if s.starts_with("Result(") => {
+                            // Extract first type parameter from Result(T, E)
+                            let inner = s.strip_prefix("Result(").unwrap_or("");
+                            let first = inner.split(',').next().unwrap_or("unknown");
+                            Ok(type_from_str(first.trim(), defs))
+                        }
+                        _ => Ok(Type::Unknown),
+                    }
                 }
                 "result_extract_or" => {
                     if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
                     infer_type(&args[0], env, defs, constraints)?;
-                    infer_type(&args[1], env, defs, constraints)?;
-                    Ok(Type::Unknown)
+                    infer_type(&args[1], env, defs, constraints)
                 }
                 "result_map" => {
                     if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
@@ -7791,14 +7807,16 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
         "option_extract" => {
             if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
+            let opt_ty = check_expr(&args[0], env, defs)?;
+            match opt_ty {
+                Type::Option(inner) => Ok(*inner),
+                _ => Ok(Type::Unknown),
+            }
         }
         "option_extract_or" => {
             if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
             let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
+            check_expr(&args[1], env, defs)
         }
         "option_map" => {
             if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
@@ -7841,14 +7859,20 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
         "result_extract" => {
             if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
+            let res_ty = check_expr(&args[0], env, defs)?;
+            match res_ty {
+                Type::State(s) if s.starts_with("Result(") => {
+                    let inner = s.strip_prefix("Result(").unwrap_or("");
+                    let first = inner.split(',').next().unwrap_or("unknown");
+                    Ok(type_from_str(first.trim(), defs))
+                }
+                _ => Ok(Type::Unknown),
+            }
         }
         "result_extract_or" => {
             if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
             let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
+            check_expr(&args[1], env, defs)
         }
         "result_map" => {
             if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }

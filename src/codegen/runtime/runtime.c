@@ -12,6 +12,12 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#ifndef M_E
+#define M_E 2.71828182845904523536
+#endif
 #include <stdint.h>
 #include <time.h>
 #include "runtime.h"
@@ -24,6 +30,67 @@
 #define strcasecmp _stricmp
 #define strncasecmp _strnicmp
 #define strtok_r strtok_s
+// WinHTTP constant fallbacks for clang/LLVM on Windows
+#ifndef WINHTTP_OPTION_MAXHTTPAUTOREDIRECTS
+#define WINHTTP_OPTION_MAXHTTPAUTOREDIRECTS 38
+#endif
+#ifndef WINHTTP_OPTION_REDIRECT_POLICY
+#define WINHTTP_OPTION_REDIRECT_POLICY 38
+#endif
+#ifndef WINHTTP_OPTION_REDIRECT_POLICY_NEVER
+#define WINHTTP_OPTION_REDIRECT_POLICY_NEVER 0
+#endif
+#ifndef WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP
+#define WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP 1
+#endif
+#ifndef WINHTTP_QUERY_STATUS_CODE
+#define WINHTTP_QUERY_STATUS_CODE 19
+#endif
+#ifndef WINHTTP_QUERY_FLAG_NUMBER
+#define WINHTTP_QUERY_FLAG_NUMBER 0x20000000
+#endif
+#ifndef WINHTTP_QUERY_RAW_HEADERS_CRLF
+#define WINHTTP_QUERY_RAW_HEADERS_CRLF 21
+#endif
+#ifndef WINHTTP_NO_HEADER_INDEX
+#define WINHTTP_NO_HEADER_INDEX ((DWORD)-1)
+#endif
+#ifndef WINHTTP_NO_PROXY_NAME
+#define WINHTTP_NO_PROXY_NAME NULL
+#endif
+#ifndef WINHTTP_NO_PROXY_BYPASS
+#define WINHTTP_NO_PROXY_BYPASS NULL
+#endif
+#ifndef WINHTTP_NO_REFERER
+#define WINHTTP_NO_REFERER NULL
+#endif
+#ifndef WINHTTP_DEFAULT_ACCEPT_TYPES
+#define WINHTTP_DEFAULT_ACCEPT_TYPES NULL
+#endif
+#ifndef WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+#define WINHTTP_ACCESS_TYPE_DEFAULT_PROXY 0
+#endif
+#ifndef WINHTTP_FLAG_SECURE
+#define WINHTTP_FLAG_SECURE 0x00800000
+#endif
+#ifndef WINHTTP_OPTION_SECURITY_FLAGS
+#define WINHTTP_OPTION_SECURITY_FLAGS 94
+#endif
+#ifndef SECURITY_FLAG_IGNORE_UNKNOWN_CA
+#define SECURITY_FLAG_IGNORE_UNKNOWN_CA 0x00001000
+#endif
+#ifndef SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
+#define SECURITY_FLAG_IGNORE_CERT_DATE_INVALID 0x00002000
+#endif
+#ifndef SECURITY_FLAG_IGNORE_CERT_CN_INVALID
+#define SECURITY_FLAG_IGNORE_CERT_CN_INVALID 0x00004000
+#endif
+#ifndef SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE
+#define SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE 0x00008000
+#endif
+#ifndef WINHTTP_QUERY_HEADER_NAME_BY_INDEX
+#define WINHTTP_QUERY_HEADER_NAME_BY_INDEX WINHTTP_NO_HEADER_INDEX
+#endif
 #else
 #include <unistd.h>
 #include <dirent.h>
@@ -137,7 +204,7 @@ char* runtime_str_from_f64(double v) {
     // documented limitation: native uses %g (6 significant digits) while the
     // interpreter uses Rust's shortest round-trip repr.
     char buf[64];
-    snprintf(buf, sizeof(buf), "%g", v);
+    snprintf(buf, sizeof(buf), "%.16g", v);
     return runtime_str_copy(buf);
 }
 
@@ -461,20 +528,22 @@ double runtime_math_e(void) { return M_E; }
 // -- String helpers for Option/Result display --
 // Tag values: Option{0=Some, 1=None}, Result{0=Success, 1=Error}
 char* runtime_str_from_option(int64_t payload, int tag) {
-    static char buf[64];
     if (tag == 1) {
-        return "None";
+        return runtime_str_copy("None");
     }
-    snprintf(buf, sizeof(buf), "Some(%lld)", (long long)payload);
+    char* buf = (char*)malloc(64);
+    if (!buf) runtime_panic("out of memory");
+    snprintf(buf, 64, "Some(%lld)", (long long)payload);
     return buf;
 }
 
 char* runtime_str_from_result(int64_t payload, int tag) {
-    static char buf[64];
+    char* buf = (char*)malloc(64);
+    if (!buf) runtime_panic("out of memory");
     if (tag == 0) {
-        snprintf(buf, sizeof(buf), "Success(%lld)", (long long)payload);
+        snprintf(buf, 64, "Success(%lld)", (long long)payload);
     } else {
-        snprintf(buf, sizeof(buf), "Error(%lld)", (long long)payload);
+        snprintf(buf, 64, "Error(%lld)", (long long)payload);
     }
     return buf;
 }
@@ -1478,9 +1547,17 @@ static LimeJson* jp_parse_value(void);
 
 static LimeJson* jp_parse_string_raw(void) {
     jp_pos++; // skip '"'
-    char buf[4096];
-    int64_t blen = 0;
+    size_t cap = 256;
+    size_t blen = 0;
+    char* buf = (char*)malloc(cap);
+    if (!buf) runtime_panic("json: out of memory");
     while (jp_input[jp_pos] != '"' && jp_input[jp_pos] != '\0') {
+        if (blen + 4 >= cap) {
+            cap *= 2;
+            char* nb = (char*)realloc(buf, cap);
+            if (!nb) { free(buf); runtime_panic("json: out of memory"); }
+            buf = nb;
+        }
         if (jp_input[jp_pos] == '\\') {
             jp_pos++;
             char esc = jp_input[jp_pos];
@@ -1513,7 +1590,7 @@ static LimeJson* jp_parse_string_raw(void) {
     jp_pos++; // skip closing '"'
     buf[blen] = '\0';
     LimeJson* j = json_alloc(JSON_STRING);
-    j->data.string_val = json_strdup(buf);
+    j->data.string_val = buf; // buf is already malloc'd, transfer ownership
     return j;
 }
 
@@ -1828,15 +1905,16 @@ char* runtime_path_join(char* a, char* b) {
     if (!*b_start) return runtime_str_copy(a);
 
     int a_len = strlen(a);
-    char* result = (char*)malloc(a_len + 1 + strlen(b_start) + 1);
+    size_t b_len = strlen(b_start);
+    char* result = (char*)malloc(a_len + 1 + b_len + 1);
     if (!result) runtime_panic("path: out of memory");
     memcpy(result, a, a_len);
-    result[a_len] = path_is_sep(a[a_len - 1]) ? '\0' : '/';
-    strcat(result + a_len + (result[a_len] == '/' ? 0 : 1), b_start);
-    // Fix the separator
-    if (result[a_len] != '/') {
-        result[a_len] = '/';
+    int pos = a_len;
+    if (!path_is_sep(a[a_len - 1])) {
+        result[pos++] = '/';
     }
+    memcpy(result + pos, b_start, b_len);
+    result[pos + b_len] = '\0';
     return result;
 }
 
@@ -2707,6 +2785,12 @@ char* runtime_regex_compile(char* pattern) {
     blob[2] = (char)((count >> 16) & 0xFF);
     blob[3] = (char)((count >> 24) & 0xFF);
     memcpy(blob + 4, prog.ops, prog.len * sizeof(RegexOp));
+    // Free any allocated cls strings in the ops
+    for (int64_t i = 0; i < prog.len; i++) {
+        if (prog.ops[i].cmd == RC_CLASS && prog.ops[i].cls) {
+            free(prog.ops[i].cls);
+        }
+    }
     free(prog.ops);
     return blob;
 }
@@ -2928,7 +3012,7 @@ LimeList runtime_regex_split(char* compiled, char* text) {
 
 static int64_t win_create_process(char* command, LimeList args, HANDLE* out_handle) {
     // Build command line from command + args
-    size_t cmd_len = strlen(command) + 1;
+    size_t cmd_len = strlen(command) + 3; // +3 for potential quotes + null
     for (int64_t i = 0; i < args.len; i++) {
         char* arg = (char*)(intptr_t)runtime_list_get(args, i);
         if (arg) cmd_len += strlen(arg) + 3; // space + quotes + null
@@ -2971,8 +3055,13 @@ static int64_t win_create_process(char* command, LimeList args, HANDLE* out_hand
     sa.bInheritHandle = TRUE;
     sa.lpSecurityDescriptor = NULL;
 
-    if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0) ||
-        !CreatePipe(&stderr_read, &stderr_write, &sa, 0)) {
+    if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0)) {
+        free(cmd_line);
+        return -1;
+    }
+    if (!CreatePipe(&stderr_read, &stderr_write, &sa, 0)) {
+        CloseHandle(stdout_read);
+        CloseHandle(stdout_write);
         free(cmd_line);
         return -1;
     }
@@ -3033,20 +3122,31 @@ int64_t runtime_process_spawn(char* command, LimeList args) {
 char* runtime_process_run(char* command, LimeList args) {
     if (!command) return runtime_str_copy("");
     // For run, we spawn and wait
-    // This is a simplified implementation
-    // In production, we'd capture stdout properly
-    char cmd_buf[4096];
+    // Build command with dynamic buffer
+    size_t cmd_cap = 256;
+    size_t cmd_len = strlen(command) + 1;
+    char* cmd_buf = (char*)malloc(cmd_cap);
+    if (!cmd_buf) return runtime_str_copy("");
     strcpy(cmd_buf, command);
     for (int64_t i = 0; i < args.len; i++) {
         char* arg = (char*)(intptr_t)runtime_list_get(args, i);
         if (arg) {
+            size_t need = cmd_len + 1 + strlen(arg) + 1;
+            if (need > cmd_cap) {
+                cmd_cap = need * 2;
+                char* nb = (char*)realloc(cmd_buf, cmd_cap);
+                if (!nb) { free(cmd_buf); return runtime_str_copy(""); }
+                cmd_buf = nb;
+            }
             strcat(cmd_buf, " ");
             strcat(cmd_buf, arg);
+            cmd_len = strlen(cmd_buf);
         }
     }
 
     // Use _popen for simple command execution
     FILE* fp = _popen(cmd_buf, "r");
+    free(cmd_buf);
     if (!fp) return runtime_str_copy("");
 
     size_t cap = 4096;
@@ -3112,7 +3212,7 @@ char* runtime_process_status(int64_t pid) {
 LimeList runtime_process_args(void) {
     LimeList list = runtime_list_empty();
     // Get command line arguments
-    LPCommandLineW cmd_line = GetCommandLineW();
+    wchar_t* cmd_line = GetCommandLineW();
     int argc;
     LPWSTR* argv = CommandLineToArgvW(cmd_line, &argc);
     if (!argv) return list;
@@ -3181,9 +3281,9 @@ int64_t runtime_process_spawn(char* command, LimeList args) {
     int stdout_read = -1;
     int64_t pid = posix_spawn_process(command, args, &stdout_read);
     if (pid < 0) return -1;
-    // We don't store the pipe read fd for now
+    // Close the pipe fd since we don't store it for later use
     // A full implementation would maintain a process table
-    (void)stdout_read;
+    if (stdout_read >= 0) close(stdout_read);
     return pid;
 }
 
@@ -3229,15 +3329,15 @@ char* runtime_process_run(char* command, LimeList args) {
     char* buf = (char*)malloc(cap);
     if (!buf) { close(pipefd[0]); waitpid(pid, NULL, 0); return NULL; }
 
-    int c;
-    while ((c = read(pipefd[0], 1, 1)) > 0) {
+    char c;
+    while (read(pipefd[0], &c, 1) == 1) {
         if (len + 1 >= cap) {
             cap *= 2;
             char* nb = (char*)realloc(buf, cap);
             if (!nb) { free(buf); close(pipefd[0]); waitpid(pid, NULL, 0); return NULL; }
             buf = nb;
         }
-        buf[len++] = (char)c;
+        buf[len++] = c;
     }
     buf[len] = '\0';
     close(pipefd[0]);
@@ -3659,6 +3759,10 @@ void runtime_requests_tls_config_free(RequestsTlsConfig* config) {
     free(config->client_key_path);
     free(config);
 }
+
+// Forward declarations for cookie management
+static void cookie_free(RequestsCookie* c);
+static void parse_url_host_port(const char* url, char** host, int* port, char** path);
 
 void runtime_requests_cookie_jar_free(RequestsCookieJar* jar) {
     if (!jar) return;
@@ -4169,11 +4273,14 @@ RequestsCookieJar* runtime_requests_cookie_jar_new(void) {
 
 int runtime_requests_cookie_jar_add(RequestsCookieJar* jar, char* cookie_str) {
     if (!jar || !cookie_str) return -1;
-    jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)runtime_str_copy(cookie_str));
+    // Parse the cookie string and store as RequestsCookie*
+    RequestsCookie* c = cookie_parse_set_cookie(cookie_str, NULL);
+    if (!c) return -1;
+    jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)c);
     return 0;
 }
 
-int runtime_requests_cookie_jar_add_parsed(RequestsCookieJar* jar, RequestsCookie* cookie) {
+int runtime_requests_cookie_jar_add_parsed(RequestsCookieJar* jar, void* cookie) {
     if (!jar || !cookie) return -1;
     jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)cookie);
     return 0;
