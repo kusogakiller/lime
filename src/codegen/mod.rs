@@ -243,6 +243,88 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_process_status(i64)\n");
     out.push_str("declare %LimeList @runtime_process_args()\n\n");
 
+    // Requests runtime declarations (Phase C-1.12)
+    out.push_str("declare i8* @runtime_requests_client_new()\n");
+    out.push_str("declare i8* @runtime_requests_client_builder_new()\n");
+    out.push_str("declare i8* @runtime_requests_client_builder_build(i8*)\n");
+    out.push_str("declare void @runtime_requests_client_builder_default_headers(i8*, i8*)\n");
+    out.push_str("declare void @runtime_requests_client_builder_timeout(i8*, i64)\n");
+    out.push_str("declare void @runtime_requests_client_builder_redirect_limit(i8*, i64)\n");
+    out.push_str("declare void @runtime_requests_client_builder_redirect_disabled(i8*)\n");
+    out.push_str("declare void @runtime_requests_client_builder_proxy(i8*, i8*)\n");
+    out.push_str("declare void @runtime_requests_client_builder_tls_config(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_request_builder_new(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_header(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_headers(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_query(i8*, %LimeList)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_body_bytes(i8*, i8*, i64)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_body_str(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_json(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_form(i8*, %LimeList)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_multipart(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_timeout(i8*, i64)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_redirect_limit(i8*, i64)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_redirect_disabled(i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_basic_auth(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_bearer_auth(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_send(i8*)\n");
+    out.push_str("declare i64 @runtime_requests_response_status(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_response_headers(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_response_url(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_response_text(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_response_bytes(i8*, i64*)\n");
+    out.push_str("declare i8* @runtime_requests_response_json(i8*)\n");
+    out.push_str("declare i64 @runtime_requests_response_content_length(i8*)\n");
+    out.push_str("declare i32 @runtime_requests_response_is_success(i8*)\n");
+    out.push_str("declare i32 @runtime_requests_response_is_client_error(i8*)\n");
+    out.push_str("declare i32 @runtime_requests_response_is_server_error(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_response_error_for_status(i8*)\n");
+    out.push_str("declare i64 @runtime_requests_status_code_code(i64)\n");
+    out.push_str("declare i32 @runtime_requests_status_code_is_success(i64)\n");
+    out.push_str("declare i32 @runtime_requests_status_code_is_client_error(i64)\n");
+    out.push_str("declare i32 @runtime_requests_status_code_is_server_error(i64)\n");
+    out.push_str("declare i32 @runtime_requests_status_code_is_redirect(i64)\n");
+    out.push_str("declare i8* @runtime_requests_header_map_new()\n");
+    out.push_str("declare i32 @runtime_requests_header_map_insert(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_header_map_append(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_header_map_remove(i8*, i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_header_map_get(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_header_map_contains(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_multipart_new()\n");
+    out.push_str("declare i32 @runtime_requests_multipart_text(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_multipart_file(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_multipart_file_with_metadata(i8*, i8*, i8*, i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_tls_config_new()\n");
+    out.push_str("declare i32 @runtime_requests_tls_config_add_ca_cert(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_tls_config_add_client_cert(i8*, i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_requests_tls_config_danger_accept_invalid_certs(i8*)\n");
+    out.push_str("declare i32 @runtime_requests_tls_config_danger_accept_invalid_hostnames(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_cookie_jar_new()\n");
+    out.push_str("declare i32 @runtime_requests_cookie_jar_add(i8*, i8*)\n");
+    out.push_str("declare i8* @runtime_requests_cookie_parse(i8*)\n");
+    out.push_str("declare i64 @runtime_requests_response_copy_to(i8*, i8*)\n");
+    out.push_str("declare %LimeList @runtime_requests_response_chunks(i8*, i64)\n");
+    out.push_str("declare i8* @runtime_requests_response_stream(i8*)\n");
+    out.push_str("declare i8* @runtime_requests_stream_read(i8*, i64, i64*)\n");
+    out.push_str("declare i32 @runtime_requests_stream_has_more(i8*)\n");
+    out.push_str("declare void @runtime_requests_client_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_request_builder_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_response_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_header_map_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_multipart_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_tls_config_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_cookie_jar_free(i8*)\n");
+    out.push_str("declare void @runtime_requests_stream_free(i8*)\n");
+    // Session
+    out.push_str("declare i8* @runtime_requests_session_new()\n");
+    out.push_str("declare i8* @runtime_requests_session_request(i8*, i8*, i8*)\n");
+    out.push_str("declare void @runtime_requests_session_free(i8*)\n");
+    // New builder methods
+    out.push_str("declare i32 @runtime_requests_request_builder_set_headers(i8*, %LimeList)\n");
+    out.push_str("declare i32 @runtime_requests_request_builder_verify(i8*, i32)\n");
+    // Response headers as list
+    out.push_str("declare %LimeList @runtime_requests_response_headers_list(i8*)\n\n");
+
     // Format strings for print/println builtin lowering (Phase 2)
     out.push_str("@.str.int   = private unnamed_addr constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.str.int_nl = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\"\n");

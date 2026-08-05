@@ -3160,6 +3160,500 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_list(self, "runtime_process_args", &[]);
                 Ok(Some((v, t)))
             }
+            // ===== Requests operations (Phase C-1.12) =====
+            "requests_client_new" => {
+                let (v, t) = call_str(self, "runtime_requests_client_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_client_builder_new" => {
+                let (v, t) = call_str(self, "runtime_requests_client_builder_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_client_builder_build" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_client_builder_build", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_client_builder_default_headers" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_client_builder_default_headers(i8* {}, i8* {})\n", a0, a1
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
+            "requests_client_builder_timeout" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = i64_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_client_builder_timeout(i8* {}, i64 {})\n", a0, a1
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
+            "requests_client_builder_redirect_limit" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = i64_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_client_builder_redirect_limit(i8* {}, i64 {})\n", a0, a1
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
+            "requests_client_builder_redirect_disabled" => {
+                let a0 = str_arg(self, &args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_client_builder_redirect_disabled(i8* {})\n", a0
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
+            "requests_client_builder_proxy" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_client_builder_proxy(i8* {}, i8* {})\n", a0, a1
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
+            "requests_client_builder_tls_config" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_client_builder_tls_config(i8* {}, i8* {})\n", a0, a1
+                ));
+                Ok(Some((tmp, Type::Unknown)))
+            }
+            "requests_request_builder_new" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_str(self, "runtime_requests_request_builder_new", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_header" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_header", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_headers" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_headers", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_query" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = list_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_query", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_body_bytes" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a1_len = i64_arg(self, &args[1])?; // placeholder
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_body_bytes", &[a0, a1, a1_len]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_body_str" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_body_str", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_json" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_json", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_form" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = list_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_form", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_multipart" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_multipart", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_timeout" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = i64_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_timeout", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_redirect_limit" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = i64_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_redirect_limit", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_redirect_disabled" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_redirect_disabled", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_basic_auth" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_basic_auth", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_bearer_auth" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_request_builder_bearer_auth", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_send" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_send", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_status" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_requests_response_status", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_headers" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_response_headers", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_url" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_response_url", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_text" => {
+                let a0 = str_arg(self, &args[0])?;
+                let ptr_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_requests_response_text(i8* {})\n", ptr_val, a0
+                ));
+                let is_null = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
+                ));
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %Option, align 8\n", slot
+                ));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                ));
+                let tag_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                ));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                ));
+                let ptr_as_i64 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                ));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                ));
+                Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
+            }
+            "requests_response_bytes" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_response_bytes", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_json" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_response_json", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_content_length" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_requests_response_content_length", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_is_success" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_response_is_success", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_is_client_error" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_response_is_client_error", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_is_server_error" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_response_is_server_error", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_error_for_status" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_response_error_for_status", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_status_code_code" => {
+                let a0 = i64_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "runtime_requests_status_code_code", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_status_code_is_success" => {
+                let a0 = i64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_status_code_is_success", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_status_code_is_client_error" => {
+                let a0 = i64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_status_code_is_client_error", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_status_code_is_server_error" => {
+                let a0 = i64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_status_code_is_server_error", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_status_code_is_redirect" => {
+                let a0 = i64_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_status_code_is_redirect", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_header_map_new" => {
+                let (v, t) = call_str(self, "runtime_requests_header_map_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_header_map_insert" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_header_map_insert", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_header_map_append" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_header_map_append", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_header_map_remove" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_header_map_remove", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_header_map_get" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let ptr_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_requests_header_map_get(i8* {}, i8* {})\n", ptr_val, a0, a1
+                ));
+                let is_null = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
+                ));
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %Option, align 8\n", slot
+                ));
+                let tag_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                ));
+                let tag_val = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                ));
+                let payload_gep = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                ));
+                let ptr_as_i64 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                ));
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                ));
+                Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
+            }
+            "requests_header_map_contains" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_header_map_contains", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_multipart_new" => {
+                let (v, t) = call_str(self, "runtime_requests_multipart_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_multipart_text" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_multipart_text", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_multipart_file" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_multipart_file", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_multipart_file_with_metadata" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let a3 = str_arg(self, &args[3])?;
+                let a4 = str_arg(self, &args[4])?;
+                let (v, t) = call_bool(self, "runtime_requests_multipart_file_with_metadata", &[a0, a1, a2, a3, a4]);
+                Ok(Some((v, t)))
+            }
+            "requests_tls_config_new" => {
+                let (v, t) = call_str(self, "runtime_requests_tls_config_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_tls_config_add_ca_cert" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_tls_config_add_ca_cert", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_tls_config_add_client_cert" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let a2 = str_arg(self, &args[2])?;
+                let (v, t) = call_bool(self, "runtime_requests_tls_config_add_client_cert", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_tls_config_danger_accept_invalid_certs" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_tls_config_danger_accept_invalid_certs", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_tls_config_danger_accept_invalid_hostnames" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_tls_config_danger_accept_invalid_hostnames", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_cookie_jar_new" => {
+                let (v, t) = call_str(self, "runtime_requests_cookie_jar_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_cookie_jar_add" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_bool(self, "runtime_requests_cookie_jar_add", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_cookie_parse" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_cookie_parse", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_copy_to" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = str_arg(self, &args[1])?;
+                let (v, t) = call_i64(self, "runtime_requests_response_copy_to", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_chunks" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = i64_arg(self, &args[1])?;
+                let (v, t) = call_list(self, "runtime_requests_response_chunks", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_stream" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_str(self, "runtime_requests_response_stream", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_stream_read" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = i64_arg(self, &args[1])?;
+                let (v, t) = call_str(self, "runtime_requests_stream_read", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_stream_has_more" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_bool(self, "runtime_requests_stream_has_more", &[a0]);
+                Ok(Some((v, t)))
+            }
+            "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
+            | "requests_header_map_free" | "requests_multipart_free"
+            | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
+                let a0 = str_arg(self, &args[0])?;
+                let free_name = format!("runtime_{}", func);
+                self.out.push_str(&format!(
+                    "  call void @{}(i8* {})\n", free_name, a0
+                ));
+                let tmp = self.fresh_temp();
+                Ok(Some((tmp, Type::Unit)))
+            }
+            // ===== Requests Session operations (Phase C-1.12) =====
+            "requests_session_new" => {
+                let (v, t) = call_str(self, "runtime_requests_session_new", &[]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_request" => {
+                let a0 = str_arg(self, &args[0])?;  // session
+                let a1 = str_arg(self, &args[1])?;  // method
+                let a2 = str_arg(self, &args[2])?;  // url
+                let (v, t) = call_str(self, "runtime_requests_session_request", &[a0, a1, a2]);
+                Ok(Some((v, t)))
+            }
+            "requests_session_free" => {
+                let a0 = str_arg(self, &args[0])?;
+                self.out.push_str(&format!("  call void @runtime_requests_session_free(i8* {})\n", a0));
+                Ok(Some((self.fresh_temp(), Type::Unit)))
+            }
+            "requests_request_builder_set_headers" => {
+                let a0 = str_arg(self, &args[0])?;
+                let a1 = list_arg(self, &args[1])?;
+                let (v, t) = call_i32(self, "runtime_requests_request_builder_set_headers", &[a0, a1]);
+                Ok(Some((v, t)))
+            }
+            "requests_request_builder_verify" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (val, _ty) = self.codegen_expr(&args[1])?;
+                let bool_val = self.fresh_temp();
+                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
+                let (v, t) = call_i32(self, "runtime_requests_request_builder_verify", &[a0, bool_val]);
+                Ok(Some((v, t)))
+            }
+            "requests_response_headers_list" => {
+                let a0 = str_arg(self, &args[0])?;
+                let (v, t) = call_list(self, "runtime_requests_response_headers_list", &[a0]);
+                Ok(Some((v, t)))
+            }
             _ => Ok(None),
         }
     }

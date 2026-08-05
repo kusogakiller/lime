@@ -294,4 +294,308 @@ char* runtime_process_status(int64_t pid);
 // Returns the current program arguments as a LimeList of strings.
 LimeList runtime_process_args(void);
 
+// -- Requests operations (Phase C-1.12) --
+// Opaque handle for HTTP client
+typedef struct RequestsClient RequestsClient;
+// Opaque handle for request builder
+typedef struct RequestsRequestBuilder RequestsRequestBuilder;
+// Opaque handle for response
+typedef struct RequestsResponse RequestsResponse;
+// Opaque handle for header map
+typedef struct RequestsHeaderMap RequestsHeaderMap;
+// Opaque handle for multipart form
+typedef struct RequestsMultipart RequestsMultipart;
+// Opaque handle for TLS config
+typedef struct RequestsTlsConfig RequestsTlsConfig;
+// Opaque handle for cookie jar
+typedef struct RequestsCookieJar RequestsCookieJar;
+// Opaque handle for stream
+typedef struct RequestsStream RequestsStream;
+// Opaque handle for HTTP session
+typedef struct RequestsSession RequestsSession;
+
+// Creates a new HTTP client with default configuration.
+// Returns opaque pointer or NULL on error.
+RequestsClient* runtime_requests_client_new(void);
+
+// Creates a new HTTP client builder.
+RequestsClient* runtime_requests_client_builder_new(void);
+
+// Builds the client from the builder.
+// Returns client pointer or NULL on error.
+RequestsClient* runtime_requests_client_builder_build(RequestsClient* builder);
+
+// Sets default headers on the client builder.
+void runtime_requests_client_builder_default_headers(RequestsClient* builder, RequestsHeaderMap* headers);
+
+// Sets default timeout on the client builder (in seconds).
+void runtime_requests_client_builder_timeout(RequestsClient* builder, int64_t seconds);
+
+// Sets redirect limit on the client builder.
+void runtime_requests_client_builder_redirect_limit(RequestsClient* builder, int64_t limit);
+
+// Disables redirects on the client builder.
+void runtime_requests_client_builder_redirect_disabled(RequestsClient* builder);
+
+// Sets proxy on the client builder.
+void runtime_requests_client_builder_proxy(RequestsClient* builder, char* proxy_url);
+
+// Sets TLS config on the client builder.
+void runtime_requests_client_builder_tls_config(RequestsClient* builder, RequestsTlsConfig* tls_config);
+
+// Creates a new request builder.
+// Returns opaque pointer or NULL on error.
+RequestsRequestBuilder* runtime_requests_request_builder_new(RequestsClient* client, char* method, char* url);
+
+// Sets a header on the request builder.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_header(RequestsRequestBuilder* builder, char* key, char* value);
+
+// Sets multiple headers on the request builder.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_headers(RequestsRequestBuilder* builder, RequestsHeaderMap* headers);
+
+// Sets query parameters on the request builder.
+// params is a LimeList of tuples (key, value).
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_query(RequestsRequestBuilder* builder, LimeList params);
+
+// Sets the request body as bytes.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_body_bytes(RequestsRequestBuilder* builder, char* data, int64_t len);
+
+// Sets the request body as a string.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_body_str(RequestsRequestBuilder* builder, char* body);
+
+// Sets the request body as JSON.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_json(RequestsRequestBuilder* builder, void* json_value);
+
+// Sets the request body as form data.
+// data is a LimeList of tuples (key, value).
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_form(RequestsRequestBuilder* builder, LimeList data);
+
+// Sets the request body as multipart.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_multipart(RequestsRequestBuilder* builder, RequestsMultipart* multipart);
+
+// Sets the request timeout in seconds.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_timeout(RequestsRequestBuilder* builder, int64_t seconds);
+
+// Sets the maximum number of redirects to follow.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_redirect_limit(RequestsRequestBuilder* builder, int64_t limit);
+
+// Disables automatic redirect following.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_redirect_disabled(RequestsRequestBuilder* builder);
+
+// Sets basic authentication.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_basic_auth(RequestsRequestBuilder* builder, char* user, char* password);
+
+// Sets bearer token authentication.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_bearer_auth(RequestsRequestBuilder* builder, char* token);
+
+// Sends the request and returns the response.
+// Returns opaque pointer or NULL on error.
+RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder);
+
+// Returns the status code of the response.
+int64_t runtime_requests_response_status(RequestsResponse* response);
+
+// Returns the headers of the response.
+RequestsHeaderMap* runtime_requests_response_headers(RequestsResponse* response);
+
+// Returns the final URL after redirects.
+// Returns malloc'd string.
+char* runtime_requests_response_url(RequestsResponse* response);
+
+// Returns the response body as a string.
+// Returns malloc'd string or NULL on error.
+char* runtime_requests_response_text(RequestsResponse* response);
+
+// Returns the response body as bytes.
+// Returns malloc'd buffer (caller must free) or NULL on error.
+// Output length is stored in out_len.
+char* runtime_requests_response_bytes(RequestsResponse* response, int64_t* out_len);
+
+// Parses the response body as JSON.
+// Returns malloc'd JSON string or NULL on error.
+char* runtime_requests_response_json(RequestsResponse* response);
+
+// Returns the content length of the response, or -1 if not available.
+int64_t runtime_requests_response_content_length(RequestsResponse* response);
+
+// Returns true if the status code is successful (200-299).
+int runtime_requests_response_is_success(RequestsResponse* response);
+
+// Returns true if the status code is a client error (400-499).
+int runtime_requests_response_is_client_error(RequestsResponse* response);
+
+// Returns true if the status code is a server error (500-599).
+int runtime_requests_response_is_server_error(RequestsResponse* response);
+
+// Returns an error message if the status code is not successful, or NULL if successful.
+// Returns malloc'd string or NULL.
+char* runtime_requests_response_error_for_status(RequestsResponse* response);
+
+// Returns the numeric status code.
+int64_t runtime_requests_status_code_code(int64_t code);
+
+// Returns true if the status code is successful (200-299).
+int runtime_requests_status_code_is_success(int64_t code);
+
+// Returns true if the status code is a client error (400-499).
+int runtime_requests_status_code_is_client_error(int64_t code);
+
+// Returns true if the status code is a server error (500-599).
+int runtime_requests_status_code_is_server_error(int64_t code);
+
+// Returns true if the status code is a redirect (300-399).
+int runtime_requests_status_code_is_redirect(int64_t code);
+
+// Creates a new header map.
+// Returns opaque pointer or NULL on error.
+RequestsHeaderMap* runtime_requests_header_map_new(void);
+
+// Inserts a header into the map.
+// Returns 0 on success, -1 on error.
+int runtime_requests_header_map_insert(RequestsHeaderMap* map, char* key, char* value);
+
+// Appends a header value (allows multiple values for same key).
+// Returns 0 on success, -1 on error.
+int runtime_requests_header_map_append(RequestsHeaderMap* map, char* key, char* value);
+
+// Removes a header from the map.
+// Returns 0 on success, -1 on error.
+int runtime_requests_header_map_remove(RequestsHeaderMap* map, char* key);
+
+// Gets a header value by key.
+// Returns malloc'd string or NULL if not found.
+char* runtime_requests_header_map_get(RequestsHeaderMap* map, char* key);
+
+// Checks if a header exists.
+int runtime_requests_header_map_contains(RequestsHeaderMap* map, char* key);
+
+// Creates a new multipart form.
+// Returns opaque pointer or NULL on error.
+RequestsMultipart* runtime_requests_multipart_new(void);
+
+// Adds a text field to multipart form.
+// Returns 0 on success, -1 on error.
+int runtime_requests_multipart_text(RequestsMultipart* multipart, char* name, char* value);
+
+// Adds a file to multipart form.
+// Returns 0 on success, -1 on error.
+int runtime_requests_multipart_file(RequestsMultipart* multipart, char* name, char* file_path);
+
+// Adds a file with custom filename and content type to multipart form.
+// Returns 0 on success, -1 on error.
+int runtime_requests_multipart_file_with_metadata(RequestsMultipart* multipart, char* name, char* file_path, char* filename, char* content_type);
+
+// Creates a new TLS configuration.
+// Returns opaque pointer or NULL on error.
+RequestsTlsConfig* runtime_requests_tls_config_new(void);
+
+// Adds a custom CA certificate from a PEM file.
+// Returns 0 on success, -1 on error.
+int runtime_requests_tls_config_add_ca_cert(RequestsTlsConfig* config, char* pem_path);
+
+// Adds a client certificate from PEM files.
+// Returns 0 on success, -1 on error.
+int runtime_requests_tls_config_add_client_cert(RequestsTlsConfig* config, char* cert_path, char* key_path);
+
+// Disables certificate verification (dangerous, for testing only).
+// Returns 0 on success, -1 on error.
+int runtime_requests_tls_config_danger_accept_invalid_certs(RequestsTlsConfig* config);
+
+// Disables hostname verification (dangerous, for testing only).
+// Returns 0 on success, -1 on error.
+int runtime_requests_tls_config_danger_accept_invalid_hostnames(RequestsTlsConfig* config);
+
+// Creates a new cookie jar.
+// Returns opaque pointer or NULL on error.
+RequestsCookieJar* runtime_requests_cookie_jar_new(void);
+
+// Adds a cookie to the jar.
+// Returns 0 on success, -1 on error.
+int runtime_requests_cookie_jar_add(RequestsCookieJar* jar, char* cookie_str);
+
+// Parses a cookie from string.
+// Returns malloc'd cookie string or NULL on error.
+char* runtime_requests_cookie_parse(char* cookie_str);
+
+// Streams the response body to a file.
+// Returns bytes written or -1 on error.
+int64_t runtime_requests_response_copy_to(RequestsResponse* response, char* file_path);
+
+// Streams the response body in chunks.
+// Returns LimeList of byte buffers or NULL on error.
+LimeList runtime_requests_response_chunks(RequestsResponse* response, int64_t chunk_size);
+
+// Reads the response body as a stream.
+// Returns opaque stream pointer or NULL on error.
+RequestsStream* runtime_requests_response_stream(RequestsResponse* response);
+
+// Reads a chunk from the stream.
+// Returns malloc'd buffer or NULL on error/EOF.
+// Output length is stored in out_len.
+char* runtime_requests_stream_read(RequestsStream* stream, int64_t size, int64_t* out_len);
+
+// Checks if stream has more data.
+int runtime_requests_stream_has_more(RequestsStream* stream);
+
+// Creates a new HTTP session with persistent state.
+// Returns opaque pointer or NULL on error.
+RequestsSession* runtime_requests_session_new(void);
+
+// Creates a request builder from a session.
+// Returns opaque pointer or NULL on error.
+RequestsRequestBuilder* runtime_requests_session_request(RequestsSession* session, char* method, char* url);
+
+// Sets headers from a flat list of key/value string pairs.
+// list is a LimeList of char* strings in alternating key, value order.
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_set_headers(RequestsRequestBuilder* builder, LimeList headers);
+
+// Sets whether to verify TLS certificates (1=verify, 0=don't verify).
+// Returns 0 on success, -1 on error.
+int runtime_requests_request_builder_verify(RequestsRequestBuilder* builder, int verify);
+
+// Returns response headers as a LimeList of alternating key, value strings.
+// Caller must free the returned list contents.
+LimeList runtime_requests_response_headers_list(RequestsResponse* response);
+
+// Frees a session.
+void runtime_requests_session_free(RequestsSession* session);
+
+// Frees a client.
+void runtime_requests_client_free(RequestsClient* client);
+
+// Frees a request builder.
+void runtime_requests_request_builder_free(RequestsRequestBuilder* builder);
+
+// Frees a response.
+void runtime_requests_response_free(RequestsResponse* response);
+
+// Frees a header map.
+void runtime_requests_header_map_free(RequestsHeaderMap* map);
+
+// Frees a multipart form.
+void runtime_requests_multipart_free(RequestsMultipart* multipart);
+
+// Frees a TLS config.
+void runtime_requests_tls_config_free(RequestsTlsConfig* config);
+
+// Frees a cookie jar.
+void runtime_requests_cookie_jar_free(RequestsCookieJar* jar);
+
+// Frees a stream.
+void runtime_requests_stream_free(RequestsStream* stream);
+
 #endif // LIME_RUNTIME_H

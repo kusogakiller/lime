@@ -1,0 +1,6 @@
+[package]
+name = "requests"
+version = "v0.1.0"
+
+[files]
+requests = "src/requests.lime"

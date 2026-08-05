@@ -1,0 +1,156 @@
+// HTTP client library for Lime.
+// Provides synchronous HTTP client functionality compatible with Python requests.
+
+// -- Core types --
+
+type Session = struct { inner: opaque }
+type Response = struct { inner: opaque }
+type RequestError = struct { variant: str, message: str }
+type CookieJar = struct { inner: opaque }
+
+// -- Central request function --
+
+fn request(str: method, str: url): RequestBuilder:
+    return requests_request_builder_new(requests_client_new(), method, url)
+
+// -- Convenience functions (Python requests compatible) --
+
+fn get(str: url): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "GET", url)
+    return requests_send(b)
+
+fn post(str: url, str: body): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "POST", url)
+    requests_request_builder_body_str(b, body)
+    return requests_send(b)
+
+fn put(str: url, str: body): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "PUT", url)
+    requests_request_builder_body_str(b, body)
+    return requests_send(b)
+
+fn patch(str: url, str: body): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "PATCH", url)
+    requests_request_builder_body_str(b, body)
+    return requests_send(b)
+
+fn delete(str: url): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "DELETE", url)
+    return requests_send(b)
+
+fn head(str: url): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "HEAD", url)
+    return requests_send(b)
+
+fn options(str: url): Result(Response, RequestError):
+    let b = requests_request_builder_new(requests_client_new(), "OPTIONS", url)
+    return requests_send(b)
+
+// -- Session --
+
+fn session(): Session:
+    return requests_session_new()
+
+fn Session.get(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "GET", url)
+
+fn Session.post(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "POST", url)
+
+fn Session.put(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "PUT", url)
+
+fn Session.patch(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "PATCH", url)
+
+fn Session.delete(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "DELETE", url)
+
+fn Session.head(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "HEAD", url)
+
+fn Session.options(Session: self, str: url): RequestBuilder:
+    return requests_session_request(self, "OPTIONS", url)
+
+// -- RequestBuilder (fluent API) --
+
+fn RequestBuilder.params(RequestBuilder: self, list(tuple(str,str)): params): RequestBuilder:
+    requests_request_builder_query(self, params)
+    return self
+
+fn RequestBuilder.data(RequestBuilder: self, str: body): RequestBuilder:
+    requests_request_builder_body_str(self, body)
+    return self
+
+fn RequestBuilder.json(RequestBuilder: self, opaque: json_val): RequestBuilder:
+    requests_request_builder_json(self, json_val)
+    return self
+
+fn RequestBuilder.headers(RequestBuilder: self, list(tuple(str,str)): hdrs): RequestBuilder:
+    requests_request_builder_set_headers(self, hdrs)
+    return self
+
+fn RequestBuilder.header(RequestBuilder: self, str: key, str: value): RequestBuilder:
+    requests_request_builder_header(self, key, value)
+    return self
+
+fn RequestBuilder.auth(RequestBuilder: self, str: user, str: password): RequestBuilder:
+    requests_request_builder_basic_auth(self, user, password)
+    return self
+
+fn RequestBuilder.verify(RequestBuilder: self, bool: verify): RequestBuilder:
+    requests_request_builder_verify(self, verify)
+    return self
+
+fn RequestBuilder.allow_redirects(RequestBuilder: self, bool: allow): RequestBuilder:
+    if allow {
+        requests_request_builder_timeout(self, 30)
+    } else {
+        requests_request_builder_redirect_disabled(self)
+    }
+    return self
+
+fn RequestBuilder.timeout(RequestBuilder: self, int: seconds): RequestBuilder:
+    requests_request_builder_timeout(self, seconds)
+    return self
+
+fn RequestBuilder.send(RequestBuilder: self): Result(Response, RequestError):
+    return requests_send(self)
+
+// -- Response --
+
+fn Response.status(Response: self): int:
+    return requests_response_status(self)
+
+fn Response.headers(Response: self): list(tuple(str,str)):
+    return requests_response_headers_list(self)
+
+fn Response.url(Response: self): str:
+    return requests_response_url(self)
+
+fn Response.text(Response: self): str:
+    return requests_response_text(self)
+
+fn Response.json(Response: self): opaque:
+    return requests_response_json(self)
+
+fn Response.ok(Response: self): bool:
+    return requests_response_is_success(self)
+
+fn Response.is_success(Response: self): bool:
+    return requests_response_is_success(self)
+
+fn Response.is_client_error(Response: self): bool:
+    return requests_response_is_client_error(self)
+
+fn Response.is_server_error(Response: self): bool:
+    return requests_response_is_server_error(self)
+
+fn Response.error_for_status(Response: self): Result(Response, RequestError):
+    return requests_response_error_for_status(self)
+
+fn Response.content_length(Response: self): int:
+    return requests_response_content_length(self)
+
+fn Response.copy_to(Response: self, str: file_path): int:
+    return requests_response_copy_to(self, file_path)

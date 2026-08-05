@@ -6384,6 +6384,321 @@ fn infer_type(
                     if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
                     Ok(Type::List(Box::new(Type::String)))
                 }
+                // ===== Requests operations (Phase C-1.12) =====
+                "requests_client_new" => {
+                    if !args.is_empty() { return Err("requests_client_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown) // opaque handle
+                }
+                "requests_client_builder_new" => {
+                    if !args.is_empty() { return Err("requests_client_builder_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_build" => {
+                    if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_default_headers" => {
+                    if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_timeout" | "requests_client_builder_redirect_limit" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_redirect_disabled" => {
+                    if args.len() != 1 { return Err("requests_client_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_proxy" => {
+                    if args.len() != 2 { return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_tls_config" => {
+                    if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_new" => {
+                    if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_header" => {
+                    if args.len() != 3 { return Err("requests_request_builder_header() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_headers" | "requests_request_builder_multipart" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_query" | "requests_request_builder_form" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_json" => {
+                    if args.len() != 2 { return Err("requests_request_builder_json() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_timeout" | "requests_request_builder_redirect_limit" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_redirect_disabled" | "requests_request_builder_basic_auth" => {
+                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_bearer_auth" => {
+                    if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_send" => {
+                    if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown) // Result(Response, RequestError)
+                }
+                "requests_response_status" => {
+                    if args.len() != 1 { return Err("requests_response_status() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Int) // StatusCode
+                }
+                "requests_response_headers" => {
+                    if args.len() != 1 { return Err("requests_response_headers() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_url" => {
+                    if args.len() != 1 { return Err("requests_response_url() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "requests_response_text" => {
+                    if args.len() != 1 { return Err("requests_response_text() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::String)
+                }
+                "requests_response_bytes" => {
+                    if args.len() != 1 { return Err("requests_response_bytes() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_json" => {
+                    if args.len() != 1 { return Err("requests_response_json() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_content_length" => {
+                    if args.len() != 1 { return Err("requests_response_content_length() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Int)
+                }
+                "requests_response_is_success" | "requests_response_is_client_error" | "requests_response_is_server_error" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "requests_response_error_for_status" => {
+                    if args.len() != 1 { return Err("requests_response_error_for_status() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown) // Result(Response, RequestError)
+                }
+                "requests_status_code_code" => {
+                    if args.len() != 1 { return Err("requests_status_code_code() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Int)
+                }
+                "requests_status_code_is_success" | "requests_status_code_is_client_error"
+                | "requests_status_code_is_server_error" | "requests_status_code_is_redirect" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "requests_header_map_new" => {
+                    if !args.is_empty() { return Err("requests_header_map_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_header_map_insert" | "requests_header_map_append" | "requests_header_map_remove" => {
+                    if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_header_map_get" => {
+                    if args.len() != 2 { return Err("requests_header_map_get() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown) // Option(str)
+                }
+                "requests_header_map_contains" => {
+                    if args.len() != 2 { return Err("requests_header_map_contains() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "requests_multipart_new" => {
+                    if !args.is_empty() { return Err("requests_multipart_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_multipart_text" => {
+                    if args.len() != 3 { return Err("requests_multipart_text() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_multipart_file" => {
+                    if args.len() != 3 { return Err("requests_multipart_file() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_multipart_file_with_metadata" => {
+                    if args.len() != 5 { return Err("requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    infer_type(&args[3], env, defs, constraints)?;
+                    infer_type(&args[4], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_new" => {
+                    if !args.is_empty() { return Err("requests_tls_config_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_add_ca_cert" => {
+                    if args.len() != 2 { return Err("requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_add_client_cert" => {
+                    if args.len() != 3 { return Err("requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_danger_accept_invalid_certs" | "requests_tls_config_danger_accept_invalid_hostnames" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_cookie_jar_new" => {
+                    if !args.is_empty() { return Err("requests_cookie_jar_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_cookie_jar_add" => {
+                    if args.len() != 2 { return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_cookie_parse" => {
+                    if args.len() != 1 { return Err("requests_cookie_parse() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_copy_to" => {
+                    if args.len() != 2 { return Err("requests_response_copy_to() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_chunks" => {
+                    if args.len() != 2 { return Err("requests_response_chunks() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_stream" => {
+                    if args.len() != 1 { return Err("requests_response_stream() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_stream_read" => {
+                    if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unknown) // Option(bytes)
+                }
+                "requests_stream_has_more" => {
+                    if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Bool)
+                }
+                "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
+                | "requests_header_map_free" | "requests_multipart_free"
+                | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
+                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_new" => {
+                    if !args.is_empty() { return Err("requests_session_new() takes no arguments".to_string()); }
+                    Ok(Type::Unknown)
+                }
+                "requests_session_request" => {
+                    if args.len() != 3 { return Err("requests_session_request() takes exactly 3 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_set_headers" => {
+                    if args.len() != 2 { return Err("requests_request_builder_set_headers() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_request_builder_verify" => {
+                    if args.len() != 2 { return Err("requests_request_builder_verify() takes exactly 2 arguments".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    infer_type(&args[1], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
+                "requests_response_headers_list" => {
+                    if args.len() != 1 { return Err("requests_response_headers_list() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_session_free" => {
+                    if args.len() != 1 { return Err("requests_session_free() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unit)
+                }
                 _ => {
                     let resolved = resolve_pkg_name(defs, func)
                         .or_else(|| defs.resolve_type(func))
@@ -7571,6 +7886,316 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         "process_args" => {
             if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
             Ok(Type::List(Box::new(Type::String)))
+        }
+        // ===== Requests operations (Phase C-1.12) =====
+        "requests_client_new" => {
+            if !args.is_empty() { return Err("requests_client_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_new" => {
+            if !args.is_empty() { return Err("requests_client_builder_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_build" => {
+            if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_default_headers" => {
+            if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_timeout" | "requests_client_builder_redirect_limit" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_redirect_disabled" => {
+            if args.len() != 1 { return Err("requests_client_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_proxy" => {
+            if args.len() != 2 { return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_client_builder_tls_config" => {
+            if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_new" => {
+            if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_header" => {
+            if args.len() != 3 { return Err("requests_request_builder_header() takes exactly 3 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_headers" | "requests_request_builder_multipart" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_query" | "requests_request_builder_form" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_json" => {
+            if args.len() != 2 { return Err("requests_request_builder_json() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_timeout" | "requests_request_builder_redirect_limit" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_redirect_disabled" | "requests_request_builder_basic_auth" => {
+            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_bearer_auth" => {
+            if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_send" => {
+            if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_response_status" => {
+            if args.len() != 1 { return Err("requests_response_status() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Int)
+        }
+        "requests_response_headers" => {
+            if args.len() != 1 { return Err("requests_response_headers() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_response_url" => {
+            if args.len() != 1 { return Err("requests_response_url() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::String)
+        }
+        "requests_response_text" => {
+            if args.len() != 1 { return Err("requests_response_text() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::String)
+        }
+        "requests_response_bytes" | "requests_response_json" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_response_content_length" => {
+            if args.len() != 1 { return Err("requests_response_content_length() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Int)
+        }
+        "requests_response_is_success" | "requests_response_is_client_error" | "requests_response_is_server_error" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "requests_response_error_for_status" => {
+            if args.len() != 1 { return Err("requests_response_error_for_status() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_status_code_code" => {
+            if args.len() != 1 { return Err("requests_status_code_code() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Int)
+        }
+        "requests_status_code_is_success" | "requests_status_code_is_client_error"
+        | "requests_status_code_is_server_error" | "requests_status_code_is_redirect" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "requests_header_map_new" => {
+            if !args.is_empty() { return Err("requests_header_map_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_header_map_insert" | "requests_header_map_append" | "requests_header_map_remove" => {
+            if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_header_map_get" => {
+            if args.len() != 2 { return Err("requests_header_map_get() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_header_map_contains" => {
+            if args.len() != 2 { return Err("requests_header_map_contains() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "requests_multipart_new" => {
+            if !args.is_empty() { return Err("requests_multipart_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_multipart_text" => {
+            if args.len() != 3 { return Err("requests_multipart_text() takes exactly 3 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_multipart_file" => {
+            if args.len() != 3 { return Err("requests_multipart_file() takes exactly 3 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_multipart_file_with_metadata" => {
+            if args.len() != 5 { return Err("requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            let _ = check_expr(&args[3], env, defs)?;
+            let _ = check_expr(&args[4], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_tls_config_new" => {
+            if !args.is_empty() { return Err("requests_tls_config_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_tls_config_add_ca_cert" => {
+            if args.len() != 2 { return Err("requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_tls_config_add_client_cert" => {
+            if args.len() != 3 { return Err("requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_tls_config_danger_accept_invalid_certs" | "requests_tls_config_danger_accept_invalid_hostnames" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_cookie_jar_new" => {
+            if !args.is_empty() { return Err("requests_cookie_jar_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_cookie_jar_add" => {
+            if args.len() != 2 { return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_cookie_parse" => {
+            if args.len() != 1 { return Err("requests_cookie_parse() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_response_copy_to" => {
+            if args.len() != 2 { return Err("requests_response_copy_to() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_response_chunks" => {
+            if args.len() != 2 { return Err("requests_response_chunks() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_response_stream" => {
+            if args.len() != 1 { return Err("requests_response_stream() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_stream_read" => {
+            if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_stream_has_more" => {
+            if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Bool)
+        }
+        "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
+        | "requests_header_map_free" | "requests_multipart_free"
+        | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
+            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unit)
+        }
+        "requests_session_new" => {
+            if !args.is_empty() { return Err("requests_session_new() takes no arguments".to_string()); }
+            Ok(Type::Unknown)
+        }
+        "requests_session_request" => {
+            if args.len() != 3 { return Err("requests_session_request() takes exactly 3 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_set_headers" => {
+            if args.len() != 2 { return Err("requests_request_builder_set_headers() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unit)
+        }
+        "requests_request_builder_verify" => {
+            if args.len() != 2 { return Err("requests_request_builder_verify() takes exactly 2 arguments".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            let _ = check_expr(&args[1], env, defs)?;
+            Ok(Type::Unit)
+        }
+        "requests_response_headers_list" => {
+            if args.len() != 1 { return Err("requests_response_headers_list() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_session_free" => {
+            if args.len() != 1 { return Err("requests_session_free() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unit)
         }
         other => {
                     // Function reference in env (e.g. `let f = add; f(3, 4)`)
@@ -10874,7 +11499,42 @@ fn is_runtime_builtin(name: &str) -> bool {
              | "env_get" | "env_has" | "env_set" | "env_remove" | "env_all"
              | "regex_compile" | "regex_is_match" | "regex_match" | "regex_find"
              | "regex_find_all" | "regex_replace" | "regex_replace_all" | "regex_split"
-              | "process_spawn" | "process_run" | "process_output" | "process_wait" | "process_kill" | "process_status" | "process_args"
+               | "process_spawn" | "process_run" | "process_output" | "process_wait" | "process_kill" | "process_status" | "process_args"
+              | "requests_client_new" | "requests_client_builder_new" | "requests_client_builder_build"
+              | "requests_client_builder_default_headers" | "requests_client_builder_timeout"
+              | "requests_client_builder_redirect_limit" | "requests_client_builder_redirect_disabled"
+              | "requests_client_builder_proxy" | "requests_client_builder_tls_config"
+              | "requests_request_builder_new" | "requests_request_builder_header"
+              | "requests_request_builder_headers" | "requests_request_builder_query"
+              | "requests_request_builder_body_bytes" | "requests_request_builder_body_str"
+              | "requests_request_builder_json" | "requests_request_builder_form"
+              | "requests_request_builder_multipart" | "requests_request_builder_timeout"
+              | "requests_request_builder_redirect_limit" | "requests_request_builder_redirect_disabled"
+              | "requests_request_builder_basic_auth" | "requests_request_builder_bearer_auth"
+              | "requests_send"
+              | "requests_response_status" | "requests_response_headers" | "requests_response_url"
+              | "requests_response_text" | "requests_response_bytes" | "requests_response_json"
+              | "requests_response_content_length"
+              | "requests_response_is_success" | "requests_response_is_client_error" | "requests_response_is_server_error"
+              | "requests_response_error_for_status"
+              | "requests_status_code_code" | "requests_status_code_is_success"
+              | "requests_status_code_is_client_error" | "requests_status_code_is_server_error" | "requests_status_code_is_redirect"
+              | "requests_header_map_new" | "requests_header_map_insert" | "requests_header_map_append"
+              | "requests_header_map_remove" | "requests_header_map_get" | "requests_header_map_contains"
+              | "requests_multipart_new" | "requests_multipart_text" | "requests_multipart_file"
+              | "requests_multipart_file_with_metadata"
+              | "requests_tls_config_new" | "requests_tls_config_add_ca_cert"
+              | "requests_tls_config_add_client_cert" | "requests_tls_config_danger_accept_invalid_certs"
+              | "requests_tls_config_danger_accept_invalid_hostnames"
+              | "requests_cookie_jar_new" | "requests_cookie_jar_add" | "requests_cookie_parse"
+              | "requests_response_copy_to" | "requests_response_chunks" | "requests_response_stream"
+              | "requests_stream_read" | "requests_stream_has_more"
+              | "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
+              | "requests_header_map_free" | "requests_multipart_free"
+              | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free"
+              | "requests_session_new" | "requests_session_request"
+              | "requests_request_builder_set_headers" | "requests_request_builder_verify"
+              | "requests_response_headers_list" | "requests_session_free"
     )
 }
 
@@ -11078,6 +11738,957 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
         return Err(format!("JSON parse error: trailing content at position {}", pos));
     }
     Ok(result)
+}
+
+fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Value>, defs: &Defs) -> Result<Option<Value>, String> {
+    let result = match func {
+        "requests_client_new" => {
+                if !args.is_empty() { return Err("requests_client_new() takes no arguments".to_string()); }
+                let mut fields = Vec::new();
+                fields.push(("type".to_string(), Value::String("Client".to_string())));
+                fields.push(("timeout".to_string(), Value::Int(30)));
+                Ok(Value::Struct { name: "Client".to_string(), fields })
+            }
+            "requests_client_builder_new" => {
+                if !args.is_empty() { return Err("requests_client_builder_new() takes no arguments".to_string()); }
+                let mut fields = Vec::new();
+                fields.push(("timeout".to_string(), Value::Int(30)));
+                fields.push(("redirect_limit".to_string(), Value::Int(10)));
+                fields.push(("disable_redirects".to_string(), Value::Bool(false)));
+                fields.push(("proxy_url".to_string(), Value::String(String::new())));
+                Ok(Value::Struct { name: "ClientBuilder".to_string(), fields })
+            }
+            "requests_client_builder_build" => {
+                if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
+                let builder_val = eval_expr(&args[0], env, defs)?;
+                let timeout_secs = match &builder_val {
+                    Value::Struct { fields, .. } => {
+                        fields.iter().find(|(k, _)| k == "timeout")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i as u64), _ => None })
+                            .unwrap_or(30)
+                    }
+                    _ => 30,
+                };
+                let mut fields = Vec::new();
+                fields.push(("type".to_string(), Value::String("Client".to_string())));
+                fields.push(("timeout".to_string(), Value::Int(timeout_secs as i64)));
+                Ok(Value::Struct { name: "Client".to_string(), fields })
+            }
+            "requests_client_builder_default_headers" => {
+                if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _headers = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_client_builder_timeout" => {
+                if args.len() != 2 { return Err("requests_client_builder_timeout() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let timeout = eval_expr(&args[1], env, defs)?;
+                match (builder, timeout) {
+                    (Value::Struct { mut fields, name }, Value::Int(t)) => {
+                        if let Some(pos) = fields.iter().position(|(k, _)| k == "timeout") {
+                            fields[pos].1 = Value::Int(t);
+                        } else {
+                            fields.push(("timeout".to_string(), Value::Int(t)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_client_builder_timeout() expects (Struct, int)".to_string()),
+                }
+            }
+            "requests_client_builder_redirect_limit" => {
+                if args.len() != 2 { return Err("requests_client_builder_redirect_limit() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let limit = eval_expr(&args[1], env, defs)?;
+                match (builder, limit) {
+                    (Value::Struct { mut fields, name }, Value::Int(l)) => {
+                        if let Some(pos) = fields.iter().position(|(k, _)| k == "redirect_limit") {
+                            fields[pos].1 = Value::Int(l);
+                        } else {
+                            fields.push(("redirect_limit".to_string(), Value::Int(l)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_client_builder_redirect_limit() expects (Struct, int)".to_string()),
+                }
+            }
+            "requests_client_builder_redirect_disabled" => {
+                if args.len() != 1 { return Err("requests_client_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                match builder {
+                    Value::Struct { mut fields, name } => {
+                        if let Some(pos) = fields.iter().position(|(k, _)| k == "disable_redirects") {
+                            fields[pos].1 = Value::Bool(true);
+                        } else {
+                            fields.push(("disable_redirects".to_string(), Value::Bool(true)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_client_builder_redirect_disabled() expects Struct".to_string()),
+                }
+            }
+            "requests_client_builder_proxy" => {
+                if args.len() != 2 { return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let proxy = eval_expr(&args[1], env, defs)?;
+                match (builder, proxy) {
+                    (Value::Struct { mut fields, name }, Value::String(p)) => {
+                        if let Some(pos) = fields.iter().position(|(k, _)| k == "proxy_url") {
+                            fields[pos].1 = Value::String(p);
+                        } else {
+                            fields.push(("proxy_url".to_string(), Value::String(p)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_client_builder_proxy() expects (Struct, str)".to_string()),
+                }
+            }
+            "requests_client_builder_tls_config" => {
+                if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _tls = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_request_builder_new" => {
+                if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
+                let _client = eval_expr(&args[0], env, defs)?;
+                let method = eval_expr(&args[1], env, defs)?;
+                let url = eval_expr(&args[2], env, defs)?;
+                let method_str = match method { Value::String(s) => s, _ => return Err("requests_request_builder_new() expects string method".to_string()) };
+                let url_str = match url { Value::String(s) => s, _ => return Err("requests_request_builder_new() expects string url".to_string()) };
+                let mut fields = Vec::new();
+                fields.push(("method".to_string(), Value::String(method_str)));
+                fields.push(("url".to_string(), Value::String(url_str)));
+                fields.push(("headers".to_string(), Value::Map(HashMap::new())));
+                fields.push(("body".to_string(), Value::Option(None)));
+                fields.push(("timeout".to_string(), Value::Option(None)));
+                Ok(Value::Struct { name: "RequestBuilder".to_string(), fields })
+            }
+            "requests_request_builder_header" => {
+                if args.len() != 3 { return Err("requests_request_builder_header() takes exactly 3 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let key = eval_expr(&args[1], env, defs)?;
+                let value = eval_expr(&args[2], env, defs)?;
+                match (builder, key, value) {
+                    (Value::Struct { mut fields, name }, Value::String(k), Value::String(v)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
+                            if let Value::Map(mut m) = fields[pos].1.clone() {
+                                m.insert(Value::String(k), Value::String(v));
+                                fields[pos].1 = Value::Map(m);
+                            }
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_header() expects (Struct, str, str)".to_string()),
+                }
+            }
+            "requests_request_builder_headers" => {
+                if args.len() != 2 { return Err("requests_request_builder_headers() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _headers = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_request_builder_query" => {
+                if args.len() != 2 { return Err("requests_request_builder_query() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _params = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
+                if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let body = eval_expr(&args[1], env, defs)?;
+                match (builder, body) {
+                    (Value::Struct { mut fields, name }, Value::String(b)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(b))));
+                        } else {
+                            fields.push(("body".to_string(), Value::Option(Some(Box::new(Value::String(b))))));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err(format!("{}() expects (Struct, str)", func)),
+                }
+            }
+            "requests_request_builder_json" => {
+                if args.len() != 2 { return Err("requests_request_builder_json() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let json_val = eval_expr(&args[1], env, defs)?;
+                let json_str = match &json_val {
+                    Value::String(s) => s.clone(),
+                    Value::Int(i) => i.to_string(),
+                    Value::Float(f) => f.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    _ => return Err("requests_request_builder_json() expects a JSON-serializable value".to_string()),
+                };
+                match builder {
+                    Value::Struct { mut fields, name } => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(json_str))));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_json() expects Struct".to_string()),
+                }
+            }
+            "requests_request_builder_form" => {
+                if args.len() != 2 { return Err("requests_request_builder_form() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _data = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_request_builder_multipart" => {
+                if args.len() != 2 { return Err("requests_request_builder_multipart() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _multipart = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_request_builder_timeout" => {
+                if args.len() != 2 { return Err("requests_request_builder_timeout() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let timeout = eval_expr(&args[1], env, defs)?;
+                match (builder, timeout) {
+                    (Value::Struct { mut fields, name }, Value::Int(t)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "timeout") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::Int(t))));
+                        } else {
+                            fields.push(("timeout".to_string(), Value::Option(Some(Box::new(Value::Int(t))))));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_timeout() expects (Struct, int)".to_string()),
+                }
+            }
+            "requests_request_builder_redirect_limit" => {
+                if args.len() != 2 { return Err("requests_request_builder_redirect_limit() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _limit = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_request_builder_redirect_disabled" => {
+                if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                match builder {
+                    Value::Struct { mut fields, name } => {
+                        fields.push(("disable_redirects".to_string(), Value::Bool(true)));
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_redirect_disabled() expects RequestBuilder".to_string()),
+                }
+            }
+            "requests_request_builder_basic_auth" => {
+                if args.len() != 3 { return Err("requests_request_builder_basic_auth() takes exactly 3 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let user = eval_expr(&args[1], env, defs)?;
+                let password = eval_expr(&args[2], env, defs)?;
+                match (builder, user, password) {
+                    (Value::Struct { mut fields, name }, Value::String(u), Value::String(p)) => {
+                        fields.push(("basic_auth_user".to_string(), Value::String(u)));
+                        fields.push(("basic_auth_pass".to_string(), Value::String(p)));
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_basic_auth() expects (RequestBuilder, str, str)".to_string()),
+                }
+            }
+            "requests_request_builder_bearer_auth" => {
+                if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let _token = eval_expr(&args[1], env, defs)?;
+                Ok(builder)
+            }
+            "requests_send" => {
+                if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
+                let builder_val = eval_expr(&args[0], env, defs)?;
+                let (method, url, body_val, headers_val, params_val, basic_auth_user, basic_auth_pass, bearer_token, timeout_val, verify_val) = match &builder_val {
+                    Value::Struct { fields, .. } => {
+                        let method = fields.iter().find(|(k, _)| k == "method")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_else(|| "GET".to_string());
+                        let url = fields.iter().find(|(k, _)| k == "url")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v {
+                                Value::Option(Some(b)) => match *b.clone() {
+                                    Value::String(s) => Some(s),
+                                    _ => None,
+                                },
+                                Value::String(s) => Some(s.clone()),
+                                _ => None,
+                            });
+                        let headers = fields.iter().find(|(k, _)| k == "headers")
+                            .and_then(|(_, v)| match v { Value::Map(m) => Some(m.clone()), _ => None })
+                            .unwrap_or_default();
+                        let params = fields.iter().find(|(k, _)| k == "params")
+                            .and_then(|(_, v)| match v { Value::Array(a) => Some(a.clone()), _ => None })
+                            .unwrap_or_default();
+                        let basic_auth_user = fields.iter().find(|(k, _)| k == "basic_auth_user")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None });
+                        let basic_auth_pass = fields.iter().find(|(k, _)| k == "basic_auth_pass")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None });
+                        let bearer_token = fields.iter().find(|(k, _)| k == "bearer_token")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None });
+                        let timeout_val = fields.iter().find(|(k, _)| k == "timeout")
+                            .and_then(|(_, v)| match v {
+                                Value::Int(i) => Some(*i),
+                                Value::Option(Some(b)) => match **b { Value::Int(i) => Some(i), _ => None },
+                                _ => None,
+                            });
+                        let verify_val = fields.iter().find(|(k, _)| k == "verify")
+                            .and_then(|(_, v)| match v { Value::Bool(b) => Some(*b), _ => None });
+                        (method, url, body, headers, params, basic_auth_user, basic_auth_pass, bearer_token, timeout_val, verify_val)
+                    }
+                    Value::Tuple(parts) if parts.len() >= 2 => {
+                        let method = match &parts[0] { Value::String(s) => s.clone(), _ => "GET".to_string() };
+                        let url = match &parts[1] { Value::String(s) => s.clone(), _ => String::new() };
+                        (method, url, None, HashMap::new(), vec![], None, None, None, None, None)
+                    }
+                    _ => return Err("requests_send() expects a RequestBuilder or tuple".to_string()),
+                };
+                let mut cmd_parts = Vec::new();
+                cmd_parts.push("curl".to_string());
+                cmd_parts.push("-s".to_string());
+                cmd_parts.push("-i".to_string());
+                cmd_parts.push("-X".to_string());
+                cmd_parts.push(method.clone());
+                if let Some(t) = timeout_val {
+                    cmd_parts.push("--connect-timeout".to_string());
+                    cmd_parts.push(t.to_string());
+                }
+                if verify_val == Some(false) {
+                    cmd_parts.push("-k".to_string());
+                }
+                for (k, v) in &headers_val {
+                    if let (Value::String(key), Value::String(val)) = (k, v) {
+                        cmd_parts.push("-H".to_string());
+                        cmd_parts.push(format!("{}: {}", key, val));
+                    }
+                }
+                if let Some(user) = &basic_auth_user {
+                    let pass = basic_auth_pass.as_deref().unwrap_or("");
+                    cmd_parts.push("-u".to_string());
+                    cmd_parts.push(format!("{}:{}", user, pass));
+                }
+                if let Some(token) = &bearer_token {
+                    cmd_parts.push("-H".to_string());
+                    cmd_parts.push(format!("Authorization: Bearer {}", token));
+                }
+                let mut param_url = url.clone();
+                let mut first = true;
+                for chunk in params_val.chunks(2) {
+                    if let (Value::String(pk), Value::String(pv)) = (&chunk[0], &chunk.get(1).unwrap_or(&chunk[0])) {
+                        let separator = if first { "?" } else { "&" };
+                        if first {
+                            param_url = format!("{}{}{}={}", param_url, separator, pk, pv);
+                        } else {
+                            param_url = format!("{}{}={}", param_url, pk, pv);
+                        }
+                        first = false;
+                    }
+                }
+                if let Some(body) = &body_val {
+                    if body.starts_with('{') || body.starts_with('[') {
+                        cmd_parts.push("-H".to_string());
+                        cmd_parts.push("Content-Type: application/json".to_string());
+                    }
+                    cmd_parts.push("-d".to_string());
+                    cmd_parts.push(body.clone());
+                }
+                cmd_parts.push(param_url);
+                let shell_cmd = cmd_parts.join(" ");
+                match std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&shell_cmd)
+                    .output()
+                {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        let mut resp_headers = HashMap::new();
+                        let mut status_code: i64 = 0;
+                        let mut body_text = String::new();
+                        let mut lines = stdout.lines();
+                        let mut header_section_ended = false;
+                        let mut current_line = String::new();
+                        for line in lines.by_ref() {
+                            if header_section_ended {
+                                body_text.push_str(line);
+                                body_text.push('\n');
+                            } else if line.is_empty() {
+                                header_section_ended = true;
+                            } else if let Some(code) = line.strip_prefix("HTTP/") {
+                                if let Some(pos) = code.find(' ') {
+                                    status_code = code[..pos].trim().parse().unwrap_or(0);
+                                }
+                            } else if let Some(pos) = line.find(':') {
+                                let key = line[..pos].trim().to_string();
+                                let val = line[pos+1..].trim().to_string();
+                                resp_headers.insert(key, val);
+                            }
+                        }
+                        if body_text.ends_with('\n') {
+                            body_text.pop();
+                        }
+                        let mut fields = Vec::new();
+                        fields.push(("status_code".to_string(), Value::Int(status_code)));
+                        fields.push(("url".to_string(), Value::String(url)));
+                        fields.push(("headers".to_string(), Value::Map(resp_headers.into_iter().map(|(k,v)| (Value::String(k), Value::String(v))).collect())));
+                        fields.push(("body".to_string(), Value::String(body_text)));
+                        Ok(Value::Struct { name: "Response".to_string(), fields })
+                    }
+                    Err(e) => {
+                        let mut fields = Vec::new();
+                        fields.push(("variant".to_string(), Value::String("RequestError".to_string())));
+                        fields.push(("message".to_string(), Value::String(format!("Request failed: {}", e))));
+                        Ok(Value::Struct { name: "RequestError".to_string(), fields })
+                    }
+                }
+            }
+            "requests_response_status" => {
+                if args.len() != 1 { return Err("requests_response_status() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let code = fields.iter().find(|(k, _)| k == "status_code")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(0);
+                        Ok(Value::Int(code))
+                    }
+                    _ => Err("requests_response_status() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_headers" => {
+                if args.len() != 1 { return Err("requests_response_headers() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let headers = fields.iter().find(|(k, _)| k == "headers")
+                            .cloned()
+                            .map(|(_, v)| v)
+                            .unwrap_or(Value::Map(HashMap::new()));
+                        Ok(headers)
+                    }
+                    _ => Err("requests_response_headers() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_url" => {
+                if args.len() != 1 { return Err("requests_response_url() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let url = fields.iter().find(|(k, _)| k == "url")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        Ok(Value::String(url))
+                    }
+                    _ => Err("requests_response_url() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_text" => {
+                if args.len() != 1 { return Err("requests_response_text() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        Ok(Value::String(body))
+                    }
+                    _ => Err("requests_response_text() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_bytes" => {
+                if args.len() != 1 { return Err("requests_response_bytes() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.as_bytes().to_vec()), _ => None })
+                            .unwrap_or_default();
+                        Ok(Value::Option(Some(Box::new(Value::Array(body.into_iter().map(|b| Value::Int(b as i64)).collect())))))
+                    }
+                    _ => Err("requests_response_bytes() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_json" => {
+                if args.len() != 1 { return Err("requests_response_json() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        match json_parse_str(&body) {
+                            Ok(json_val) => Ok(Value::Option(Some(Box::new(Value::Json(json_val))))),
+                            Err(_) => Ok(Value::Option(None)),
+                        }
+                    }
+                    _ => Err("requests_response_json() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_content_length" => {
+                if args.len() != 1 { return Err("requests_response_content_length() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.len() as i64), _ => None })
+                            .unwrap_or(-1);
+                        Ok(Value::Int(body))
+                    }
+                    _ => Err("requests_response_content_length() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_is_success" => {
+                if args.len() != 1 { return Err("requests_response_is_success() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let code = fields.iter().find(|(k, _)| k == "status_code")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(0);
+                        Ok(Value::Bool(code >= 200 && code < 300))
+                    }
+                    _ => Err("requests_response_is_success() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_is_client_error" => {
+                if args.len() != 1 { return Err("requests_response_is_client_error() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let code = fields.iter().find(|(k, _)| k == "status_code")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(0);
+                        Ok(Value::Bool(code >= 400 && code < 500))
+                    }
+                    _ => Err("requests_response_is_client_error() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_is_server_error" => {
+                if args.len() != 1 { return Err("requests_response_is_server_error() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let code = fields.iter().find(|(k, _)| k == "status_code")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(0);
+                        Ok(Value::Bool(code >= 500 && code < 600))
+                    }
+                    _ => Err("requests_response_is_server_error() expects Response struct".to_string()),
+                }
+            }
+            "requests_response_error_for_status" => {
+                if args.len() != 1 { return Err("requests_response_error_for_status() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let code = fields.iter().find(|(k, _)| k == "status_code")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(0);
+                        if code >= 200 && code < 300 {
+                            Ok(resp)
+                        } else {
+                            let mut err_fields = Vec::new();
+                            err_fields.push(("variant".to_string(), Value::String("RequestError".to_string())));
+                            err_fields.push(("message".to_string(), Value::String(format!("HTTP error: {}", code))));
+                            Ok(Value::Struct { name: "RequestError".to_string(), fields: err_fields })
+                        }
+                    }
+                    _ => Err("requests_response_error_for_status() expects Response struct".to_string()),
+                }
+            }
+            "requests_status_code_code" => {
+                if args.len() != 1 { return Err("requests_status_code_code() takes exactly 1 argument".to_string()); }
+                let code = eval_expr(&args[0], env, defs)?;
+                match code { Value::Int(c) => Ok(Value::Int(c)), _ => Ok(code) }
+            }
+            "requests_status_code_is_success" => {
+                if args.len() != 1 { return Err("requests_status_code_is_success() takes exactly 1 argument".to_string()); }
+                let code = eval_expr(&args[0], env, defs)?;
+                match code { Value::Int(c) => Ok(Value::Bool(c >= 200 && c < 300)), _ => Ok(Value::Bool(false)) }
+            }
+            "requests_status_code_is_client_error" => {
+                if args.len() != 1 { return Err("requests_status_code_is_client_error() takes exactly 1 argument".to_string()); }
+                let code = eval_expr(&args[0], env, defs)?;
+                match code { Value::Int(c) => Ok(Value::Bool(c >= 400 && c < 500)), _ => Ok(Value::Bool(false)) }
+            }
+            "requests_status_code_is_server_error" => {
+                if args.len() != 1 { return Err("requests_status_code_is_server_error() takes exactly 1 argument".to_string()); }
+                let code = eval_expr(&args[0], env, defs)?;
+                match code { Value::Int(c) => Ok(Value::Bool(c >= 500 && c < 600)), _ => Ok(Value::Bool(false)) }
+            }
+            "requests_status_code_is_redirect" => {
+                if args.len() != 1 { return Err("requests_status_code_is_redirect() takes exactly 1 argument".to_string()); }
+                let code = eval_expr(&args[0], env, defs)?;
+                match code { Value::Int(c) => Ok(Value::Bool(c >= 300 && c < 400)), _ => Ok(Value::Bool(false)) }
+            }
+            "requests_header_map_new" => {
+                if !args.is_empty() { return Err("requests_header_map_new() takes no arguments".to_string()); }
+                Ok(Value::Map(HashMap::new()))
+            }
+            "requests_header_map_insert" | "requests_header_map_append" => {
+                if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+                let map_val = eval_expr(&args[0], env, defs)?;
+                let key = eval_expr(&args[1], env, defs)?;
+                let value = eval_expr(&args[2], env, defs)?;
+                match (map_val, key, value) {
+                    (Value::Map(mut m), Value::String(k), Value::String(v)) => {
+                        m.insert(Value::String(k), Value::String(v));
+                        Ok(Value::Map(m))
+                    }
+                    _ => Err(format!("{}() expects (Map, str, str)", func)),
+                }
+            }
+            "requests_header_map_remove" => {
+                if args.len() != 3 { return Err("requests_header_map_remove() takes exactly 3 arguments".to_string()); }
+                let map_val = eval_expr(&args[0], env, defs)?;
+                let key = eval_expr(&args[1], env, defs)?;
+                let _value = eval_expr(&args[2], env, defs)?;
+                match (map_val, key) {
+                    (Value::Map(mut m), Value::String(k)) => {
+                        m.remove(&Value::String(k));
+                        Ok(Value::Map(m))
+                    }
+                    _ => Err("requests_header_map_remove() expects (Map, str, _)".to_string()),
+                }
+            }
+            "requests_header_map_get" => {
+                if args.len() != 2 { return Err("requests_header_map_get() takes exactly 2 arguments".to_string()); }
+                let map_val = eval_expr(&args[0], env, defs)?;
+                let key = eval_expr(&args[1], env, defs)?;
+                match (map_val, key) {
+                    (Value::Map(m), Value::String(k)) => {
+                        let val = m.get(&Value::String(k)).cloned();
+                        Ok(Value::Option(val.map(Box::new)))
+                    }
+                    _ => Err("requests_header_map_get() expects (Map, str)".to_string()),
+                }
+            }
+            "requests_header_map_contains" => {
+                if args.len() != 2 { return Err("requests_header_map_contains() takes exactly 2 arguments".to_string()); }
+                let map_val = eval_expr(&args[0], env, defs)?;
+                let key = eval_expr(&args[1], env, defs)?;
+                match (map_val, key) {
+                    (Value::Map(m), Value::String(k)) => {
+                        Ok(Value::Bool(m.contains_key(&Value::String(k))))
+                    }
+                    _ => Err("requests_header_map_contains() expects (Map, str)".to_string()),
+                }
+            }
+            "requests_multipart_new" => {
+                if !args.is_empty() { return Err("requests_multipart_new() takes no arguments".to_string()); }
+                Ok(Value::Array(vec![]))
+            }
+            "requests_multipart_text" => {
+                if args.len() != 3 { return Err("requests_multipart_text() takes exactly 3 arguments".to_string()); }
+                let multipart = eval_expr(&args[0], env, defs)?;
+                let name = eval_expr(&args[1], env, defs)?;
+                let value = eval_expr(&args[2], env, defs)?;
+                match (multipart, name, value) {
+                    (Value::Array(mut arr), Value::String(n), Value::String(v)) => {
+                        arr.push(Value::Tuple(vec![Value::String(n), Value::String(v), Value::String("text".to_string())]));
+                        Ok(Value::Array(arr))
+                    }
+                    _ => Err("requests_multipart_text() expects (Array, str, str)".to_string()),
+                }
+            }
+            "requests_multipart_file" => {
+                if args.len() != 3 { return Err("requests_multipart_file() takes exactly 3 arguments".to_string()); }
+                let multipart = eval_expr(&args[0], env, defs)?;
+                let name = eval_expr(&args[1], env, defs)?;
+                let file_path = eval_expr(&args[2], env, defs)?;
+                match (multipart, name, file_path) {
+                    (Value::Array(mut arr), Value::String(n), Value::String(f)) => {
+                        arr.push(Value::Tuple(vec![Value::String(n), Value::String(f), Value::String("file".to_string())]));
+                        Ok(Value::Array(arr))
+                    }
+                    _ => Err("requests_multipart_file() expects (Array, str, str)".to_string()),
+                }
+            }
+            "requests_multipart_file_with_metadata" => {
+                if args.len() != 5 { return Err("requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string()); }
+                let multipart = eval_expr(&args[0], env, defs)?;
+                let name = eval_expr(&args[1], env, defs)?;
+                let file_path = eval_expr(&args[2], env, defs)?;
+                let filename = eval_expr(&args[3], env, defs)?;
+                let content_type = eval_expr(&args[4], env, defs)?;
+                match (multipart, name, file_path, filename, content_type) {
+                    (Value::Array(mut arr), Value::String(n), Value::String(f), Value::String(fn_), Value::String(ct)) => {
+                        arr.push(Value::Tuple(vec![Value::String(n), Value::String(f), Value::String("file".to_string()), Value::String(fn_), Value::String(ct)]));
+                        Ok(Value::Array(arr))
+                    }
+                    _ => Err("requests_multipart_file_with_metadata() expects (Array, str, str, str, str)".to_string()),
+                }
+            }
+            "requests_tls_config_new" => {
+                if !args.is_empty() { return Err("requests_tls_config_new() takes no arguments".to_string()); }
+                let mut fields = Vec::new();
+                fields.push(("ca_cert_path".to_string(), Value::Option(None)));
+                fields.push(("client_cert_path".to_string(), Value::Option(None)));
+                fields.push(("client_key_path".to_string(), Value::Option(None)));
+                fields.push(("accept_invalid_certs".to_string(), Value::Bool(false)));
+                fields.push(("accept_invalid_hostnames".to_string(), Value::Bool(false)));
+                Ok(Value::Struct { name: "TlsConfig".to_string(), fields })
+            }
+            "requests_tls_config_add_ca_cert" => {
+                if args.len() != 2 { return Err("requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string()); }
+                let config = eval_expr(&args[0], env, defs)?;
+                let path = eval_expr(&args[1], env, defs)?;
+                match (config, path) {
+                    (Value::Struct { mut fields, name }, Value::String(p)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "ca_cert_path") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(p))));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_tls_config_add_ca_cert() expects (Struct, str)".to_string()),
+                }
+            }
+            "requests_tls_config_add_client_cert" => {
+                if args.len() != 3 { return Err("requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string()); }
+                let config = eval_expr(&args[0], env, defs)?;
+                let cert = eval_expr(&args[1], env, defs)?;
+                let key = eval_expr(&args[2], env, defs)?;
+                match (config, cert, key) {
+                    (Value::Struct { mut fields, name }, Value::String(c), Value::String(k)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "client_cert_path") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(c))));
+                        }
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "client_key_path") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(k))));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_tls_config_add_client_cert() expects (Struct, str, str)".to_string()),
+                }
+            }
+            "requests_tls_config_danger_accept_invalid_certs" => {
+                if args.len() != 1 { return Err("requests_tls_config_danger_accept_invalid_certs() takes exactly 1 argument".to_string()); }
+                let config = eval_expr(&args[0], env, defs)?;
+                match config {
+                    Value::Struct { mut fields, name } => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "accept_invalid_certs") {
+                            fields[pos].1 = Value::Bool(true);
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_tls_config_danger_accept_invalid_certs() expects Struct".to_string()),
+                }
+            }
+            "requests_tls_config_danger_accept_invalid_hostnames" => {
+                if args.len() != 1 { return Err("requests_tls_config_danger_accept_invalid_hostnames() takes exactly 1 argument".to_string()); }
+                let config = eval_expr(&args[0], env, defs)?;
+                match config {
+                    Value::Struct { mut fields, name } => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "accept_invalid_hostnames") {
+                            fields[pos].1 = Value::Bool(true);
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_tls_config_danger_accept_invalid_hostnames() expects Struct".to_string()),
+                }
+            }
+            "requests_cookie_jar_new" => {
+                if !args.is_empty() { return Err("requests_cookie_jar_new() takes no arguments".to_string()); }
+                Ok(Value::Array(vec![]))
+            }
+            "requests_cookie_jar_add" => {
+                if args.len() != 2 { return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string()); }
+                let jar = eval_expr(&args[0], env, defs)?;
+                let cookie = eval_expr(&args[1], env, defs)?;
+                match (jar, cookie) {
+                    (Value::Array(mut arr), Value::String(c)) => {
+                        arr.push(Value::String(c));
+                        Ok(Value::Array(arr))
+                    }
+                    _ => Err("requests_cookie_jar_add() expects (Array, str)".to_string()),
+                }
+            }
+            "requests_cookie_parse" => {
+                if args.len() != 1 { return Err("requests_cookie_parse() takes exactly 1 argument".to_string()); }
+                let cookie_str = eval_expr(&args[0], env, defs)?;
+                match cookie_str {
+                    Value::String(s) => Ok(Value::String(s)),
+                    _ => Err("requests_cookie_parse() expects str".to_string()),
+                }
+            }
+            "requests_response_copy_to" => {
+                if args.len() != 2 { return Err("requests_response_copy_to() takes exactly 2 arguments".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                let path = eval_expr(&args[1], env, defs)?;
+                match (resp, path) {
+                    (Value::Struct { fields, .. }, Value::String(p)) => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        match std::fs::write(&p, &body) {
+                            Ok(()) => Ok(Value::Int(body.len() as i64)),
+                            Err(_e) => Ok(Value::Int(-1)),
+                        }
+                    }
+                    _ => Err("requests_response_copy_to() expects (Response, str)".to_string()),
+                }
+            }
+            "requests_response_chunks" => {
+                if args.len() != 2 { return Err("requests_response_chunks() takes exactly 2 arguments".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                let chunk_size = eval_expr(&args[1], env, defs)?;
+                match (resp, chunk_size) {
+                    (Value::Struct { fields, .. }, Value::Int(size)) => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        let mut chunks = Vec::new();
+                        let bytes = body.as_bytes();
+                        let mut pos = 0;
+                        while pos < bytes.len() {
+                            let end = std::cmp::min(pos + size as usize, bytes.len());
+                            let chunk = &bytes[pos..end];
+                            chunks.push(Value::Array(chunk.iter().map(|b| Value::Int(*b as i64)).collect()));
+                            pos = end;
+                        }
+                        Ok(Value::Option(Some(Box::new(Value::Array(chunks)))))
+                    }
+                    _ => Err("requests_response_chunks() expects (Response, int)".to_string()),
+                }
+            }
+            "requests_response_stream" => {
+                if args.len() != 1 { return Err("requests_response_stream() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let body = fields.iter().find(|(k, _)| k == "body")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        let mut stream_fields = Vec::new();
+                        stream_fields.push(("data".to_string(), Value::String(body)));
+                        stream_fields.push(("pos".to_string(), Value::Int(0)));
+                        Ok(Value::Struct { name: "Stream".to_string(), fields: stream_fields })
+                    }
+                    _ => Err("requests_response_stream() expects Response struct".to_string()),
+                }
+            }
+            "requests_stream_read" => {
+                if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
+                let _stream = eval_expr(&args[0], env, defs)?;
+                let _size = eval_expr(&args[1], env, defs)?;
+                Ok(Value::Option(None))
+            }
+            "requests_stream_has_more" => {
+                if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
+                let _stream = eval_expr(&args[0], env, defs)?;
+                Ok(Value::Bool(false))
+            }
+            "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
+            | "requests_header_map_free" | "requests_multipart_free"
+            | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
+                if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                let _ = eval_expr(&args[0], env, defs)?;
+                Ok(Value::Option(None))
+            }
+            "requests_session_new" => {
+                if !args.is_empty() { return Err("requests_session_new() takes no arguments".to_string()); }
+                let mut fields = Vec::new();
+                fields.push(("type".to_string(), Value::String("Session".to_string())));
+                fields.push(("timeout".to_string(), Value::Int(30)));
+                fields.push(("redirect_limit".to_string(), Value::Int(10)));
+                fields.push(("verify".to_string(), Value::Bool(true)));
+                fields.push(("headers".to_string(), Value::Map(HashMap::new())));
+                fields.push(("cookies".to_string(), Value::Array(vec![])));
+                Ok(Value::Struct { name: "Session".to_string(), fields })
+            }
+            "requests_session_request" => {
+                if args.len() != 3 { return Err("requests_session_request() takes exactly 3 arguments".to_string()); }
+                let session = eval_expr(&args[0], env, defs)?;
+                let method = eval_expr(&args[1], env, defs)?;
+                let url = eval_expr(&args[2], env, defs)?;
+                let method_str = match method { Value::String(s) => s, _ => return Err("requests_session_request() expects string method".to_string()) };
+                let url_str = match url { Value::String(s) => s, _ => return Err("requests_session_request() expects string url".to_string()) };
+                let mut headers = HashMap::new();
+                let mut timeout = 30i64;
+                let mut verify = true;
+                if let Value::Struct { fields, .. } = &session {
+                    for (k, v) in fields {
+                        if k == "timeout" { if let Value::Int(t) = v { timeout = *t; } }
+                        if k == "verify" { if let Value::Bool(b) = v { verify = *b; } }
+                        if k == "headers" { if let Value::Map(m) = v { headers = m.clone(); } }
+                    }
+                }
+                let mut rb_fields = Vec::new();
+                rb_fields.push(("method".to_string(), Value::String(method_str)));
+                rb_fields.push(("url".to_string(), Value::String(url_str)));
+                rb_fields.push(("headers".to_string(), Value::Map(headers)));
+                rb_fields.push(("body".to_string(), Value::Option(None)));
+                rb_fields.push(("timeout".to_string(), Value::Int(timeout)));
+                rb_fields.push(("verify".to_string(), Value::Bool(verify)));
+                rb_fields.push(("params".to_string(), Value::Array(vec![])));
+                Ok(Value::Struct { name: "RequestBuilder".to_string(), fields: rb_fields })
+            }
+            "requests_session_free" => {
+                if args.len() != 1 { return Err("requests_session_free() takes exactly 1 argument".to_string()); }
+                let _ = eval_expr(&args[0], env, defs)?;
+                Ok(Value::Option(None))
+            }
+            "requests_request_builder_set_headers" => {
+                if args.len() != 2 { return Err("requests_request_builder_set_headers() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let hdrs = eval_expr(&args[1], env, defs)?;
+                match (builder, hdrs) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
+                            if let Value::Map(mut m) = fields[pos].1.clone() {
+                                let mut i = 0;
+                                while i + 1 < arr.len() {
+                                    if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
+                                        m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                                    }
+                                    i += 2;
+                                }
+                                fields[pos].1 = Value::Map(m);
+                            }
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_set_headers() expects (RequestBuilder, list)".to_string()),
+                }
+            }
+            "requests_request_builder_verify" => {
+                if args.len() != 2 { return Err("requests_request_builder_verify() takes exactly 2 arguments".to_string()); }
+                let builder = eval_expr(&args[0], env, defs)?;
+                let verify = eval_expr(&args[1], env, defs)?;
+                match (builder, verify) {
+                    (Value::Struct { mut fields, name }, Value::Bool(v)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "verify") {
+                            fields[pos].1 = Value::Bool(v);
+                        } else {
+                            fields.push(("verify".to_string(), Value::Bool(v)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_verify() expects (RequestBuilder, bool)".to_string()),
+                }
+            }
+            "requests_response_headers_list" => {
+                if args.len() != 1 { return Err("requests_response_headers_list() takes exactly 1 argument".to_string()); }
+                let resp = eval_expr(&args[0], env, defs)?;
+                match &resp {
+                    Value::Struct { fields, .. } => {
+                        let headers = fields.iter().find(|(k, _)| k == "headers")
+                            .and_then(|(_, v)| match v { Value::Map(m) => Some(m.clone()), _ => None })
+                            .unwrap_or_default();
+                        let mut list = Vec::new();
+                        for (k, v) in &headers {
+                            list.push(k.clone());
+                            list.push(v.clone());
+                        }
+                        Ok(Value::Array(list))
+                    }
+                    _ => Err("requests_response_headers_list() expects Response struct".to_string()),
+                }
+            }
+            _ => return Ok(None),
+    };
+    result.map(Some)
 }
 
 fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Result<Value, String> {
@@ -11948,6 +13559,13 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 result.push(Value::String(arg));
             }
             Ok(Value::Array(result))
+        }
+        // ===== Requests operations (Phase C-1.12) - delegated to eval_requests_builtin =====
+        _ if func.starts_with("requests_") => {
+            if let Some(val) = eval_requests_builtin(func, args, env, defs)? {
+                return Ok(val);
+            }
+            return Err(format!("Unknown requests function: {}", func));
         }
         // ===== Standard-library runtime builtins (Phase 7/10) =====
         // List helpers (Lists are represented as Value::Array).

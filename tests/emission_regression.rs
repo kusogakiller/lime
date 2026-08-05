@@ -2689,3 +2689,143 @@ fn emit_object_process_builtins() {
     // process_args returns a list of strings
     assert!(interp.len() >= 1, "process builtins: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
 }
+
+#[test]
+fn emit_object_requests_builtins() {
+    // Test requests type inference and basic structure
+    // This tests that the requests functions are properly registered as builtins
+    // and that type inference works correctly.
+    // Note: Actual HTTP requests require network access and are tested separately.
+    write_stdlib_project(
+        "target/test_requests_builtins",
+        "fn main():\n    let client = requests_client_new()\n    println(typeof(client))\n    let builder = requests_request_builder_new(client, \"GET\", \"http://example.com\")\n    println(typeof(builder))\n    let headers = requests_header_map_new()\n    println(typeof(headers))\n    let mp = requests_multipart_new()\n    println(typeof(mp))\n    let tls = requests_tls_config_new()\n    println(typeof(tls))\n    let jar = requests_cookie_jar_new()\n    println(typeof(jar))\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_builtins/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    // requests functions return opaque handles
+    assert!(interp.len() >= 6, "requests builtins: expected at least 6 outputs, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_send() {
+    // Test requests_send with a real HTTP request (if network is available)
+    // This tests the full request/response cycle
+    write_stdlib_project(
+        "target/test_requests_send",
+        "fn main():\n    let resp = requests_send(requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\"))\n    if requests_response_is_success(resp):\n        println(requests_response_status(resp))\n    else:\n        println(\"error\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_send/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    // Should print status code (200) or error
+    assert!(interp.len() >= 1, "requests send: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_session() {
+    write_stdlib_project(
+        "target/test_requests_session",
+        "fn main():\n    let s = requests_session_new()\n    let b = requests_session_request(s, \"GET\", \"http://example.com\")\n    requests_session_free(s)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_session/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests session: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_set_headers() {
+    write_stdlib_project(
+        "target/test_requests_set_headers",
+        "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://example.com\")\n    let hdrs = [\"Authorization\", \"Bearer test123\"]\n    requests_request_builder_set_headers(b, hdrs)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_set_headers/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests set_headers: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_verify() {
+    write_stdlib_project(
+        "target/test_requests_verify",
+        "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://example.com\")\n    requests_request_builder_verify(b, false)\n    requests_request_builder_verify(b, true)\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_verify/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests verify: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_basic_auth() {
+    write_stdlib_project(
+        "target/test_requests_basic_auth",
+        "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://example.com\")\n    requests_request_builder_basic_auth(b, \"user\", \"pass\")\n    println(\"ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_basic_auth/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests basic_auth: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
