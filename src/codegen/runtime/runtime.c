@@ -3550,6 +3550,35 @@ static char* sb_finish(StrBuilder* sb) {
     return sb->data;
 }
 
+// --- Shell escape a string for safe inclusion in single-quoted shell args ---
+// Returns malloc'd string. Caller must free.
+static char* shell_escape(const char* s) {
+    if (!s) return runtime_str_copy("");
+    // Count single quotes in input
+    int sq_count = 0;
+    for (const char* p = s; *p; p++) {
+        if (*p == '\'') sq_count++;
+    }
+    if (sq_count == 0) {
+        return runtime_str_copy(s);
+    }
+    // Escape: replace ' with '\'' (end quote, escaped quote, start quote)
+    size_t slen = strlen(s);
+    size_t out_len = slen + sq_count * 3 + 1;
+    char* out = (char*)malloc(out_len);
+    if (!out) runtime_panic("requests: out of memory");
+    char* q = out;
+    for (const char* p = s; *p; p++) {
+        if (*p == '\'') {
+            *q++ = '\''; *q++ = '\\'; *q++ = '\''; *q++ = '\'';
+        } else {
+            *q++ = *p;
+        }
+    }
+    *q = '\0';
+    return out;
+}
+
 // --- URL-encode a string (application/x-www-form-urlencoded) ---
 
 static char* url_encode(const char* s) {
@@ -3586,10 +3615,10 @@ void runtime_requests_request_builder_free(RequestsRequestBuilder* builder) {
     free(builder->url);
     header_map_free(builder->headers);
     free(builder->body_data);
-    if (builder->json_body) json_free(builder->json_body);
     free(builder->basic_auth_user);
     free(builder->basic_auth_pass);
     free(builder->bearer_token);
+    if (builder->multipart) runtime_requests_multipart_free(builder->multipart);
     free(builder);
 }
 
@@ -3748,6 +3777,7 @@ int runtime_requests_request_builder_headers(RequestsRequestBuilder* builder, Re
 
 int runtime_requests_request_builder_query(RequestsRequestBuilder* builder, LimeList params) {
     if (!builder) return -1;
+    free(builder->query_params.data);
     builder->query_params = params;
     return 0;
 }
@@ -3782,7 +3812,8 @@ int runtime_requests_request_builder_json(RequestsRequestBuilder* builder, void*
         builder->body_data = json_str;
         builder->body_len = json_str ? (int64_t)strlen(json_str) : 0;
     }
-    builder->json_body = (LimeJson*)json_value;
+    // Do NOT store json_value pointer - it's not owned by us
+    builder->json_body = NULL;
     builder->body_type = 3;
     return 0;
 }
@@ -4061,9 +4092,31 @@ static RequestsCookie* cookie_parse_set_cookie(char* header_value, char* request
                 c->expires = (int64_t)time(NULL) + max_age;
             }
         } else if (strncasecmp(token, "Expires=", 8) == 0) {
-            // Parse HTTP date (simplified: store as approximate timestamp)
-            // For now, just mark as very far future
-            c->expires = (int64_t)time(NULL) + 86400 * 365;
+            // Parse HTTP date: "Wdy, DD Mon YYYY HH:MM:SS GMT"
+            // Use mktime as a fallback - parse the date string
+            struct tm tm_val;
+            memset(&tm_val, 0, sizeof(tm_val));
+            char* date_str = token + 8;
+            // Try common HTTP date formats
+            // Format: "Mon, 01 Jan 2024 00:00:00 GMT"
+            static const char* months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+            char day_name[4], month_name[4];
+            int day, year, hour, min, sec;
+            if (sscanf(date_str, "%3s, %d %3s %d %d:%d:%d", day_name, &day, month_name, &year, &hour, &min, &sec) == 7) {
+                tm_val.tm_mday = day;
+                tm_val.tm_year = year - 1900;
+                tm_val.tm_hour = hour;
+                tm_val.tm_min = min;
+                tm_val.tm_sec = sec;
+                for (int m = 0; m < 12; m++) {
+                    if (strcasecmp(month_name, months[m]) == 0) {
+                        tm_val.tm_mon = m;
+                        break;
+                    }
+                }
+                c->expires = (int64_t)mktime(&tm_val);
+            }
+            // If parsing failed, leave expires as 0 (session cookie)
         } else if (strcasecmp(token, "Secure") == 0) {
             c->secure = 1;
         } else if (strcasecmp(token, "HttpOnly") == 0) {
@@ -4351,6 +4404,7 @@ int runtime_requests_session_set_default_headers(RequestsSession* session, LimeL
 
 int runtime_requests_session_set_default_params(RequestsSession* session, LimeList params) {
     if (!session) return -1;
+    free(session->default_params.data);
     session->default_params = params;
     return 0;
 }
@@ -4528,6 +4582,9 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
     } else {
         DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
         WinHttpSetOption(hRequest, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
+        // Set max redirects
+        DWORD max_redirs = (DWORD)builder->redirect_limit;
+        WinHttpSetOption(hRequest, WINHTTP_OPTION_MAXHTTPAUTOREDIRECTS, &max_redirs, sizeof(max_redirs));
     }
 
     // Add headers
@@ -4743,67 +4800,60 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
     if (builder->client && builder->client->default_headers) {
         HeaderEntry* e = builder->client->default_headers->first;
         while (e) {
+            char* hdr_val = (char*)malloc(strlen(e->key) + strlen(e->value) + 3);
+            sprintf(hdr_val, "%s: %s", e->key, e->value);
+            char* escaped_hdr = shell_escape(hdr_val);
             sb_append(&cmd, " -H '");
-            sb_append(&cmd, e->key);
-            sb_append(&cmd, ": ");
-            sb_append(&cmd, e->value);
+            sb_append(&cmd, escaped_hdr);
             sb_append(&cmd, "'");
+            free(escaped_hdr);
+            free(hdr_val);
             e = e->next;
         }
     }
     HeaderEntry* he = builder->headers->first;
     while (he) {
+        char* hdr_val = (char*)malloc(strlen(he->key) + strlen(he->value) + 3);
+        sprintf(hdr_val, "%s: %s", he->key, he->value);
+        char* escaped_hdr = shell_escape(hdr_val);
         sb_append(&cmd, " -H '");
-        sb_append(&cmd, he->key);
-        sb_append(&cmd, ": ");
-        sb_append(&cmd, he->value);
+        sb_append(&cmd, escaped_hdr);
         sb_append(&cmd, "'");
+        free(escaped_hdr);
+        free(hdr_val);
         he = he->next;
     }
 
     // Basic auth
     if (builder->basic_auth_user) {
+        char* auth_val = (char*)malloc(strlen(builder->basic_auth_user) + 1 + strlen(builder->basic_auth_pass ? builder->basic_auth_pass : "") + 1);
+        sprintf(auth_val, "%s:%s", builder->basic_auth_user, builder->basic_auth_pass ? builder->basic_auth_pass : "");
+        char* escaped_auth = shell_escape(auth_val);
         sb_append(&cmd, " -u '");
-        sb_append(&cmd, builder->basic_auth_user);
-        sb_append(&cmd, ":");
-        sb_append(&cmd, builder->basic_auth_pass ? builder->basic_auth_pass : "");
+        sb_append(&cmd, escaped_auth);
         sb_append(&cmd, "'");
+        free(escaped_auth);
+        free(auth_val);
     }
 
     // Bearer auth
     if (builder->bearer_token) {
-        sb_append(&cmd, " -H 'Authorization: Bearer ");
-        sb_append(&cmd, builder->bearer_token);
+        char* bearer_val = (char*)malloc(strlen("Authorization: Bearer ") + strlen(builder->bearer_token) + 1);
+        sprintf(bearer_val, "Authorization: Bearer %s", builder->bearer_token);
+        char* escaped_bearer = shell_escape(bearer_val);
+        sb_append(&cmd, " -H '");
+        sb_append(&cmd, escaped_bearer);
         sb_append(&cmd, "'");
+        free(escaped_bearer);
+        free(bearer_val);
     }
 
     // Body
     if (builder->body_type == 1 || builder->body_type == 2) {
         if (builder->body_data && builder->body_len > 0) {
+            // Use binary-safe escape: copy body data to a temporary buffer
+            char* escaped = shell_escape(builder->body_data);
             sb_append(&cmd, " -d '");
-            // Escape single quotes in body data
-            char* escaped = NULL;
-            int64_t elen = 0;
-            for (const char* p = builder->body_data; *p; p++) {
-                if (*p == '\'') {
-                    elen += 4; // '\'\\'''
-                } else {
-                    elen += 1;
-                }
-            }
-            escaped = (char*)malloc(elen + 1);
-            char* q = escaped;
-            for (const char* p = builder->body_data; *p; p++) {
-                if (*p == '\'') {
-                    *q++ = '\'';
-                    *q++ = '\\';
-                    *q++ = '\'';
-                    *q++ = '\'';
-                } else {
-                    *q++ = *p;
-                }
-            }
-            *q = '\0';
             sb_append(&cmd, escaped);
             sb_append(&cmd, "'");
             free(escaped);
@@ -4811,38 +4861,21 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
     } else if (builder->body_type == 3) {
         sb_append(&cmd, " -H 'Content-Type: application/json'");
         if (builder->body_data && builder->body_len > 0) {
+            char* escaped = shell_escape(builder->body_data);
             sb_append(&cmd, " -d '");
-            // Escape single quotes in JSON data
-            char* escaped = NULL;
-            int64_t elen = 0;
-            for (const char* p = builder->body_data; *p; p++) {
-                if (*p == '\'') {
-                    elen += 4;
-                } else {
-                    elen += 1;
-                }
-            }
-            escaped = (char*)malloc(elen + 1);
-            char* q = escaped;
-            for (const char* p = builder->body_data; *p; p++) {
-                if (*p == '\'') {
-                    *q++ = '\'';
-                    *q++ = '\\';
-                    *q++ = '\'';
-                    *q++ = '\'';
-                } else {
-                    *q++ = *p;
-                }
-            }
-            *q = '\0';
             sb_append(&cmd, escaped);
             sb_append(&cmd, "'");
             free(escaped);
         }
     } else if (builder->body_type == 4) {
-        sb_append(&cmd, " -d '");
-        sb_append(&cmd, builder->body_data ? builder->body_data : "");
-        sb_append(&cmd, "'");
+        sb_append(&cmd, " -H 'Content-Type: application/x-www-form-urlencoded'");
+        if (builder->body_data && builder->body_len > 0) {
+            char* escaped = shell_escape(builder->body_data);
+            sb_append(&cmd, " -d '");
+            sb_append(&cmd, escaped);
+            sb_append(&cmd, "'");
+            free(escaped);
+        }
     }
 
     // Output format: write headers to stderr, body to stdout
@@ -4873,8 +4906,10 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
         }
     }
     char* full_url = sb_finish(&url_sb);
-    sb_append(&cmd, full_url);
+    char* escaped_url = shell_escape(full_url);
+    sb_append(&cmd, escaped_url);
     sb_append(&cmd, "'");
+    free(escaped_url);
 
     char* curl_cmd = sb_finish(&cmd);
 
@@ -4897,15 +4932,11 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
     int64_t status_code = 200;
     char* response_url = runtime_str_copy(full_url);
 
-    // Look for __LIME_STATUS__ marker
+    // Look for markers BEFORE truncating
     char* status_marker = strstr(out_sb.data, "__LIME_STATUS__");
     char* url_marker = strstr(out_sb.data, "__LIME_URL__");
-    if (status_marker) {
-        status_code = atoi(status_marker + 15);
-        // Truncate body at marker
-        *status_marker = '\0';
-        out_sb.len = status_marker - out_sb.data;
-    }
+
+    // Extract URL from marker first (before any truncation)
     if (url_marker) {
         free(response_url);
         char* url_start = url_marker + 12;
@@ -4917,7 +4948,16 @@ RequestsResponse* runtime_requests_send(RequestsRequestBuilder* builder) {
         } else {
             response_url = runtime_str_copy(url_start);
         }
-        // Remove URL marker from output
+    }
+
+    // Now extract status code and truncate
+    if (status_marker) {
+        status_code = atoi(status_marker + 15);
+        *status_marker = '\0';
+        out_sb.len = status_marker - out_sb.data;
+    }
+    // Remove URL marker from output if present
+    if (url_marker) {
         *url_marker = '\0';
     }
 

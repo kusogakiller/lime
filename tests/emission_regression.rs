@@ -2917,3 +2917,113 @@ fn emit_object_requests_session_cookies() {
         .collect();
     assert!(interp.len() >= 1, "requests session_cookies: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
 }
+
+#[test]
+fn emit_object_requests_stream_read() {
+    write_stdlib_project(
+        "target/test_requests_stream_read",
+        "fn main():\n    let resp = requests_send(requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\"))\n    let stream = requests_response_stream(resp)\n    if requests_stream_has_more(stream):\n        let chunk = requests_stream_read(stream, 5)\n        println(\"read ok\")\n    else:\n        println(\"no data\")\n    requests_stream_free(stream)\n    requests_response_free(resp)\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_stream_read/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests stream_read: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_form_body() {
+    write_stdlib_project(
+        "target/test_requests_form_body",
+        "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"POST\", \"http://httpbin.org/post\")\n    let b2 = requests_request_builder_form(b, [\"key\", \"value\"])\n    println(\"form ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_form_body/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests form_body: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_client_builder_fields() {
+    write_stdlib_project(
+        "target/test_requests_client_builder_fields",
+        "fn main():\n    let cb = requests_client_builder_new()\n    let cb2 = requests_client_builder_timeout(cb, 60)\n    let cb3 = requests_client_builder_redirect_limit(cb2, 5)\n    let client = requests_client_builder_build(cb3)\n    println(\"client built ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_client_builder_fields/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests client_builder_fields: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_bearer_auth() {
+    write_stdlib_project(
+        "target/test_requests_bearer_auth",
+        "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\")\n    let b2 = requests_request_builder_bearer_auth(b, \"mytoken\")\n    println(\"bearer ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_bearer_auth/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests bearer_auth: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}
+
+#[test]
+fn emit_object_requests_query_params() {
+    write_stdlib_project(
+        "target/test_requests_query_params",
+        "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\")\n    let b2 = requests_request_builder_query(b, [\"foo\", \"bar\"])\n    println(\"query ok\")\n    return\n",
+    );
+
+    let out = lime_cmd(
+        "run",
+        "target/test_requests_query_params/citrus.toml",
+        &[],
+    );
+    let interp: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.starts_with("warning"))
+        .filter(|l| !l.contains("unused variable"))
+        .filter(|l| !l.starts_with("In function"))
+        .filter(|l| !l.starts_with("error["))
+        .collect();
+    assert!(interp.len() >= 1, "requests query_params: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+}

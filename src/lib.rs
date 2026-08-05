@@ -6471,10 +6471,16 @@ fn infer_type(
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
-                "requests_request_builder_redirect_disabled" | "requests_request_builder_basic_auth" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                "requests_request_builder_redirect_disabled" => {
+                    if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+                    infer_type(&args[0], env, defs, constraints)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_basic_auth" => {
+                    if args.len() != 3 { return Err("requests_request_builder_basic_auth() takes exactly 3 arguments".to_string()); }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
+                    infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_bearer_auth" => {
@@ -8075,10 +8081,16 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             let _ = check_expr(&args[1], env, defs)?;
             Ok(Type::Unknown)
         }
-        "requests_request_builder_redirect_disabled" | "requests_request_builder_basic_auth" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+        "requests_request_builder_redirect_disabled" => {
+            if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+            let _ = check_expr(&args[0], env, defs)?;
+            Ok(Type::Unknown)
+        }
+        "requests_request_builder_basic_auth" => {
+            if args.len() != 3 { return Err("requests_request_builder_basic_auth() takes exactly 3 arguments".to_string()); }
             let _ = check_expr(&args[0], env, defs)?;
             let _ = check_expr(&args[1], env, defs)?;
+            let _ = check_expr(&args[2], env, defs)?;
             Ok(Type::Unknown)
         }
         "requests_request_builder_bearer_auth" => {
@@ -11871,24 +11883,51 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_client_builder_build" => {
                 if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
                 let builder_val = eval_expr(&args[0], env, defs)?;
-                let timeout_secs = match &builder_val {
+                match &builder_val {
                     Value::Struct { fields, .. } => {
-                        fields.iter().find(|(k, _)| k == "timeout")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i as u64), _ => None })
-                            .unwrap_or(30)
+                        let timeout = fields.iter().find(|(k, _)| k == "timeout")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(30);
+                        let verify = fields.iter().find(|(k, _)| k == "verify")
+                            .and_then(|(_, v)| match v { Value::Bool(b) => Some(*b), _ => None })
+                            .unwrap_or(true);
+                        let redirect_limit = fields.iter().find(|(k, _)| k == "redirect_limit")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
+                            .unwrap_or(10);
+                        let disable_redirects = fields.iter().find(|(k, _)| k == "disable_redirects")
+                            .and_then(|(_, v)| match v { Value::Bool(b) => Some(*b), _ => None })
+                            .unwrap_or(false);
+                        let default_headers = fields.iter().find(|(k, _)| k == "default_headers")
+                            .and_then(|(_, v)| Some(v.clone()));
+                        let mut out_fields = Vec::new();
+                        out_fields.push(("type".to_string(), Value::String("Client".to_string())));
+                        out_fields.push(("timeout".to_string(), Value::Int(timeout)));
+                        out_fields.push(("verify".to_string(), Value::Bool(verify)));
+                        out_fields.push(("redirect_limit".to_string(), Value::Int(redirect_limit)));
+                        out_fields.push(("disable_redirects".to_string(), Value::Bool(disable_redirects)));
+                        if let Some(dh) = default_headers {
+                            out_fields.push(("default_headers".to_string(), dh));
+                        }
+                        Ok(Value::Struct { name: "Client".to_string(), fields: out_fields })
                     }
-                    _ => 30,
-                };
-                let mut fields = Vec::new();
-                fields.push(("type".to_string(), Value::String("Client".to_string())));
-                fields.push(("timeout".to_string(), Value::Int(timeout_secs as i64)));
-                Ok(Value::Struct { name: "Client".to_string(), fields })
+                    _ => Err("requests_client_builder_build() expects ClientBuilder".to_string()),
+                }
             }
             "requests_client_builder_default_headers" => {
                 if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _headers = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let headers = eval_expr(&args[1], env, defs)?;
+                match (builder, headers) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "default_headers") {
+                            fields[pos].1 = Value::Array(arr);
+                        } else {
+                            fields.push(("default_headers".to_string(), Value::Array(arr)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_client_builder_default_headers() expects (Struct, list)".to_string()),
+                }
             }
             "requests_client_builder_timeout" => {
                 if args.len() != 2 { return Err("requests_client_builder_timeout() takes exactly 2 arguments".to_string()); }
@@ -11956,8 +11995,18 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_client_builder_tls_config" => {
                 if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _tls = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let tls = eval_expr(&args[1], env, defs)?;
+                match builder {
+                    Value::Struct { mut fields, name } => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "tls_config") {
+                            fields[pos].1 = tls;
+                        } else {
+                            fields.push(("tls_config".to_string(), tls));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_client_builder_tls_config() expects (Struct, TlsConfig)".to_string()),
+                }
             }
             "requests_request_builder_new" => {
                 if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
@@ -11995,14 +12044,41 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_request_builder_headers" => {
                 if args.len() != 2 { return Err("requests_request_builder_headers() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _headers = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let headers = eval_expr(&args[1], env, defs)?;
+                match (builder, headers) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
+                            if let Value::Map(mut m) = fields[pos].1.clone() {
+                                let mut i = 0;
+                                while i + 1 < arr.len() {
+                                    if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
+                                        m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                                    }
+                                    i += 2;
+                                }
+                                fields[pos].1 = Value::Map(m);
+                            }
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_headers() expects (Struct, list)".to_string()),
+                }
             }
             "requests_request_builder_query" => {
                 if args.len() != 2 { return Err("requests_request_builder_query() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _params = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let params = eval_expr(&args[1], env, defs)?;
+                match (builder, params) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "params") {
+                            fields[pos].1 = Value::Array(arr);
+                        } else {
+                            fields.push(("params".to_string(), Value::Array(arr)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_query() expects (Struct, list)".to_string()),
+                }
             }
             "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
                 if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
@@ -12035,6 +12111,8 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
                     Value::Struct { mut fields, name } => {
                         if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
                             fields[pos].1 = Value::Option(Some(Box::new(Value::String(json_str))));
+                        } else {
+                            fields.push(("body".to_string(), Value::Option(Some(Box::new(Value::String(json_str))))));
                         }
                         Ok(Value::Struct { name, fields })
                     }
@@ -12044,14 +12122,44 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_request_builder_form" => {
                 if args.len() != 2 { return Err("requests_request_builder_form() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _data = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let data = eval_expr(&args[1], env, defs)?;
+                match (builder, data) {
+                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                        // Build form-encoded body from key/value pairs
+                        let mut parts = Vec::new();
+                        let mut i = 0;
+                        while i + 1 < arr.len() {
+                            if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
+                                parts.push(format!("{}={}", k, v));
+                            }
+                            i += 2;
+                        }
+                        let form_body = parts.join("&");
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
+                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(form_body))));
+                        } else {
+                            fields.push(("body".to_string(), Value::Option(Some(Box::new(Value::String(form_body))))));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_form() expects (Struct, list)".to_string()),
+                }
             }
             "requests_request_builder_multipart" => {
                 if args.len() != 2 { return Err("requests_request_builder_multipart() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _multipart = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let multipart = eval_expr(&args[1], env, defs)?;
+                match (builder, multipart) {
+                    (Value::Struct { mut fields, name }, mp) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "multipart") {
+                            fields[pos].1 = mp;
+                        } else {
+                            fields.push(("multipart".to_string(), mp));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_multipart() expects (Struct, value)".to_string()),
+                }
             }
             "requests_request_builder_timeout" => {
                 if args.len() != 2 { return Err("requests_request_builder_timeout() takes exactly 2 arguments".to_string()); }
@@ -12072,8 +12180,18 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_request_builder_redirect_limit" => {
                 if args.len() != 2 { return Err("requests_request_builder_redirect_limit() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _limit = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let limit = eval_expr(&args[1], env, defs)?;
+                match (builder, limit) {
+                    (Value::Struct { mut fields, name }, Value::Int(l)) => {
+                        if let Some(pos) = fields.iter().position(|(f, _)| f == "redirect_limit") {
+                            fields[pos].1 = Value::Int(l);
+                        } else {
+                            fields.push(("redirect_limit".to_string(), Value::Int(l)));
+                        }
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_redirect_limit() expects (Struct, int)".to_string()),
+                }
             }
             "requests_request_builder_redirect_disabled" => {
                 if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
@@ -12103,8 +12221,14 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_request_builder_bearer_auth" => {
                 if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
                 let builder = eval_expr(&args[0], env, defs)?;
-                let _token = eval_expr(&args[1], env, defs)?;
-                Ok(builder)
+                let token = eval_expr(&args[1], env, defs)?;
+                match (builder, token) {
+                    (Value::Struct { mut fields, name }, Value::String(t)) => {
+                        fields.push(("bearer_token".to_string(), Value::String(t)));
+                        Ok(Value::Struct { name, fields })
+                    }
+                    _ => Err("requests_request_builder_bearer_auth() expects (Struct, str)".to_string()),
+                }
             }
             "requests_send" => {
                 if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
@@ -12188,11 +12312,7 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
                 for chunk in params_val.chunks(2) {
                     if let (Value::String(pk), Value::String(pv)) = (&chunk[0], &chunk.get(1).unwrap_or(&chunk[0])) {
                         let separator = if first { "?" } else { "&" };
-                        if first {
-                            param_url = format!("{}{}{}={}", param_url, separator, pk, pv);
-                        } else {
-                            param_url = format!("{}{}={}", param_url, pk, pv);
-                        }
+                        param_url = format!("{}{}{}={}", param_url, separator, pk, pv);
                         first = false;
                     }
                 }
@@ -12680,14 +12800,46 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             }
             "requests_stream_read" => {
                 if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
-                let _stream = eval_expr(&args[0], env, defs)?;
-                let _size = eval_expr(&args[1], env, defs)?;
-                Ok(Value::Option(None))
+                let stream = eval_expr(&args[0], env, defs)?;
+                let size = eval_expr(&args[1], env, defs)?;
+                match (stream, size) {
+                    (Value::Struct { mut fields, name }, Value::Int(s)) => {
+                        let data = fields.iter().find(|(k, _)| k == "data")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
+                            .unwrap_or_default();
+                        let pos = fields.iter().find(|(k, _)| k == "pos")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i as usize), _ => None })
+                            .unwrap_or(0);
+                        if pos >= data.len() {
+                            Ok(Value::Option(None))
+                        } else {
+                            let end = std::cmp::min(pos + s as usize, data.len());
+                            let chunk = data[pos..end].to_string();
+                            // Update pos
+                            if let Some(p) = fields.iter_mut().find(|(k, _)| k == "pos") {
+                                p.1 = Value::Int(end as i64);
+                            }
+                            Ok(Value::Option(Some(Box::new(Value::String(chunk)))))
+                        }
+                    }
+                    _ => Err("requests_stream_read() expects (Stream, int)".to_string()),
+                }
             }
             "requests_stream_has_more" => {
                 if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
-                let _stream = eval_expr(&args[0], env, defs)?;
-                Ok(Value::Bool(false))
+                let stream = eval_expr(&args[0], env, defs)?;
+                match stream {
+                    Value::Struct { fields, .. } => {
+                        let data_len = fields.iter().find(|(k, _)| k == "data")
+                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.len()), _ => None })
+                            .unwrap_or(0);
+                        let pos = fields.iter().find(|(k, _)| k == "pos")
+                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i as usize), _ => None })
+                            .unwrap_or(0);
+                        Ok(Value::Bool(pos < data_len))
+                    }
+                    _ => Err("requests_stream_has_more() expects Stream".to_string()),
+                }
             }
             "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
             | "requests_header_map_free" | "requests_multipart_free"
@@ -13005,15 +13157,15 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
             "requests_redirect_history_add" => {
                 if args.len() != 4 { return Err("requests_redirect_history_add() takes exactly 4 arguments".to_string()); }
                 let history = eval_expr(&args[0], env, defs)?;
-                let _status_code = eval_expr(&args[1], env, defs)?;
+                let status_code = eval_expr(&args[1], env, defs)?;
                 let url = eval_expr(&args[2], env, defs)?;
-                let _method = eval_expr(&args[3], env, defs)?;
-                match (history, url) {
-                    (Value::Array(mut arr), Value::String(u)) => {
-                        arr.push(Value::String(u));
+                let method = eval_expr(&args[3], env, defs)?;
+                match history {
+                    Value::Array(mut arr) => {
+                        arr.push(Value::Array(vec![status_code, url, method]));
                         Ok(Value::Array(arr))
                     }
-                    _ => Err("requests_redirect_history_add() expects (Array, int, str, str)".to_string()),
+                    _ => Err("requests_redirect_history_add() expects Array as first argument".to_string()),
                 }
             }
             "requests_redirect_history_list" => {
