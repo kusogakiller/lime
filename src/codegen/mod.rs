@@ -39,6 +39,7 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     // (LLVM rejects forward-referenced struct types in function signatures).
     out.push_str("%LimeList = type { i8*, i64, i64 }\n");
     out.push_str("%LimeOption = type { i1, i8* }\n");
+    out.push_str("declare void @llvm.memcpy.p0.p0.i64(i8*, i8*, i64, i1)\n");
     out.push_str("%LimeIface = type { i8*, i8* }\n");
     out.push_str("%LimeClosure = type { i8*, i8* }\n");
     out.push_str("%LimeMap = type { i8*, i64, i64 }\n");
@@ -57,8 +58,11 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_concat(i8*, i8*)\n");
     out.push_str("declare void @runtime_str_chars(ptr sret(%LimeList), ptr)\n");
     out.push_str("declare void @runtime_str_bytes(ptr sret(%LimeList), ptr)\n");
-    out.push_str("declare void @runtime_list_add(ptr sret(%LimeList), ptr, i64)\n");
-    out.push_str("declare void @runtime_list_set(ptr sret(%LimeList), ptr, i64, i64)\n\n");
+    out.push_str("declare void @runtime_list_add(ptr, i64)\n");
+    out.push_str("declare void @runtime_list_set(ptr, i64, i64)\n\n");
+    out.push_str("declare void @runtime_list_empty(ptr)\n");
+    out.push_str("declare i64 @runtime_list_len(%LimeList)\n");
+    out.push_str("declare i64 @runtime_list_get(%LimeList, i64)\n\n");
 
     // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
     out.push_str("declare i32 @runtime_str_contains(i8*, i8*)\n");
@@ -73,6 +77,10 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_from_i64(i64)\n");
     out.push_str("declare i8* @runtime_str_from_f64(double)\n");
     out.push_str("declare i8* @runtime_str_from_bool(i1)\n");
+    out.push_str("declare i64 @runtime_str_byte(i8*, i64)\n");
+    out.push_str("declare i8* @runtime_str_new(i64)\n");
+    out.push_str("declare i8* @runtime_str_from_byte(i64)\n");
+    out.push_str("declare i8* @runtime_str_push_byte(i8*, i64)\n");
     // Phase B-3: extended string builtins
     out.push_str("declare i32 @runtime_str_is_empty(i8*)\n");
     out.push_str("declare i64 @runtime_str_find(i8*, i8*)\n");
@@ -134,10 +142,10 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i32 @runtime_fs_write_lines(i8*, ptr)\n");
 
     // Phase C-1.2: list mutation / inspection builtins
-    out.push_str("declare void @runtime_list_insert(ptr sret(%LimeList), ptr, i64, i64)\n");
-    out.push_str("declare void @runtime_list_clear(ptr sret(%LimeList), ptr)\n");
-    out.push_str("declare void @runtime_list_sort(ptr sret(%LimeList), ptr)\n");
-    out.push_str("declare void @runtime_list_clone(ptr sret(%LimeList), ptr)\n");
+    out.push_str("declare void @runtime_list_insert(ptr, i64, i64)\n");
+    out.push_str("declare void @runtime_list_clear(ptr)\n");
+    out.push_str("declare void @runtime_list_sort(ptr)\n");
+    out.push_str("declare void @runtime_list_clone(ptr, ptr)\n");
 
     // Phase C-1.2: map builtins
     out.push_str("declare i64 @runtime_map_len(ptr)\n");

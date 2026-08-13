@@ -1,0 +1,11 @@
+// Category B: Floating point — accumulation, multiply/divide, math-heavy.
+// No int/float conversion in this build, so all operands are float literals
+// and the loop counter itself is a float. Result scaled to int for comparison.
+fn main():
+    let mut float: s = 0.0
+    let mut float: i = 1.0
+    while (i < 2000000.0):
+        s = s + i * 0.5
+        s = s / 1.000001
+        i = i + 1.0
+    println(s)

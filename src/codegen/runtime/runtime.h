@@ -130,17 +130,17 @@ LimeList runtime_fs_read_lines(char* path);
 int runtime_fs_write_lines(char* path, LimeList lines);
 
 // -- List operations --
-LimeList runtime_list_empty(void);
-LimeList runtime_list_add(LimeList list, int64_t elem);
-LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem);
+void runtime_list_empty(LimeList* out);
+void runtime_list_add(LimeList* list, int64_t elem);
+void runtime_list_set(LimeList* list, int64_t index, int64_t elem);
 int64_t runtime_list_len(LimeList list);
 int64_t runtime_list_get(LimeList list, int64_t index);
 
 // -- List mutation / inspection (Phase C-1.2) --
-LimeList runtime_list_insert(LimeList list, int64_t index, int64_t elem);
-LimeList runtime_list_clear(LimeList list);
-LimeList runtime_list_sort(LimeList list);
-LimeList runtime_list_clone(LimeList list);
+void runtime_list_insert(LimeList* list, int64_t index, int64_t elem);
+void runtime_list_clear(LimeList* list);
+void runtime_list_sort(LimeList* list);
+void runtime_list_clone(LimeList* dest, LimeList* src);
 
 // -- Map operations --
 typedef struct {

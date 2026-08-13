@@ -246,8 +246,20 @@ impl<'a> Cg<'a> {
 
     fn codegen_stmt(&mut self, s: &Stmt) -> Result<(), String> {
         match s {
-            Stmt::Let { name, value, place, .. } => {
-                let (v, ty) = self.codegen_expr(value)?;
+            Stmt::Let { name, value, place, type_hint, .. } => {
+                let (v, mut ty) = self.codegen_expr(value)?;
+                // Phase 4 fix: when a type hint (e.g. `List(int)`) is present and
+                // the initializer is an empty list literal, the element type from
+                // the hint must win over the inferred `List(Unknown)`. This lets
+                // `let List(int): xs = []` codegen `xs.get()` as an Int list.
+                if let (Some(th), Expr::Array(items)) = (type_hint.as_ref(), value) {
+                    if items.is_empty() {
+                        let hint_ty = type_from_str(th, &self.defs);
+                        if hint_ty != Type::Unknown {
+                            ty = hint_ty;
+                        }
+                    }
+                }
                 let llty = llvm_type_name(&ty);
                 let align = align_of(&ty);
                 let is_heap = matches!(place, Some(MemoryPlace::Heap))
@@ -1055,6 +1067,25 @@ impl<'a> Cg<'a> {
                 Ok((tmp, ty))
             }
             "==" | "!=" | "<" | ">" | "<=" | ">=" => {
+                // String equality must go through runtime_str_equals (pointer
+                // comparison via icmp is wrong). Route == / != here.
+                if lt == Type::String && (op == "==" || op == "!=") {
+                    let tmp = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = call i32 @runtime_str_equals(i8* {}, i8* {})\n",
+                        tmp,
+                        self.bare_value(&lv),
+                        self.bare_value(&rv)
+                    ));
+                    if op == "!=" {
+                        let neg = self.fresh_temp();
+                        self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", neg, tmp));
+                        return Ok((neg, Type::Bool));
+                    }
+                    let iseq = self.fresh_temp();
+                    self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", iseq, tmp));
+                    return Ok((iseq, Type::Bool));
+                }
                 let (instr, llty) = if float {
                     let i = match op {
                         "==" => "fcmp oeq",
@@ -2128,18 +2159,28 @@ impl<'a> Cg<'a> {
                 };
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
-                self.out.push_str(&format!(
-                    "  call void @{}(ptr sret(%LimeList) {}, ptr {})\n",
-                    rt, slot, slot
-                ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                if func == "list_clone" {
+                    // void runtime_list_clone(LimeList* dest, LimeList* src)
+                    self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                    self.out.push_str(&format!(
+                        "  call void @{}(ptr {}, ptr {})\n",
+                        rt, slot, self.bare_value(&list_v)
+                    ));
+                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                } else {
+                    // void runtime_list_clear/sort(LimeList* list)
+                    self.out.push_str(&format!(
+                        "  call void @{}(ptr {})\n",
+                        rt, self.bare_value(&list_v)
+                    ));
+                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, self.bare_value(&list_v)));
+                }
                 Ok(Some((tmp, list_t)))
             }
             "list_empty" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- map builtins (Phase C-1.2) ----
@@ -2333,7 +2374,8 @@ impl<'a> Cg<'a> {
             }
             "queue_empty" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- stack builtins (Phase C-1.2) ----
@@ -2385,7 +2427,8 @@ impl<'a> Cg<'a> {
             }
             "stack_empty" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call %LimeList @runtime_list_empty()\n", tmp));
+                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- JSON builtins ----
@@ -4116,23 +4159,65 @@ impl<'a> Cg<'a> {
         }
     }
 
+    // Phase 5: int method codegen (chr -> single-char owned string)
+    fn codegen_int_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
+        match method {
+            "chr" => {
+                if args.len() != 0 {
+                    return Err("chr() takes no arguments (receiver is the byte)".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_from_byte({})\n",
+                    tmp,
+                    self.fmt_call_arg(obj, &Type::Int)
+                ));
+                Ok((tmp, Type::String))
+            }
+            other => Err(format!("unknown int method '{}'", other)),
+        }
+    }
+
     // Phase 5: string literal -> global constant pointer
     fn codegen_string_lit(&mut self, s: &str) -> Result<(String, Type), String> {
         let global_name = self.string_literals.get(s).ok_or_else(|| {
             format!("string literal '{}' not found in globals", s)
         })?;
-        let len = s.len() + 1;
-        let tmp = self.fresh_temp();
+        let len = s.len() as i64; // bytes (excludes NUL); capacity for runtime_str_new
+        let gsrc = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = getelementptr inbounds [{} x i8], ptr @{}, i64 0, i64 0\n",
-            tmp, len, global_name
+            gsrc, len + 1, global_name
         ));
-        Ok((tmp, Type::String))
+        // OPT-002: emit every string literal as an OWNED, header-backed string
+        // (via runtime_str_new) so it carries the OWNED marker. This makes
+        // runtime_str_concat's in-place reuse always memory-safe.
+        let owned = self.fresh_temp();
+        self.out.push_str(&format!(
+            "  {} = call i8* @runtime_str_new(i64 {})\n",
+            owned, len
+        ));
+        self.out.push_str(&format!(
+            "  call void @llvm.memcpy.p0.p0.i64(i8* {}, i8* {}, i64 {}, i1 false)\n",
+            owned, gsrc, len + 1
+        ));
+        Ok((owned, Type::String))
     }
 
     // Phase 5: array literal -> construct %LimeList on stack
     fn codegen_array_lit(&mut self, items: &[Expr]) -> Result<(String, Type), String> {
         let count = items.len();
+        if count == 0 {
+            // Empty list literal: use runtime_list_empty() (returns {NULL,0,0})
+            // rather than hand-rolling a runtime_alloc(8) + insertvalue. This keeps
+            // the data pointer NULL so grow_list's first realloc behaves correctly.
+            let tmp = self.fresh_temp();
+            self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+            self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+            let loaded = self.fresh_temp();
+            self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", loaded, tmp));
+            return Ok((loaded, Type::List(Box::new(Type::Unknown))));
+        }
         let mut elem_values: Vec<(String, Type)> = Vec::new();
         for item in items {
             elem_values.push(self.codegen_expr(item)?);
@@ -4190,6 +4275,7 @@ impl<'a> Cg<'a> {
         let (obj_v, obj_t) = self.codegen_expr(object)?;
         match obj_t {
             Type::String => self.codegen_string_method(&obj_v, method, args),
+            Type::Int | Type::Long => self.codegen_int_method(&obj_v, method, args),
             Type::List(ref elem) => {
                 // `add`/`set` mutate the receiver: the runtime returns a new
                 // list, which must be stored back into the receiver variable
@@ -4284,7 +4370,7 @@ impl<'a> Cg<'a> {
         }
     }
 
-    // Phase 5: string method codegen (len, byte_len, slice, chars, bytes)
+    // Phase 5: string method codegen (len, byte_len, slice, chars, bytes, byte)
     fn codegen_string_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
         match method {
             "len" | "byte_len" | "length" => {
@@ -4299,6 +4385,48 @@ impl<'a> Cg<'a> {
                     tmp, obj_arg
                 ));
                 Ok((tmp, Type::Int))
+            }
+            "byte" => {
+                if args.len() != 1 {
+                    return Err("byte() takes exactly 1 argument (index)".to_string());
+                }
+                let (idx_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_str_byte(i8* {}, {})\n",
+                    tmp,
+                    obj,
+                    self.fmt_call_arg(&idx_v, &Type::Int)
+                ));
+                Ok((tmp, Type::Int))
+            }
+            "chr" => {
+                if args.len() != 1 {
+                    return Err("chr() takes exactly 1 argument (byte)".to_string());
+                }
+                let (idx_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_from_byte({})\n",
+                    tmp,
+                    self.fmt_call_arg(&idx_v, &Type::Int)
+                ));
+                Ok((tmp, Type::String))
+            }
+            "push_byte" => {
+                if args.len() != 1 {
+                    return Err("push_byte() takes exactly 1 argument (byte)".to_string());
+                }
+                let (idx_v, _) = self.codegen_expr(&args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_str_push_byte(i8* {}, {})
+",
+                    tmp,
+                    obj,
+                    self.fmt_call_arg(&idx_v, &Type::Int)
+                ));
+                Ok((tmp, Type::String))
             }
             "slice" => {
                 if args.len() != 2 {
@@ -4403,23 +4531,22 @@ impl<'a> Cg<'a> {
                 }
                 let (elem_v, elem_t) = self.codegen_expr(&args[0])?;
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
+                // C ABI: void runtime_list_add(LimeList* list, int64_t elem).
+                // In-place mutation: store `obj` (the receiver) into arg_slot,
+                // call, then load the mutated list back out of arg_slot.
                 let arg_slot = self.fresh_temp();
-                let slot = self.fresh_temp();
-                let tmp = self.fresh_temp();
+                let result = self.fresh_temp();
                 self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
                 self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  call void @runtime_list_add(ptr sret(%LimeList) {}, ptr {}, i64 {})\n",
-                    slot, arg_slot, converted
+                    "  call void @runtime_list_add(ptr {}, i64 {})\n",
+                    arg_slot, converted
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
                 if let Some(slot) = rebind_slot {
-                    // Mutation semantics: write the returned list back into the
-                    // receiver variable's storage.
-                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", tmp, slot));
+                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", result, slot));
                 }
-                Ok((tmp, Type::List(Box::new(elem_t))))
+                Ok((result, Type::List(Box::new(elem_t))))
             }
             "set" => {
                 if args.len() != 2 {
@@ -4428,23 +4555,20 @@ impl<'a> Cg<'a> {
                 let (idx_v, _) = self.codegen_expr(&args[0])?;
                 let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
+                // C ABI: void runtime_list_set(LimeList* list, int64_t index, int64_t elem).
                 let arg_slot = self.fresh_temp();
-                let slot = self.fresh_temp();
-                let tmp = self.fresh_temp();
+                let result = self.fresh_temp();
                 self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
                 self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  call void @runtime_list_set(ptr sret(%LimeList) {}, ptr {}, i64 {}, i64 {})\n",
-                    slot, arg_slot, self.bare_value(&idx_v), converted
+                    "  call void @runtime_list_set(ptr {}, i64 {}, i64 {})\n",
+                    arg_slot, self.bare_value(&idx_v), converted
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
                 if let Some(slot) = rebind_slot {
-                    // Mutation semantics: write the returned list back into the
-                    // receiver variable's storage.
-                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", tmp, slot));
+                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", result, slot));
                 }
-                Ok((tmp, Type::List(Box::new(elem_t))))
+                Ok((result, Type::List(Box::new(elem_t))))
             }
             _ => Err(format!("Phase 5: unknown List method '{}'", method)),
         }

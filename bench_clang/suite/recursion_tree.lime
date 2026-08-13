@@ -1,0 +1,8 @@
+// Category D: Recursion (tree form) — recursive sum 1..n.
+fn rsum(int: n):
+    if (n <= 1):
+        return 1
+    return n + rsum(n - 1)
+
+fn main():
+    println(rsum(20000))

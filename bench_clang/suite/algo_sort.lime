@@ -1,0 +1,36 @@
+// Category J (algorithm): in-place quicksort of N ints, sum as checksum.
+// Loop/if bodies must be on their own indented line (no inline bodies in Lime).
+fn qsort(List(int): arr, int: lo, int: hi):
+    if (lo >= hi):
+        return
+    let int: pivot = arr.get((lo + hi) / 2)
+    let int: l = lo
+    let int: r = hi
+    while (l <= r):
+        while (arr.get(l) < pivot):
+            l = l + 1
+        while (arr.get(r) > pivot):
+            r = r - 1
+        if (l <= r):
+            let int: t = arr.get(l)
+            arr.set(l, arr.get(r))
+            arr.set(r, t)
+            l = l + 1
+            r = r - 1
+    qsort(arr, lo, r)
+    qsort(arr, l, hi)
+
+fn main():
+    let int: n = 5000
+    let List(int): a = []
+    let mut int: i = 0
+    while (i < n):
+        a.add((i * 2654435761) % 1000000)
+        i = i + 1
+    qsort(a, 0, n - 1)
+    let mut int: total = 0
+    let mut int: k = 0
+    while (k < n):
+        total = total + a.get(k)
+        k = k + 1
+    println(total)

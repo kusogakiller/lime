@@ -1,0 +1,21 @@
+// Category F: Struct ops — creation, field access, copy, pass as arg, return, in a loop.
+struct Point:
+    int: x
+    int: y
+
+fn make(int: a, int: b):
+    return Point(a, b)
+
+fn addp(Point: p, Point: q):
+    return Point(p.x + q.x, p.y + q.y)
+
+fn main():
+    let mut int: total = 0
+    let mut int: i = 0
+    while (i < 5000000):
+        let Point: a = make(i, i + 1)
+        let Point: b = make(i + 2, i + 3)
+        let Point: c = addp(a, b)
+        total = total + c.x + c.y
+        i = i + 1
+    println(total)

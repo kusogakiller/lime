@@ -1,0 +1,16 @@
+// Category G: String access — build a string, then iterate each character in a loop.
+fn main():
+    let mut str: s = ""
+    let mut int: i = 0
+    while (i < 5000):
+        s = s + "Lime"
+        i = i + 1
+    let mut int: total = 0
+    let mut int: j = 0
+    let mut int: n = s.len()
+    while (j < n):
+        let int: b = s.byte(j)
+        if (b >= 0):
+            total = total + 1
+        j = j + 1
+    println(total)

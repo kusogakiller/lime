@@ -1,0 +1,52 @@
+// Category J (realistic mixed workload): tokenize words from repeated text and count
+// frequencies. Uses only supported, fair constructs: string concat/slice/equality and
+// List(int) for per-word counts. Words are mapped to stable ids via a small fixed
+// vocabulary (both languages use the same vocabulary + ids). This preserves the
+// realistic "tokenize + count frequencies" shape while avoiding List(str), which has a
+// known element-type propagation gap in native codegen.
+fn word_id(str: w):
+    if (w == "lime"):
+        return 0
+    if (w == "is"):
+        return 1
+    if (w == "fast"):
+        return 2
+    if (w == "safe"):
+        return 3
+    if (w == "native"):
+        return 4
+    if (w == "code"):
+        return 5
+    return 6
+
+fn main():
+    let mut str: text = "lime is fast safe native code "
+    let mut int: reps = 0
+    while (reps < 2000):
+        text = text + "lime native code fast safe "
+        reps = reps + 1
+    let List(int): counts = [0, 0, 0, 0, 0, 0, 0]
+    let mut int: i = 0
+    let mut str: cur = ""
+    while (i < text.len()):
+        let int: b = text.byte(i)
+        if (b >= 0):
+            if (b == 32):
+                if (cur.byte_len() > 0):
+                    let int: id = word_id(cur)
+                    counts.set(id, counts.get(id) + 1)
+                    cur = ""
+            else:
+                let int: ch = b
+                cur = cur.push_byte(ch)
+        i = i + 1
+    if (cur.byte_len() > 0):
+        let int: idl = word_id(cur)
+        counts.set(idl, counts.get(idl) + 1)
+    let mut int: total = 0
+    let mut int: k = 0
+    while (k < 7):
+        total = total + counts.get(k)
+        k = k + 1
+    println(total)
+    println(7)

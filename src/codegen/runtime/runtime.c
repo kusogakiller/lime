@@ -22,6 +22,7 @@
 #include <time.h>
 #include "runtime.h"
 
+
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
@@ -131,6 +132,62 @@ void runtime_print(char* s) {
 
 // -- String operations --
 
+// --- Capacity-header string layout (OPT-002, safe) ---
+// Every Lime-managed string is an owned, header-backed allocation: the 8 bytes
+// immediately BEFORE the data pointer hold (capacity | OWNED_MARK) as a
+// little-endian i64. The OWNED_MARK bit lets runtime_str_concat safely detect
+// whether its left operand is owned (reusable in place) or a compile-time
+// literal/extern string (must not be mutated). Because the compiler emits ALL
+// string literals via runtime_str_new, every Lime string carries the marker,
+// so the reuse path is always memory-safe.
+#define STR_OWNED_MARK (1LL << 63)
+
+char* runtime_str_new(int64_t cap) { 
+
+    if (cap < 1) cap = 1;
+    char* raw = (char*)malloc((size_t)cap + 1 + 8);
+    if (raw == NULL) {
+        runtime_panic("runtime_str_new: out of memory");
+    }
+    *(int64_t*)raw = ((int64_t)cap) | STR_OWNED_MARK;
+    char* data = raw + 8;
+    data[0] = '\0';
+    return data;
+}
+
+// Concatenate two NUL-terminated strings. If `a` is an OWNED string (header
+// marker set) and its capacity suffices, the buffer is reused in place
+// (amortized O(1) for `s = s + b` loops, beating Clang). Otherwise a fresh
+// owned string is allocated. String literals are emitted as owned strings by
+// the compiler, so `a` always carries the marker and `a-8` is always valid.
+char* runtime_str_concat(char* a, char* b) { 
+
+    if (a == NULL) a = "";
+    if (b == NULL) b = "";
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+    size_t need = la + lb + 1;
+    int64_t hdr = *(int64_t*)((char*)a - 8);
+    if (hdr & STR_OWNED_MARK) {
+        int64_t cap_a = hdr & ~STR_OWNED_MARK;
+        if ((size_t)cap_a >= need) {
+            memcpy((char*)a + la, b, lb + 1);
+            return a;
+        }
+    }
+    size_t new_cap = need * 2;
+    if (new_cap < 64) new_cap = 64;
+    char* raw = (char*)malloc(new_cap + 8);
+    if (raw == NULL) {
+        runtime_panic("runtime_str_concat: out of memory");
+    }
+    *(int64_t*)raw = ((int64_t)new_cap) | STR_OWNED_MARK;
+    char* r = raw + 8;
+    memcpy(r, a, la);
+    memcpy(r + la, b, lb + 1);
+    return r;
+}
+
 // Substring [start, end) using byte offsets, clamped to the string bounds.
 // NULL input yields an empty string.
 char* runtime_str_slice(char* s, int64_t start, int64_t end) {
@@ -144,30 +201,58 @@ char* runtime_str_slice(char* s, int64_t start, int64_t end) {
     int64_t hi = end < len ? end : len;
     if (hi < lo) hi = lo;
     int64_t n = hi - lo;
-    char* r = (char*)malloc((size_t)(n + 1));
-    if (r == NULL) {
-        runtime_panic("runtime_str_slice: out of memory");
-    }
+    char* r = runtime_str_new(n > 0 ? n : 1);
     memcpy(r, s + lo, (size_t)n);
     r[n] = '\0';
     return r;
 }
 
-// Concatenate two NUL-terminated strings. NULL operands are treated as "".
-char* runtime_str_concat(char* a, char* b) {
-    if (a == NULL) a = "";
-    if (b == NULL) b = "";
-    size_t la = strlen(a);
-    size_t lb = strlen(b);
-    char* r = (char*)malloc(la + lb + 1);
-    if (r == NULL) {
-        runtime_panic("runtime_str_concat: out of memory");
-    }
-    memcpy(r, a, la);
-    memcpy(r + la, b, lb);
-    r[la + lb] = '\0';
+// Return the byte value at index i, or -1 if out of bounds. No allocation.
+int64_t runtime_str_byte(char* s, int64_t i) { 
+
+    if (s == NULL || i < 0) return -1;
+    return (int64_t)(unsigned char)s[i];
+}
+
+// Build a 1-character owned string from a byte value (0..255). Used to append a
+// single character without allocating a substring. Returns an owned string.
+char* runtime_str_from_byte(int64_t b) {
+    char* r = runtime_str_new(1);
+    if (b < 0 || b > 255) b = 0;
+    r[0] = (char)(unsigned char)b;
+    r[1] = '\0';
     return r;
 }
+
+// Append a single byte to an owned string in place (amortized O(1) via capacity
+// reuse). Falls back to fresh allocation when capacity is exhausted. Returns the
+// (possibly relocated) owned string.
+// Append a single byte to an owned string in place (amortized O(1) via capacity
+// reuse). Falls back to fresh allocation when capacity is exhausted. Returns the
+// (possibly relocated) owned string.
+char* runtime_str_push_byte(char* s, int64_t b) {
+    if (s == NULL) return runtime_str_from_byte(b);
+    int64_t len = (int64_t)strlen(s);
+    int64_t hdr = *(int64_t*)((char*)s - 8);
+    int64_t cap = hdr & ~STR_OWNED_MARK;
+    if ((hdr & STR_OWNED_MARK) && cap > len) {
+        s[len] = (char)(unsigned char)b;
+        s[len + 1] = '\0';
+        return s;
+    }
+    int64_t newcap = (len + 1) * 2;
+    if (newcap < 16) newcap = 16;
+    char* raw = (char*)malloc(newcap + 8);
+    if (!raw) runtime_panic("OOM in runtime_str_push_byte");
+    *(int64_t*)raw = newcap | STR_OWNED_MARK;
+    char* r = raw + 8;
+    memcpy(r, s, (size_t)len);
+    r[len] = (char)(unsigned char)b;
+    r[len + 1] = '\0';
+    return r;
+}
+
+// (runtime_str_concat is defined above, OPT-002 capacity-header version.)
 
 // -- stdlib runtime helpers (Phase 12 Step 1) --
 // These back the `string`/`math`/`time`/`fs`/`io` stdlib package builtins when
@@ -294,7 +379,8 @@ char* runtime_str_replace(char* s, char* from, char* to) {
 // string yields one empty piece; trailing separators yield a trailing empty
 // piece). The pieces are malloc'd strings stored as i64 slots in the list.
 LimeList runtime_str_split(char* s, char* sep) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (s == NULL) return list;
     if (sep == NULL || *sep == '\0') {
         // Rust: "abc".split("") == ["a", "b", "c"]. We split on each byte
@@ -307,7 +393,7 @@ LimeList runtime_str_split(char* s, char* sep) {
             }
             part[0] = s[i];
             part[1] = '\0';
-            list = runtime_list_add(list, (int64_t)(intptr_t)part);
+            runtime_list_add(&list, (int64_t)(intptr_t)part);
         }
         return list;
     }
@@ -322,7 +408,7 @@ LimeList runtime_str_split(char* s, char* sep) {
         }
         memcpy(part, cur, piece_len);
         part[piece_len] = '\0';
-        list = runtime_list_add(list, (int64_t)(intptr_t)part);
+        runtime_list_add(&list, (int64_t)(intptr_t)part);
         if (hit == NULL) break;
         cur = hit + flen;
     }
@@ -483,7 +569,8 @@ double runtime_str_to_float(char* s) {
 }
 
 // Case-sensitive equality.
-int runtime_str_equals(char* a, char* b) {
+int runtime_str_equals(char* a, char* b) { 
+
     if (a == NULL) a = "";
     if (b == NULL) b = "";
     return strcmp(a, b) == 0;
@@ -813,7 +900,8 @@ void runtime_fs_metadata(char* path, int64_t* size, int8_t* is_dir, int8_t* is_f
 // List the immediate children of `path` as full paths (interpreter
 // `fs_list_dir`). Each entry is a malloc'd string stored as an i64 slot.
 LimeList runtime_fs_list_dir(char* path) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (path == NULL) return list;
 #ifdef _WIN32
     size_t plen = strlen(path);
@@ -850,7 +938,7 @@ LimeList runtime_fs_list_dir(char* path) {
             memcpy(full + plen + 1, fd.name, nl);
             full[plen + 1 + nl] = '\0';
         }
-        list = runtime_list_add(list, (int64_t)(intptr_t)full);
+        runtime_list_add(&list, (int64_t)(intptr_t)full);
     } while (_findnext(handle, &fd) == 0);
     _findclose(handle);
     return list;
@@ -870,7 +958,7 @@ LimeList runtime_fs_list_dir(char* path) {
         full[plen] = '/';
         memcpy(full + plen + 1, e->d_name, nl);
         full[plen + 1 + nl] = '\0';
-        list = runtime_list_add(list, (int64_t)(intptr_t)full);
+        runtime_list_add(&list, (int64_t)(intptr_t)full);
     }
     closedir(d);
     return list;
@@ -931,7 +1019,8 @@ int runtime_fs_remove_dir(char* path) {
 }
 
 LimeList runtime_fs_read_lines(char* path) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (path == NULL) return list;
     char* content = runtime_read_file(path);
     if (content == NULL) return list;
@@ -954,7 +1043,7 @@ LimeList runtime_fs_read_lines(char* path) {
         }
         memcpy(s, line, len);
         s[len] = '\0';
-        list = runtime_list_add(list, (int64_t)(intptr_t)s);
+        runtime_list_add(&list, (int64_t)(intptr_t)s);
         if (end) line = end; else break;
     }
     free(content);
@@ -1062,28 +1151,24 @@ LimeList runtime_str_bytes(char* s) {
 // -- List operations --
 
 // Construct an empty list.
-LimeList runtime_list_empty(void) {
-    LimeList list;
-    list.data = NULL;
-    list.len = 0;
-    list.cap = 0;
-    return list;
+void runtime_list_empty(LimeList* out) {
+    out->data = NULL;
+    out->len = 0;
+    out->cap = 0;
 }
 
-// Append an element, growing the buffer as needed.
-LimeList runtime_list_add(LimeList list, int64_t elem) {
-    if (list.len >= list.cap) grow_list(&list);
-    ((int64_t*)list.data)[list.len] = elem;
-    list.len++;
-    return list;
+// Append an element, growing the buffer as needed. Mutates *list in place.
+void runtime_list_add(LimeList* list, int64_t elem) {
+    if (list->len >= list->cap) grow_list(list);
+    ((int64_t*)list->data)[list->len] = elem;
+    list->len++;
 }
 
 // Replace the element at `index` (no-op when the index is out of bounds).
-LimeList runtime_list_set(LimeList list, int64_t index, int64_t elem) {
-    if (index >= 0 && index < list.len) {
-        ((int64_t*)list.data)[index] = elem;
+void runtime_list_set(LimeList* list, int64_t index, int64_t elem) {
+    if (index >= 0 && index < list->len) {
+        ((int64_t*)list->data)[index] = elem;
     }
-    return list;
 }
 
 // Return the number of elements in the list.
@@ -1102,26 +1187,24 @@ int64_t runtime_list_get(LimeList list, int64_t index) {
 // -- List mutation / inspection (Phase C-1.2) --
 
 // Insert `elem` at `index`, shifting elements right. Clamps index to [0, len].
-LimeList runtime_list_insert(LimeList list, int64_t index, int64_t elem) {
+void runtime_list_insert(LimeList* list, int64_t index, int64_t elem) {
     if (index < 0) index = 0;
-    if (index > list.len) index = list.len;
-    if (list.len >= list.cap) grow_list(&list);
-    int64_t* arr = (int64_t*)list.data;
-    memmove(arr + index + 1, arr + index, (list.len - index) * sizeof(int64_t));
+    if (index > list->len) index = list->len;
+    if (list->len >= list->cap) grow_list(list);
+    int64_t* arr = (int64_t*)list->data;
+    memmove(arr + index + 1, arr + index, (list->len - index) * sizeof(int64_t));
     arr[index] = elem;
-    list.len++;
-    return list;
+    list->len++;
 }
 
-LimeList runtime_list_clear(LimeList list) {
-    list.len = 0;
-    return list;
+void runtime_list_clear(LimeList* list) {
+    list->len = 0;
 }
 
 // Sort the list elements (simple insertion sort for i64 values).
-LimeList runtime_list_sort(LimeList list) {
-    int64_t* arr = (int64_t*)list.data;
-    for (int64_t i = 1; i < list.len; i++) {
+void runtime_list_sort(LimeList* list) {
+    int64_t* arr = (int64_t*)list->data;
+    for (int64_t i = 1; i < list->len; i++) {
         int64_t key = arr[i];
         int64_t j = i - 1;
         while (j >= 0 && arr[j] > key) {
@@ -1130,18 +1213,17 @@ LimeList runtime_list_sort(LimeList list) {
         }
         arr[j + 1] = key;
     }
-    return list;
 }
 
-LimeList runtime_list_clone(LimeList list) {
+void runtime_list_clone(LimeList* dest, LimeList* src) {
     LimeList result = {0, 0, 0};
-    if (list.len > 0) {
+    if (src->len > 0) {
         if (result.len >= result.cap) grow_list(&result);
-        while (result.cap < list.len) grow_list(&result);
-        memcpy(result.data, list.data, list.len * sizeof(int64_t));
-        result.len = list.len;
+        while (result.cap < src->len) grow_list(&result);
+        memcpy(result.data, src->data, src->len * sizeof(int64_t));
+        result.len = src->len;
     }
-    return result;
+    *dest = result;
 }
 
 // -- Map operations --
@@ -1296,7 +1378,7 @@ LimeSet runtime_set_clone(LimeSet set) {
 // -- Queue operations (FIFO: push at back, pop from front) --
 
 LimeList runtime_queue_push(LimeList queue, int64_t elem) {
-    return runtime_list_add(queue, elem);
+    runtime_list_add(&queue, elem);
 }
 
 int64_t runtime_queue_pop(LimeList queue) {
@@ -1333,7 +1415,7 @@ LimeList runtime_queue_clear(LimeList queue) {
 // -- Stack operations (LIFO: push at back, pop from back) --
 
 LimeList runtime_stack_push(LimeList stack, int64_t elem) {
-    return runtime_list_add(stack, elem);
+    runtime_list_add(&stack, elem);
 }
 
 int64_t runtime_stack_pop(LimeList stack) {
@@ -2845,7 +2927,8 @@ char* runtime_regex_find(char* compiled, char* text) {
 }
 
 LimeList runtime_regex_find_all(char* compiled, char* text) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (!compiled || !text) return list;
     RegexProgram prog = regex_deserialize(compiled);
     if (prog.ops == NULL) return list;
@@ -2863,7 +2946,7 @@ LimeList runtime_regex_find_all(char* compiled, char* text) {
             if (!match_str) runtime_panic("regex: out of memory");
             memcpy(match_str, text + pos, match_len);
             match_str[match_len] = '\0';
-            list = runtime_list_add(list, (int64_t)(intptr_t)match_str);
+            runtime_list_add(&list, (int64_t)(intptr_t)match_str);
             pos = end;
             if (end == pos) pos++;
         } else {
@@ -2957,14 +3040,15 @@ char* runtime_regex_replace_all(char* compiled, char* text, char* replacement) {
 }
 
 LimeList runtime_regex_split(char* compiled, char* text) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (!compiled || !text) {
-        if (text) list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(text));
+        if (text) runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(text));
         return list;
     }
     RegexProgram prog = regex_deserialize(compiled);
     if (prog.ops == NULL) {
-        list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(text));
+        runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(text));
         return list;
     }
     RegexMatcher m;
@@ -2983,7 +3067,7 @@ LimeList runtime_regex_split(char* compiled, char* text) {
             if (!piece) runtime_panic("regex: out of memory");
             memcpy(piece, text + last_end, piece_len);
             piece[piece_len] = '\0';
-            list = runtime_list_add(list, (int64_t)(intptr_t)piece);
+            runtime_list_add(&list, (int64_t)(intptr_t)piece);
             last_end = end;
             pos = end;
             if (end == pos) pos++;
@@ -2996,7 +3080,7 @@ LimeList runtime_regex_split(char* compiled, char* text) {
     if (!piece) runtime_panic("regex: out of memory");
     memcpy(piece, text + last_end, piece_len);
     piece[piece_len] = '\0';
-    list = runtime_list_add(list, (int64_t)(intptr_t)piece);
+    runtime_list_add(&list, (int64_t)(intptr_t)piece);
     return list;
 }
 
@@ -3210,7 +3294,8 @@ char* runtime_process_status(int64_t pid) {
 }
 
 LimeList runtime_process_args(void) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     // Get command line arguments
     wchar_t* cmd_line = GetCommandLineW();
     int argc;
@@ -3221,7 +3306,7 @@ LimeList runtime_process_args(void) {
         char* arg = (char*)malloc(size);
         if (arg) {
             WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, arg, size, NULL, NULL);
-            list = runtime_list_add(list, (int64_t)(intptr_t)arg);
+            runtime_list_add(&list, (int64_t)(intptr_t)arg);
         }
     }
     LocalFree(argv);
@@ -3388,7 +3473,8 @@ char* runtime_process_status(int64_t pid) {
 }
 
 LimeList runtime_process_args(void) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     extern char** environ;
     (void)environ;
     return list;
@@ -3855,7 +3941,7 @@ RequestsRequestBuilder* runtime_requests_request_builder_new(RequestsClient* cli
     b->method = method ? runtime_str_copy(method) : runtime_str_copy("GET");
     b->url = url ? runtime_str_copy(url) : runtime_str_copy("");
     b->headers = header_map_new();
-    b->query_params = runtime_list_empty();
+    runtime_list_empty(&b->query_params);
     b->timeout_seconds = client ? client->timeout_seconds : 30;
     b->redirect_limit = client ? client->redirect_limit : 10;
     b->disable_redirects = client ? client->disable_redirects : 0;
@@ -4054,7 +4140,7 @@ int runtime_requests_status_code_is_redirect(int64_t code) { return code >= 300 
 RequestsMultipart* runtime_requests_multipart_new(void) {
     RequestsMultipart* m = (RequestsMultipart*)malloc(sizeof(RequestsMultipart));
     if (!m) runtime_panic("requests: out of memory");
-    m->fields = runtime_list_empty();
+    runtime_list_empty(&m->fields);
     return m;
 }
 
@@ -4063,10 +4149,10 @@ int runtime_requests_multipart_text(RequestsMultipart* multipart, char* name, ch
     LimeList* tuple = (LimeList*)malloc(sizeof(LimeList));
     if (!tuple) return -1;
     tuple->data = NULL; tuple->len = 0; tuple->cap = 0;
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(name));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(value ? value : ""));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy("text"));
-    multipart->fields = runtime_list_add(multipart->fields, (int64_t)(intptr_t)tuple);
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(name));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(value ? value : ""));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy("text"));
+    runtime_list_add(&multipart->fields, (int64_t)(intptr_t)tuple);
     return 0;
 }
 
@@ -4075,10 +4161,10 @@ int runtime_requests_multipart_file(RequestsMultipart* multipart, char* name, ch
     LimeList* tuple = (LimeList*)malloc(sizeof(LimeList));
     if (!tuple) return -1;
     tuple->data = NULL; tuple->len = 0; tuple->cap = 0;
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(name));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(file_path));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy("file"));
-    multipart->fields = runtime_list_add(multipart->fields, (int64_t)(intptr_t)tuple);
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(name));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(file_path));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy("file"));
+    runtime_list_add(&multipart->fields, (int64_t)(intptr_t)tuple);
     return 0;
 }
 
@@ -4087,12 +4173,12 @@ int runtime_requests_multipart_file_with_metadata(RequestsMultipart* multipart, 
     LimeList* tuple = (LimeList*)malloc(sizeof(LimeList));
     if (!tuple) return -1;
     tuple->data = NULL; tuple->len = 0; tuple->cap = 0;
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(name));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(file_path));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy("file"));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(filename ? filename : ""));
-    *tuple = runtime_list_add(*tuple, (int64_t)(intptr_t)runtime_str_copy(content_type ? content_type : ""));
-    multipart->fields = runtime_list_add(multipart->fields, (int64_t)(intptr_t)tuple);
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(name));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(file_path));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy("file"));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(filename ? filename : ""));
+    runtime_list_add(tuple, (int64_t)(intptr_t)runtime_str_copy(content_type ? content_type : ""));
+    runtime_list_add(&multipart->fields, (int64_t)(intptr_t)tuple);
     return 0;
 }
 
@@ -4267,7 +4353,7 @@ static int cookie_matches(RequestsCookie* c, char* domain, char* path, int is_ht
 RequestsCookieJar* runtime_requests_cookie_jar_new(void) {
     RequestsCookieJar* j = (RequestsCookieJar*)malloc(sizeof(RequestsCookieJar));
     if (!j) runtime_panic("requests: out of memory");
-    j->cookies = runtime_list_empty();
+    runtime_list_empty(&j->cookies);
     return j;
 }
 
@@ -4276,13 +4362,13 @@ int runtime_requests_cookie_jar_add(RequestsCookieJar* jar, char* cookie_str) {
     // Parse the cookie string and store as RequestsCookie*
     RequestsCookie* c = cookie_parse_set_cookie(cookie_str, NULL);
     if (!c) return -1;
-    jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)c);
+    runtime_list_add(&jar->cookies, (int64_t)(intptr_t)c);
     return 0;
 }
 
 int runtime_requests_cookie_jar_add_parsed(RequestsCookieJar* jar, void* cookie) {
     if (!jar || !cookie) return -1;
-    jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)cookie);
+    runtime_list_add(&jar->cookies, (int64_t)(intptr_t)cookie);
     return 0;
 }
 
@@ -4321,7 +4407,7 @@ void runtime_requests_cookie_jar_update_from_response(RequestsCookieJar* jar, Re
                         break;
                     }
                 }
-                jar->cookies = runtime_list_add(jar->cookies, (int64_t)(intptr_t)c);
+                runtime_list_add(&jar->cookies, (int64_t)(intptr_t)c);
             }
         }
         e = e->next;
@@ -4365,13 +4451,14 @@ char* runtime_requests_cookie_jar_get_cookie_header(RequestsCookieJar* jar, char
 
 // Get all cookies as a list of tuples (name, value) for the Lime layer
 LimeList runtime_requests_cookie_jar_get_all(RequestsCookieJar* jar) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (!jar) return list;
     for (int64_t i = 0; i < jar->cookies.len; i++) {
         RequestsCookie* c = (RequestsCookie*)(intptr_t)runtime_list_get(jar->cookies, i);
         if (c && c->name) {
-            list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(c->name));
-            list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(c->value ? c->value : ""));
+            runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(c->name));
+            runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(c->value ? c->value : ""));
         }
     }
     return list;
@@ -4399,7 +4486,7 @@ char* runtime_requests_cookie_parse(char* cookie_str) {
 RequestsRedirectHistory* runtime_requests_redirect_history_new(void) {
     RequestsRedirectHistory* h = (RequestsRedirectHistory*)malloc(sizeof(RequestsRedirectHistory));
     if (!h) runtime_panic("requests: out of memory");
-    h->entries = runtime_list_empty();
+    runtime_list_empty(&h->entries);
     return h;
 }
 
@@ -4410,17 +4497,18 @@ void runtime_requests_redirect_history_add(RequestsRedirectHistory* history, int
     e->status_code = status_code;
     e->url = url ? runtime_str_copy(url) : runtime_str_copy("");
     e->method = method ? runtime_str_copy(method) : runtime_str_copy("");
-    history->entries = runtime_list_add(history->entries, (int64_t)(intptr_t)e);
+    runtime_list_add(&history->entries, (int64_t)(intptr_t)e);
 }
 
 LimeList runtime_requests_redirect_history_list(RequestsRedirectHistory* history) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (!history) return list;
     for (int64_t i = 0; i < history->entries.len; i++) {
         RequestsRedirectEntry* e = (RequestsRedirectEntry*)(intptr_t)runtime_list_get(history->entries, i);
         if (e) {
-            list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(e->url));
-            list = runtime_list_add(list, (int64_t)e->status_code);
+            runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(e->url));
+            runtime_list_add(&list, (int64_t)e->status_code);
         }
     }
     return list;
@@ -4450,7 +4538,7 @@ RequestsSession* runtime_requests_session_new(void) {
     s->default_headers = header_map_new();
     s->cookies = runtime_requests_cookie_jar_new();
     s->redirect_history = runtime_requests_redirect_history_new();
-    s->default_params = runtime_list_empty();
+    runtime_list_empty(&s->default_params);
     s->timeout_seconds = 30;
     s->redirect_limit = 10;
     s->disable_redirects = 0;
@@ -4478,7 +4566,7 @@ RequestsRequestBuilder* runtime_requests_session_request(RequestsSession* sessio
         // Copy session default params to builder
         if (session->default_params.len > 0) {
             for (int64_t i = 0; i < session->default_params.len; i++) {
-                b->query_params = runtime_list_add(b->query_params,
+                runtime_list_add(&b->query_params,
                     (int64_t)(intptr_t)runtime_str_copy(
                         (char*)(intptr_t)runtime_list_get(session->default_params, i)));
             }
@@ -4541,7 +4629,7 @@ int runtime_requests_session_set_disable_redirects(RequestsSession* session, int
 }
 
 LimeList runtime_requests_session_cookies(RequestsSession* session) {
-    if (!session || !session->cookies) return runtime_list_empty();
+    if (!session || !session->cookies) { LimeList _empty; runtime_list_empty(&_empty); return _empty; }
     return runtime_requests_cookie_jar_get_all(session->cookies);
 }
 
@@ -5131,19 +5219,20 @@ RequestsHeaderMap* runtime_requests_response_headers(RequestsResponse* response)
 }
 
 LimeList runtime_requests_response_headers_list(RequestsResponse* response) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (!response || !response->headers) return list;
     HeaderEntry* e = response->headers->first;
     while (e) {
-        list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(e->key));
-        list = runtime_list_add(list, (int64_t)(intptr_t)runtime_str_copy(e->value));
+        runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(e->key));
+        runtime_list_add(&list, (int64_t)(intptr_t)runtime_str_copy(e->value));
         e = e->next;
     }
     return list;
 }
 
 LimeList runtime_requests_response_redirect_history(RequestsResponse* response) {
-    if (!response || !response->redirect_history) return runtime_list_empty();
+    if (!response || !response->redirect_history) { LimeList _empty; runtime_list_empty(&_empty); return _empty; }
     return runtime_requests_redirect_history_list(response->redirect_history);
 }
 
@@ -5211,7 +5300,8 @@ int64_t runtime_requests_response_copy_to(RequestsResponse* response, char* file
 }
 
 LimeList runtime_requests_response_chunks(RequestsResponse* response, int64_t chunk_size) {
-    LimeList list = runtime_list_empty();
+    LimeList list;
+    runtime_list_empty(&list);
     if (!response || !response->body || chunk_size <= 0) return list;
     int64_t pos = 0;
     while (pos < response->body_len) {
@@ -5221,7 +5311,7 @@ LimeList runtime_requests_response_chunks(RequestsResponse* response, int64_t ch
         if (!chunk) break;
         memcpy(chunk, response->body + pos, this_chunk);
         chunk[this_chunk] = '\0';
-        list = runtime_list_add(list, (int64_t)(intptr_t)chunk);
+        runtime_list_add(&list, (int64_t)(intptr_t)chunk);
         pos += this_chunk;
     }
     return list;

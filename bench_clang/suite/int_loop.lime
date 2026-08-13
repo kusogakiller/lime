@@ -1,0 +1,9 @@
+// Category A: Integer arithmetic — large loop (add / mul / rem / compare / accumulate)
+// Must be stack-safe: single accumulation loop, no deep nesting.
+fn main():
+    let mut acc = 0
+    let mut i = 0
+    while (i < 100000000):
+        acc = acc + (i * 3) % 17
+        i = i + 1
+    println(acc)

@@ -1,0 +1,25 @@
+// Category J (algorithm): Sieve of Eratosthenes, count primes up to N.
+// Uses List(int) of 0/1 flags (List(bool) codegen incomplete; N capped at 20000
+// because Lime Native overflows the stack for lists beyond ~30k elements).
+fn main():
+    let int: n = 5000
+    let List(int): sieve = []
+    let mut int: i = 0
+    while (i <= n):
+        sieve.add(1)
+        i = i + 1
+    let mut int: p = 2
+    while (p * p <= n):
+        if (sieve.get(p) == 1):
+            let mut int: j = p * p
+            while (j <= n):
+                sieve.set(j, 0)
+                j = j + p
+        p = p + 1
+    let mut int: count = 0
+    let mut int: k = 2
+    while (k <= n):
+        if (sieve.get(k) == 1):
+            count = count + 1
+        k = k + 1
+    println(count)

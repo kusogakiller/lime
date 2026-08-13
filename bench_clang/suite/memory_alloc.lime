@@ -1,0 +1,13 @@
+// Category I: Memory ops — repeated allocation of structs in a loop, checksum.
+struct Node:
+    int: x
+    int: y
+
+fn main():
+    let mut int: total = 0
+    let mut int: i = 0
+    while (i < 1000000):
+        let Node: n = Node(i, i + 1)
+        total = total + n.x + n.y
+        i = i + 1
+    println(total)

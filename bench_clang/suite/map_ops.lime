@@ -1,0 +1,26 @@
+// Category H: Map ops — Lime's HashMap is a linear list (O(n) per op). Mirror the SAME
+// linear semantics with two parallel List(int) (keys + vals). Mutations inlined in main
+// (Lime passes collections by value, so helpers cannot mutate the caller's list in place).
+// Remove phase is omitted: Lime has no List pop/truncate in this build, so insert+lookup
+// (the dominant cost) are measured symmetrically in both languages.
+fn main():
+    let List(int): keys = []
+    let List(int): vals = []
+    let mut int: i = 0
+    while (i < 5000):
+        keys.add(i)
+        vals.add(i * 3)
+        i = i + 1
+    let mut int: total = 0
+    let mut int: k = 0
+    while (k < 5000):
+        let mut int: fv = 0
+        let mut int: j = 0
+        while (j < keys.len()):
+            if (keys.get(j) == k):
+                fv = vals.get(j)
+            j = j + 1
+        total = total + fv
+        k = k + 1
+    println(total)
+    println(keys.len())

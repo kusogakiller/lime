@@ -1,0 +1,8 @@
+// Category G: String concatenation in a loop (repeated ops, large string).
+fn main():
+    let mut str: s = "x"
+    let mut int: i = 0
+    while (i < 30000):
+        s = s + "y"
+        i = i + 1
+    println(s.len())

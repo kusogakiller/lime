@@ -1,0 +1,642 @@
+{
+  "environment": {
+    "date": "2026-08-13T18:07:27",
+    "cpu": "Intel x86_64 Family 6 Model 158 (Skylake-class), 8 logical cores",
+    "os": "Windows 10.0.26200 (build 26200), MINGW64",
+    "lime_exe": "C:\\Users\\szzxl\\Downloads\\lime\\target\\release\\lime.exe",
+    "lime_git": "4019b2a",
+    "clang": "22.1.8 (LLVM 22.1.8)",
+    "lime_flags": "lime build --release --emit-object  => clang -O2 -c + lld-link",
+    "clang_o2_flags": "clang -O2 -o",
+    "clang_o3_flags": "clang -O3 -o",
+    "repeats": 11,
+    "warmup": 1
+  },
+  "results": {
+    "benchmarks": {
+      "algo_sieve": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.8753,
+          "median_ms": 10.2087,
+          "max_ms": 10.649,
+          "mean_ms": 10.243,
+          "stdev_ms": 0.2761,
+          "n": 11,
+          "output": "669"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.1692,
+          "median_ms": 6.6848,
+          "max_ms": 7.1937,
+          "mean_ms": 6.6438,
+          "stdev_ms": 0.2995,
+          "n": 11,
+          "output": "669"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.349,
+          "median_ms": 6.5015,
+          "max_ms": 7.4235,
+          "mean_ms": 6.6781,
+          "stdev_ms": 0.334,
+          "n": 11,
+          "output": "669"
+        },
+        "correctness": "MATCH"
+      },
+      "algo_sort": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 10.0937,
+          "median_ms": 10.7066,
+          "max_ms": 11.201,
+          "mean_ms": 10.6466,
+          "stdev_ms": 0.2975,
+          "n": 11,
+          "output": "2500097500"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.6316,
+          "median_ms": 7.143,
+          "max_ms": 7.3821,
+          "mean_ms": 7.0377,
+          "stdev_ms": 0.244,
+          "n": 11,
+          "output": "2500097500"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.6207,
+          "median_ms": 7.0277,
+          "max_ms": 7.3207,
+          "mean_ms": 6.9904,
+          "stdev_ms": 0.2157,
+          "n": 11,
+          "output": "2500097500"
+        },
+        "correctness": "MATCH"
+      },
+      "control_flow": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 79.3507,
+          "median_ms": 79.6874,
+          "max_ms": 80.7117,
+          "mean_ms": 79.7419,
+          "stdev_ms": 0.3533,
+          "n": 11,
+          "output": "166666613333336"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 65.2169,
+          "median_ms": 65.3938,
+          "max_ms": 65.9666,
+          "mean_ms": 65.4291,
+          "stdev_ms": 0.1942,
+          "n": 11,
+          "output": "166666613333336"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 65.0143,
+          "median_ms": 65.2624,
+          "max_ms": 65.7006,
+          "mean_ms": 65.3054,
+          "stdev_ms": 0.2173,
+          "n": 11,
+          "output": "166666613333336"
+        },
+        "correctness": "MATCH"
+      },
+      "float_loop": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 17.607,
+          "median_ms": 17.9854,
+          "max_ms": 18.6034,
+          "mean_ms": 18.0164,
+          "stdev_ms": 0.2645,
+          "n": 11,
+          "output": "567667276975.9338"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 14.4576,
+          "median_ms": 14.5908,
+          "max_ms": 14.8325,
+          "mean_ms": 14.6013,
+          "stdev_ms": 0.1069,
+          "n": 11,
+          "output": "567667276975.9338"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 14.5634,
+          "median_ms": 14.6805,
+          "max_ms": 15.9068,
+          "mean_ms": 14.8371,
+          "stdev_ms": 0.3614,
+          "n": 11,
+          "output": "567667276975.9338"
+        },
+        "correctness": "MATCH"
+      },
+      "func_call": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 27.0352,
+          "median_ms": 27.2636,
+          "max_ms": 28.5957,
+          "mean_ms": 27.4256,
+          "stdev_ms": 0.4403,
+          "n": 11,
+          "output": "13333340000000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 23.751,
+          "median_ms": 24.1685,
+          "max_ms": 24.6467,
+          "mean_ms": 24.1468,
+          "stdev_ms": 0.272,
+          "n": 11,
+          "output": "13333340000000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 23.6842,
+          "median_ms": 24.0402,
+          "max_ms": 24.6635,
+          "mean_ms": 24.0581,
+          "stdev_ms": 0.2643,
+          "n": 11,
+          "output": "13333340000000"
+        },
+        "correctness": "MATCH"
+      },
+      "int_loop": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 86.3467,
+          "median_ms": 87.1838,
+          "max_ms": 87.7379,
+          "mean_ms": 87.15,
+          "stdev_ms": 0.3619,
+          "n": 11,
+          "output": "799999994"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 83.4892,
+          "median_ms": 84.1175,
+          "max_ms": 85.8385,
+          "mean_ms": 84.308,
+          "stdev_ms": 0.7264,
+          "n": 11,
+          "output": "799999994"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 83.2401,
+          "median_ms": 83.7845,
+          "max_ms": 84.3205,
+          "mean_ms": 83.7862,
+          "stdev_ms": 0.294,
+          "n": 11,
+          "output": "799999994"
+        },
+        "correctness": "MATCH"
+      },
+      "list_iter": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 10.296,
+          "median_ms": 10.5508,
+          "max_ms": 11.1855,
+          "mean_ms": 10.6364,
+          "stdev_ms": 0.2305,
+          "n": 11,
+          "output": "9990000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.4789,
+          "median_ms": 7.0257,
+          "max_ms": 7.3276,
+          "mean_ms": 6.8712,
+          "stdev_ms": 0.3334,
+          "n": 11,
+          "output": "9990000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.2689,
+          "median_ms": 6.7391,
+          "max_ms": 7.8492,
+          "mean_ms": 6.8261,
+          "stdev_ms": 0.4454,
+          "n": 11,
+          "output": "9990000"
+        },
+        "correctness": "MATCH"
+      },
+      "list_push": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 10.0831,
+          "median_ms": 10.5052,
+          "max_ms": 10.9011,
+          "mean_ms": 10.471,
+          "stdev_ms": 0.222,
+          "n": 11,
+          "output": "20000\n999"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.1833,
+          "median_ms": 6.6062,
+          "max_ms": 7.2543,
+          "mean_ms": 6.6536,
+          "stdev_ms": 0.3636,
+          "n": 11,
+          "output": "20000\n999"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.155,
+          "median_ms": 6.3757,
+          "max_ms": 7.0138,
+          "mean_ms": 6.4973,
+          "stdev_ms": 0.2616,
+          "n": 11,
+          "output": "20000\n999"
+        },
+        "correctness": "MATCH"
+      },
+      "map_ops": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 14.5718,
+          "median_ms": 15.0684,
+          "max_ms": 15.2022,
+          "mean_ms": 14.9854,
+          "stdev_ms": 0.1949,
+          "n": 11,
+          "output": "37492500\n5000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.4153,
+          "median_ms": 9.9465,
+          "max_ms": 10.5224,
+          "mean_ms": 9.9034,
+          "stdev_ms": 0.3238,
+          "n": 11,
+          "output": "37492500\n5000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.2105,
+          "median_ms": 9.775,
+          "max_ms": 10.5902,
+          "mean_ms": 9.8921,
+          "stdev_ms": 0.42,
+          "n": 11,
+          "output": "37492500\n5000"
+        },
+        "correctness": "MATCH"
+      },
+      "memory_alloc": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.7816,
+          "median_ms": 10.0587,
+          "max_ms": 10.7242,
+          "mean_ms": 10.1465,
+          "stdev_ms": 0.3152,
+          "n": 11,
+          "output": "1000000000000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.4818,
+          "median_ms": 6.625,
+          "max_ms": 7.1614,
+          "mean_ms": 6.7062,
+          "stdev_ms": 0.1963,
+          "n": 11,
+          "output": "1000000000000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.0539,
+          "median_ms": 6.6569,
+          "max_ms": 6.9222,
+          "mean_ms": 6.6214,
+          "stdev_ms": 0.2437,
+          "n": 11,
+          "output": "1000000000000"
+        },
+        "correctness": "MATCH"
+      },
+      "mixed_workload": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "FAIL",
+          "err": "rc=3221225477 stderr="
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 19.3057,
+          "median_ms": 19.443,
+          "max_ms": 20.1791,
+          "mean_ms": 19.5022,
+          "stdev_ms": 0.2457,
+          "n": 11,
+          "output": "10006\n7"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 19.0099,
+          "median_ms": 19.3555,
+          "max_ms": 19.6003,
+          "mean_ms": 19.379,
+          "stdev_ms": 0.1686,
+          "n": 11,
+          "output": "10006\n7"
+        },
+        "correctness": null
+      },
+      "recursion_tail": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.4418,
+          "median_ms": 9.9037,
+          "max_ms": 10.9582,
+          "mean_ms": 10.0015,
+          "stdev_ms": 0.3976,
+          "n": 11,
+          "output": "20000100000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.134,
+          "median_ms": 6.7044,
+          "max_ms": 7.0407,
+          "mean_ms": 6.6784,
+          "stdev_ms": 0.2711,
+          "n": 11,
+          "output": "20000100000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.2748,
+          "median_ms": 6.5714,
+          "max_ms": 6.973,
+          "mean_ms": 6.5791,
+          "stdev_ms": 0.169,
+          "n": 11,
+          "output": "20000100000"
+        },
+        "correctness": "MATCH"
+      },
+      "recursion_tree": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.6665,
+          "median_ms": 10.0061,
+          "max_ms": 11.0005,
+          "mean_ms": 10.0473,
+          "stdev_ms": 0.3692,
+          "n": 11,
+          "output": "200010000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.3024,
+          "median_ms": 6.5338,
+          "max_ms": 6.9397,
+          "mean_ms": 6.6125,
+          "stdev_ms": 0.2189,
+          "n": 11,
+          "output": "200010000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.1195,
+          "median_ms": 6.5938,
+          "max_ms": 7.7971,
+          "mean_ms": 6.6365,
+          "stdev_ms": 0.418,
+          "n": 11,
+          "output": "200010000"
+        },
+        "correctness": "MATCH"
+      },
+      "set_ops": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 174.9976,
+          "median_ms": 176.6875,
+          "max_ms": 178.286,
+          "mean_ms": 176.8399,
+          "stdev_ms": 1.1132,
+          "n": 11,
+          "output": "11285318\n20000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 92.8899,
+          "median_ms": 94.1646,
+          "max_ms": 95.8857,
+          "mean_ms": 94.302,
+          "stdev_ms": 0.9353,
+          "n": 11,
+          "output": "11285318\n20000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 91.9679,
+          "median_ms": 95.0456,
+          "max_ms": 97.1378,
+          "mean_ms": 94.7913,
+          "stdev_ms": 1.3734,
+          "n": 11,
+          "output": "11285318\n20000"
+        },
+        "correctness": "MATCH"
+      },
+      "string_access": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 56.0178,
+          "median_ms": 56.7864,
+          "max_ms": 57.5574,
+          "mean_ms": 56.748,
+          "stdev_ms": 0.3768,
+          "n": 11,
+          "output": "20000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 18.7855,
+          "median_ms": 19.1023,
+          "max_ms": 20.5385,
+          "mean_ms": 19.2106,
+          "stdev_ms": 0.4456,
+          "n": 11,
+          "output": "20000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 18.5159,
+          "median_ms": 18.7666,
+          "max_ms": 19.3145,
+          "mean_ms": 18.8552,
+          "stdev_ms": 0.237,
+          "n": 11,
+          "output": "20000"
+        },
+        "correctness": "MATCH"
+      },
+      "string_concat": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 35.4157,
+          "median_ms": 35.5932,
+          "max_ms": 36.2273,
+          "mean_ms": 35.7003,
+          "stdev_ms": 0.2717,
+          "n": 11,
+          "output": "30001"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 112.1818,
+          "median_ms": 112.9232,
+          "max_ms": 114.6564,
+          "mean_ms": 112.9301,
+          "stdev_ms": 0.6829,
+          "n": 11,
+          "output": "30001"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 111.9049,
+          "median_ms": 112.7451,
+          "max_ms": 114.8799,
+          "mean_ms": 112.9569,
+          "stdev_ms": 0.9679,
+          "n": 11,
+          "output": "30001"
+        },
+        "correctness": "MATCH"
+      },
+      "struct_ops": {
+        "has_c_ref": true,
+        "lime": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 9.8942,
+          "median_ms": 10.1281,
+          "max_ms": 10.6765,
+          "mean_ms": 10.1932,
+          "stdev_ms": 0.2345,
+          "n": 11,
+          "output": "50000020000000"
+        },
+        "clang_o2": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.4633,
+          "median_ms": 6.6929,
+          "max_ms": 7.0535,
+          "mean_ms": 6.7349,
+          "stdev_ms": 0.1642,
+          "n": 11,
+          "output": "50000020000000"
+        },
+        "clang_o3": {
+          "build": "PASS",
+          "run": "PASS",
+          "min_ms": 6.2377,
+          "median_ms": 6.5678,
+          "max_ms": 7.1789,
+          "mean_ms": 6.6112,
+          "stdev_ms": 0.2327,
+          "n": 11,
+          "output": "50000020000000"
+        },
+        "correctness": "MATCH"
+      }
+    }
+  }
+}

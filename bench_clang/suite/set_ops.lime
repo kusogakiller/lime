@@ -1,0 +1,30 @@
+// Category H: Set ops — Lime's HashSet is a linear list (O(n) per op). Mutations inlined in
+// main (Lime passes collections by value, so helpers cannot mutate the caller's list).
+fn main():
+    let List(int): s = []
+    let mut int: i = 0
+    while (i < 20000):
+        let int: item = (i * 31) % 100000
+        let mut int: found = 0
+        let mut int: j = 0
+        while (j < s.len()):
+            if (s.get(j) == item):
+                found = 1
+            j = j + 1
+        if (not (found == 1)):
+            s.add(item)
+        i = i + 1
+    let mut int: total = 0
+    let mut int: k = 0
+    while (k < 10000):
+        let mut int: f2 = 0
+        let mut int: j2 = 0
+        while (j2 < s.len()):
+            if (s.get(j2) == k):
+                f2 = 1
+            j2 = j2 + 1
+        if (f2 == 1):
+            total = total + k
+        k = k + 1
+    println(total)
+    println(s.len())

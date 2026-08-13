@@ -1,0 +1,12 @@
+// Category H: List push — push N items, checksum the length and a sample sum.
+// NOTE: Lime Native overflows the stack for lists larger than ~30k elements in this
+// build, so N is capped at 20000 (same N used for the Clang reference). Full-scale
+// (1M) is NOT VERIFIED — see PERFORMANCE_CLANG_BASELINE.md.
+fn main():
+    let List(int): xs = []
+    let mut int: i = 0
+    while (i < 20000):
+        xs.add(i % 1000)
+        i = i + 1
+    println(xs.len())
+    println(xs.get(19999))

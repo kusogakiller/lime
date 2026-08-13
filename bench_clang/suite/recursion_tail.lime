@@ -1,0 +1,8 @@
+// Category D: Recursion (tail form) — tail-recursive accumulator sum 1..n.
+fn tsum(int: n, int: acc):
+    if (n <= 0):
+        return acc
+    return tsum(n - 1, acc + n)
+
+fn main():
+    println(tsum(200000, 0))

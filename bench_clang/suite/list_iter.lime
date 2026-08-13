@@ -1,0 +1,14 @@
+// Category H: List iterate — build then sum by iterating with get().
+// N capped at 20000 (Lime Native stack ceiling ~30k). Full-scale NOT VERIFIED.
+fn main():
+    let List(int): xs = []
+    let mut int: i = 0
+    while (i < 20000):
+        xs.add((i * 7) % 1000)
+        i = i + 1
+    let mut int: total = 0
+    let mut int: k = 0
+    while (k < xs.len()):
+        total = total + xs.get(k)
+        k = k + 1
+    println(total)

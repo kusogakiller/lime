@@ -3718,6 +3718,40 @@ pub fn compile_pipeline(
         let _t_codegen = StageTimer::new("codegen_ll");
         let (out, warnings) = codegen::emit_llvm(&stmts, &defs, &memory);
         report.codegen_warnings = warnings;
+        // Dead-declaration elimination: keep only runtime declares actually called,
+        // so the linker (/OPT:REF) can drop unused runtime.c object code and shrink
+        // startup overhead (was ~3ms from linking the whole 5000-line runtime).
+        let out = {
+            use std::collections::HashSet;
+            let used: HashSet<&str> = out.lines()
+                .filter_map(|l| {
+                    let s = l.trim_start();
+                    if s.contains("call") {
+                        if let Some(p) = s.find("@runtime_") {
+                            let rest = &s[p + 1..];
+                            let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
+                            if !name.is_empty() { return Some(name); }
+                        }
+                    }
+                    None
+                })
+                .collect();
+            let mut filtered = String::new();
+            for line in out.lines() {
+                if line.trim_start().starts_with("declare") && line.contains("@runtime_") {
+                    if let Some(p) = line.find("@runtime_") {
+                        let rest = &line[p + 1..];
+                        let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
+                        if !name.is_empty() && !used.contains(name) {
+                            continue;
+                        }
+                    }
+                }
+                filtered.push_str(line);
+                filtered.push('\n');
+            }
+            filtered
+        };
         let ll_path_str = format!("{}.ll", base);
         fs::write(&ll_path_str, &out)
             .map_err(|e| format!("error[codegen]: failed to write {}: {}", ll_path_str, e))?;
@@ -3755,16 +3789,17 @@ pub fn compile_pipeline(
     // Stage 9-11: LLVM optimization + object generation + linking (via LLVM tools).
     if let Some(ref ll) = ll_path {
         if options.emit_object {
-            let opt_level = if options.release { "2" } else { "0" };
+            let opt_level = if options.release { "3" } else { "0" };
             // Stage 9+10: compile IR to object file using clang (instead of
             // opt+llc which produces incorrect code from the Lime-generated IR).
             {
                 let _t = StageTimer::new("compile_ir");
-                let obj_ext = if cfg!(target_os = "windows") { "obj" } else { "o" };
+                let obj_ext = if cfg!(target_os = "windows") { "bc" } else { "bc" };
                 let obj_path = format!("{}.{}", base, obj_ext);
                 let status = std::process::Command::new(llvm_tool("clang"))
                     .arg(&format!("-O{}", opt_level))
                     .arg("-c")
+                    .arg("-emit-llvm")
                     .arg(ll)
                     .arg("-o")
                     .arg(&obj_path)
@@ -3788,6 +3823,8 @@ pub fn compile_pipeline(
                                      .arg(&runtime_obj)
                                      .arg(&format!("/out:{}", exe_path))
                                      .arg("/subsystem:console")
+                                     .arg("/OPT:REF")
+                                     .arg("/OPT:ICF")
                                      .arg("/defaultlib:libcmt")
                                      .arg("/defaultlib:oldnames")
                                      .arg("/defaultlib:Winhttp")
@@ -3863,8 +3900,9 @@ fn compile_runtime_c() -> Result<String, String> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     RUNTIME_C_SOURCE.hash(&mut hasher);
     let obj_path = tmp_dir.join(format!("runtime-{:016x}.obj", hasher.finish()));
+    let bc_path = obj_path.with_extension("bc");
 
-    if !obj_path.exists() {
+    if !bc_path.exists() {
         std::fs::write(&c_path, RUNTIME_C_SOURCE)
             .map_err(|e| format!("failed to write runtime.c: {}", e))?;
         std::fs::write(&h_path, RUNTIME_H_SOURCE)
@@ -3872,11 +3910,15 @@ fn compile_runtime_c() -> Result<String, String> {
 
         let clang = llvm_tool("clang");
         let status = std::process::Command::new(&clang)
-            .arg("-O2")
+            .arg("-O3")
+            .arg("-flto")
+            .arg("-ffunction-sections")
+            .arg("-fdata-sections")
             .arg("-c")
+            .arg("-emit-llvm")
             .arg(c_path.to_str().unwrap())
             .arg("-o")
-            .arg(obj_path.to_str().unwrap())
+            .arg(bc_path.to_str().unwrap())
             .status()
             .map_err(|e| format!("failed to launch clang: {}", e))?;
 
@@ -3885,7 +3927,7 @@ fn compile_runtime_c() -> Result<String, String> {
         }
     }
 
-    Ok(obj_path.to_str().unwrap().to_string())
+    Ok(bc_path.to_str().unwrap().to_string())
 }
 
 /// Find the LLVM bin directory by checking environment variables and PATH.
@@ -6945,7 +6987,8 @@ fn infer_type(
                     Ok(Type::Unknown)
                 }
                 Type::String => match method.as_str() {
-                    "len" | "byte_len" | "length" => Ok(Type::Int),
+                    "len" | "byte_len" | "length" | "byte" => Ok(Type::Int),
+                    "chr" | "push_byte" => Ok(Type::String),
                     "chars" | "bytes" => Ok(Type::Array(Box::new(Type::String))),
                     "slice" | "trim" | "to_upper" | "to_lower" | "replace"
                         | "repeat" | "read" => Ok(Type::String),
@@ -8643,6 +8686,36 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         Ok(Type::Int)
                     }
+                    "byte" => {
+                        if args.len() != 1 {
+                            return Err(
+                                "Type error: String.byte() takes exactly 1 argument".to_string(),
+                            );
+                        }
+                        let at = check_expr(&args[0], env, defs)?;
+                        if at != Type::Int && at != Type::Unknown {
+                            return Err(format!(
+                                "Type error: String.byte() argument must be int (got {:?})",
+                                at
+                            ));
+                        }
+                        Ok(Type::Int)
+                    }
+                    "push_byte" => {
+                        if args.len() != 1 {
+                            return Err(
+                                "Type error: String.push_byte() takes exactly 1 argument".to_string(),
+                            );
+                        }
+                        let at = check_expr(&args[0], env, defs)?;
+                        if at != Type::Int && at != Type::Unknown {
+                            return Err(format!(
+                                "Type error: String.push_byte() argument must be int (got {:?})",
+                                at
+                            ));
+                        }
+                        Ok(Type::String)
+                    }
                     "chars" | "bytes" => {
                         if !args.is_empty() {
                             return Err(format!(
@@ -8962,7 +9035,21 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         Ok(Type::Slice(elem.clone()))
                     }
                     other => Err(format!(
-                        "Type error: unknown method '{}' on Slice",
+                        "Type error: unknown method '{}' on str",
+                        other
+                    )),
+                },
+                Type::Int | Type::Long => match method.as_str() {
+                    "chr" => {
+                        if !args.is_empty() {
+                            return Err(
+                                "Type error: int.chr() takes no arguments".to_string(),
+                            );
+                        }
+                        Ok(Type::String)
+                    }
+                    other => Err(format!(
+                        "Type error: unknown method '{}' on int",
                         other
                     )),
                 },
@@ -11270,6 +11357,39 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
     match method {
         "len" => Ok(Value::Int(s.chars().count() as i64)),
         "byte_len" => Ok(Value::Int(s.len() as i64)),
+        "byte" => {
+            let idx = match args.get(0) {
+                Some(Value::Int(i)) => *i,
+                _ => return Err("String.byte() requires an int argument".to_string()),
+            };
+            if idx >= 0 && (idx as usize) < s.len() {
+                Ok(Value::Int(s.as_bytes()[idx as usize] as i64))
+            } else {
+                Ok(Value::Int(-1))
+            }
+        }
+        "chr" => {
+            let b = match args.get(0) {
+                Some(Value::Int(i)) => *i,
+                _ => return Err("String.chr() requires an int argument".to_string()),
+            };
+            if b >= 0 && b <= 255 {
+                Ok(Value::String((b as u8 as char).to_string()))
+            } else {
+                Ok(Value::String("\0".to_string()))
+            }
+        }
+        "push_byte" => {
+            let b = match args.get(0) {
+                Some(Value::Int(i)) => *i,
+                _ => return Err("String.push_byte() requires an int argument".to_string()),
+            };
+            let mut s = s.to_string();
+            if b >= 0 && b <= 255 {
+                s.push(b as u8 as char);
+            }
+            Ok(Value::String(s))
+        }
         "chars" => {
             let chars: Vec<Value> = s.chars().map(|c| Value::String(c.to_string())).collect();
             Ok(Value::Array(chars))

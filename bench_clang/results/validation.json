@@ -1,0 +1,146 @@
+{
+  "algo_sieve": {
+    "lime_build": "PASS",
+    "lime_out": "669",
+    "clang_build": "PASS",
+    "clang_out": "669",
+    "match": "MATCH",
+    "note": ""
+  },
+  "algo_sort": {
+    "lime_build": "PASS",
+    "lime_out": "2500097500",
+    "clang_build": "PASS",
+    "clang_out": "2500097500",
+    "match": "MATCH",
+    "note": ""
+  },
+  "control_flow": {
+    "lime_build": "PASS",
+    "lime_out": "166666613333336",
+    "clang_build": "PASS",
+    "clang_out": "166666613333336",
+    "match": "MATCH",
+    "note": ""
+  },
+  "empty": {
+    "lime_build": "PASS",
+    "lime_out": "1",
+    "clang_build": "NO_C",
+    "clang_out": null,
+    "match": null,
+    "note": ""
+  },
+  "float_loop": {
+    "lime_build": "PASS",
+    "lime_out": "567667276975.9338",
+    "clang_build": "PASS",
+    "clang_out": "567667276975.9338",
+    "match": "MATCH",
+    "note": ""
+  },
+  "func_call": {
+    "lime_build": "PASS",
+    "lime_out": "13333340000000",
+    "clang_build": "PASS",
+    "clang_out": "13333340000000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "int_loop": {
+    "lime_build": "PASS",
+    "lime_out": "799999994",
+    "clang_build": "PASS",
+    "clang_out": "799999994",
+    "match": "MATCH",
+    "note": ""
+  },
+  "list_iter": {
+    "lime_build": "PASS",
+    "lime_out": "9990000",
+    "clang_build": "PASS",
+    "clang_out": "9990000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "list_push": {
+    "lime_build": "PASS",
+    "lime_out": "20000\n999",
+    "clang_build": "PASS",
+    "clang_out": "20000\n999",
+    "match": "MATCH",
+    "note": ""
+  },
+  "map_ops": {
+    "lime_build": "PASS",
+    "lime_out": "37492500\n5000",
+    "clang_build": "PASS",
+    "clang_out": "37492500\n5000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "memory_alloc": {
+    "lime_build": "PASS",
+    "lime_out": "1000000000000",
+    "clang_build": "PASS",
+    "clang_out": "1000000000000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "mixed_workload": {
+    "lime_build": "PASS",
+    "lime_out": "10006\n7",
+    "clang_build": "PASS",
+    "clang_out": "10006\n7",
+    "match": "MATCH",
+    "note": ""
+  },
+  "recursion_tail": {
+    "lime_build": "PASS",
+    "lime_out": "20000100000",
+    "clang_build": "PASS",
+    "clang_out": "20000100000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "recursion_tree": {
+    "lime_build": "PASS",
+    "lime_out": "200010000",
+    "clang_build": "PASS",
+    "clang_out": "200010000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "set_ops": {
+    "lime_build": "PASS",
+    "lime_out": "11285318\n20000",
+    "clang_build": "PASS",
+    "clang_out": "11285318\n20000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "string_access": {
+    "lime_build": "PASS",
+    "lime_out": "20000",
+    "clang_build": "PASS",
+    "clang_out": "20000",
+    "match": "MATCH",
+    "note": ""
+  },
+  "string_concat": {
+    "lime_build": "PASS",
+    "lime_out": "30001",
+    "clang_build": "PASS",
+    "clang_out": "30001",
+    "match": "MATCH",
+    "note": ""
+  },
+  "struct_ops": {
+    "lime_build": "PASS",
+    "lime_out": "50000020000000",
+    "clang_build": "PASS",
+    "clang_out": "50000020000000",
+    "match": "MATCH",
+    "note": ""
+  }
+}
