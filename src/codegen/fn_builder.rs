@@ -127,7 +127,7 @@ impl<'a> Cg<'a> {
 
         let mut head = String::new();
         head.push_str(&format!(
-            "\n; Function {}(){}\ndefine {} @{} ({}) {{\n",
+            "\n; Function {}(){}\ndefine {} @{} ({}) local_unnamed_addr #0 {{\n",
             name, async_note, ret_ty, llvm_name, params_str
         ));
 
