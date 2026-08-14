@@ -5049,19 +5049,26 @@ impl<'a> Cg<'a> {
                 let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
                 // C ABI: void runtime_list_set(LimeList* list, int64_t index, int64_t elem).
-                let arg_slot = self.fresh_temp();
-                let result = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
-                self.out.push_str(&format!(
-                    "  call void @runtime_list_set(ptr {}, i64 {}, i64 {})\n",
-                    arg_slot, self.bare_value(&idx_v), converted
-                ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
+                // If the receiver is a known local variable (rebind_slot is its alloca
+                // pointer) we mutate it IN PLACE -- avoids a 24-byte struct copy per call.
                 if let Some(slot) = rebind_slot {
-                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", result, slot));
+                    self.out.push_str(&format!(
+                        "  call void @runtime_list_set(ptr {}, i64 {}, i64 {})\n",
+                        slot, self.bare_value(&idx_v), converted
+                    ));
+                    Ok((String::new(), Type::Unit))
+                } else {
+                    let arg_slot = self.fresh_temp();
+                    let result = self.fresh_temp();
+                    self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
+                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
+                    self.out.push_str(&format!(
+                        "  call void @runtime_list_set(ptr {}, i64 {}, i64 {})\n",
+                        arg_slot, self.bare_value(&idx_v), converted
+                    ));
+                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
+                    Ok((result, Type::List(Box::new(elem_t))))
                 }
-                Ok((result, Type::List(Box::new(elem_t))))
             }
             _ => Err(format!("Phase 5: unknown List method '{}'", method)),
         }
