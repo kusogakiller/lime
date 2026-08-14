@@ -1512,12 +1512,21 @@ impl<'a> Cg<'a> {
                     };
                     (i, "double")
                 } else {
+                    // For integer remainder on non-negative operands, prefer
+                    // `urem` over `srem`: it is semantically identical here and
+                    // lets LLVM vectorize loops the way Clang -O3 does (srem
+                    // blocks <4 x i64> vectorization). We only switch when the
+                    // left operand is statically known to be >= 0.
+                    let rem = match self.int_range(left) {
+                        Some(lr) if lr.0 >= 0 => "urem",
+                        _ => "srem",
+                    };
                     let i = match op {
                         "+" => "add",
                         "-" => "sub",
                         "*" => "mul",
                         "/" => "sdiv",
-                        "%" => "srem",
+                        "%" => rem,
                         _ => unreachable!(),
                     };
                     (i, "i64")

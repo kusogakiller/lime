@@ -430,7 +430,7 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     // Optimization attributes referenced by `local_unnamed_addr #0` on every
     // user function. `nounwind` lets LLVM hoist loop-invariant code and apply
     // aggressive loop optimizations that it would otherwise inhibit.
-    out.push_str("\nattributes #0 = { nounwind willreturn }\n");
+    out.push_str("\nattributes #0 = { nounwind willreturn alwaysinline }\n");
 
     // C runtime main wrapper
     emit_main_wrapper(&mut out, defs);
