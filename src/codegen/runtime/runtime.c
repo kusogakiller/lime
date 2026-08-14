@@ -1185,15 +1185,15 @@ void runtime_list_empty(LimeList* out) {
 }
 
 // Append an element, growing the buffer as needed. Mutates *list in place.
-void runtime_list_add(LimeList* list, int64_t elem) __attribute__((always_inline));
-void runtime_list_add(LimeList* list, int64_t elem) {
+void runtime_list_add(LimeList* restrict list, int64_t elem) __attribute__((always_inline));
+void runtime_list_add(LimeList* restrict list, int64_t elem) {
     if (list->len >= list->cap) grow_list(list);
     ((int64_t*)list->data)[list->len] = elem;
     list->len++;
 }
 
 // Replace the element at `index` (no-op when the index is out of bounds).
-void runtime_list_set(LimeList* list, int64_t index, int64_t elem) {
+void runtime_list_set(LimeList* restrict list, int64_t index, int64_t elem) {
     if (index >= 0 && index < list->len) {
         ((int64_t*)list->data)[index] = elem;
     }
