@@ -3825,8 +3825,6 @@ pub fn compile_pipeline(
                                      .arg("/subsystem:console")
                                      .arg("/OPT:REF")
                                      .arg("/OPT:ICF")
-                                     .arg("-mllvm")
-                                     .arg("-O3")
                                      .arg("/defaultlib:libcmt")
                                      .arg("/defaultlib:oldnames")
                                      .arg("/defaultlib:Winhttp")
