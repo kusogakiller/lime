@@ -19,7 +19,7 @@ CATEGORIES = [
     "string_access", "string_concat", "struct_ops",
 ]
 
-RUNS = 21
+RUNS = 51
 
 def run_exe(exe):
     try:
