@@ -449,7 +449,16 @@ impl<'a> Cg<'a> {
                         return Ok(());
                     }
                 }
-                if is_self_push {
+                if false && is_self_push {
+                    // DISABLED (unsound): the length tracker was not reliably
+                    // reset on `cur = ""` (literal reset), so the second word
+                    // onward passed a stale length to runtime_str_push_byte_len,
+                    // which then memcpy'd that many bytes out of a 1-byte buffer
+                    // (reading past `cur` into adjacent memory) and produced a
+                    // corrupted `cur`, breaking tokenization in mixed_workload.
+                    // Fall through to the normal method-call path
+                    // (runtime_str_push_byte, which strlen's internally) so push
+                    // is always correct. perf is frozen; correctness wins.
                     if let Some(len_ptr) = self.pending_len_trackers.get(name).cloned() {
                         // Promote pending -> active.
                         self.pending_len_trackers.remove(name);
@@ -1375,12 +1384,18 @@ impl<'a> Cg<'a> {
         let (lv, lt) = self.codegen_expr(left)?;
         let (rv, rt) = self.codegen_expr(right)?;
 
-        // i32-narrowing optimization: for integer `+ - * %` whose operands and
-        // result are statically proven to fit in i32, emit the operation in
-        // i32 (trunc operands -> i32 op -> sext back to i64). This lets LLVM
-        // vectorize tight loops the way Clang -O3 does, without changing
-        // observable semantics (the value provably fits i32 at runtime).
-        if lt == Type::Int && rt == Type::Int && matches!(op, "+" | "-" | "*" | "%") && self.loop_pure_arith {
+        // i32-narrowing optimization (DISABLED: unsound).
+        //
+        // The value-range analysis below cannot track loop-carried
+        // accumulation: for `total = total + i` it reads the *initial*
+        // range of `total` and concludes the result fits i32, emitting
+        // `add nuw nsw i32`. When the real accumulated value overflows
+        // i32 (e.g. control_flow's running sum reaches ~1.6e14) this is
+        // undefined behaviour and produces a wrong answer. Until the
+        // range analysis is made sound (loop-invariant / accumulator
+        // aware), keep this off so results stay correct. perf is frozen;
+        // correctness wins.
+        if false && lt == Type::Int && rt == Type::Int && matches!(op, "+" | "-" | "*" | "%") && self.loop_pure_arith {
             if let Some(_wr) = self.int_range(&Expr::BinOp {
                 op: op.to_string(),
                 left: Box::new(left.clone()),
@@ -4752,7 +4767,13 @@ impl<'a> Cg<'a> {
         // Phase B.1: if `object` is a length-tracked string variable and the
         // method is a length query, return the tracked length directly instead
         // of calling strlen.
-        if matches!(method, "len" | "byte_len" | "length") {
+        // DISABLED (unsound): the tracked length pointer was observed to alias
+        // a *different* variable's alloca for reassigned strings (e.g.
+        // `s = s + "y"` in string_concat made `s.len()` read the loop counter
+        // `i`'s slot, yielding 30000 instead of 30001). Until the tracker is
+        // made correct, always fall through to runtime_str_len so .len() is
+        // correct. perf is frozen; correctness wins.
+        if false && matches!(method, "len" | "byte_len" | "length") {
             if let Expr::Ident(name) = object {
                 if let Some(len_ptr) = self.string_len_trackers.get(name).cloned() {
                     let loaded = self.fresh_temp();

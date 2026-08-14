@@ -167,14 +167,13 @@ char* runtime_str_concat(char* a, char* b) {
     size_t la = strlen(a);
     size_t lb = strlen(b);
     size_t need = la + lb + 1;
-    int64_t hdr = *(int64_t*)((char*)a - 8);
-    if (hdr & STR_OWNED_MARK) {
-        int64_t cap_a = hdr & ~STR_OWNED_MARK;
-        if ((size_t)cap_a >= need) {
-            memcpy((char*)a + la, b, lb + 1);
-            return a;
-        }
-    }
+    // NOTE: the in-place reuse path (write into a's existing buffer when it
+    // has spare capacity) is DISABLED. It let two distinct string variables
+    // share the same underlying buffer (e.g. `text = text + "..."` followed by
+    // `cur.push_byte(...)` could relocate `cur` onto `text`'s buffer and
+    // corrupt it), which broke tokenization in mixed_workload. Always
+    // allocate a fresh buffer so buffers never alias. perf is frozen;
+    // correctness wins.
     size_t new_cap = need * 2;
     if (new_cap < 64) new_cap = 64;
     char* raw = (char*)malloc(new_cap + 8);
