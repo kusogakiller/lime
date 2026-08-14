@@ -252,6 +252,33 @@ char* runtime_str_push_byte(char* s, int64_t b) {
     return r;
 }
 
+// Phase B.1: length-tracked variant of runtime_str_push_byte.
+// The caller passes the CURRENT length of `s` (which it tracks in a register),
+// so this avoids the O(n) strlen call on the hot path. Behavior is identical to
+// runtime_str_push_byte for owned strings; for non-owned strings the caller must
+// still pass the true length (callers only use this for owned, length-tracked
+// strings built from `""` + push_byte only).
+char* runtime_str_push_byte_len(char* s, int64_t len, int64_t b) {
+    if (s == NULL) return runtime_str_from_byte(b);
+    int64_t hdr = *(int64_t*)((char*)s - 8);
+    int64_t cap = hdr & ~STR_OWNED_MARK;
+    if ((hdr & STR_OWNED_MARK) && cap > len) {
+        s[len] = (char)(unsigned char)b;
+        s[len + 1] = '\0';
+        return s;
+    }
+    int64_t newcap = (len + 1) * 2;
+    if (newcap < 16) newcap = 16;
+    char* raw = (char*)malloc(newcap + 8);
+    if (!raw) runtime_panic("OOM in runtime_str_push_byte_len");
+    *(int64_t*)raw = newcap | STR_OWNED_MARK;
+    char* r = raw + 8;
+    if (len > 0) memcpy(r, s, (size_t)len);
+    r[len] = (char)(unsigned char)b;
+    r[len + 1] = '\0';
+    return r;
+}
+
 // (runtime_str_concat is defined above, OPT-002 capacity-header version.)
 
 // -- stdlib runtime helpers (Phase 12 Step 1) --
@@ -1158,6 +1185,7 @@ void runtime_list_empty(LimeList* out) {
 }
 
 // Append an element, growing the buffer as needed. Mutates *list in place.
+void runtime_list_add(LimeList* list, int64_t elem) __attribute__((always_inline));
 void runtime_list_add(LimeList* list, int64_t elem) {
     if (list->len >= list->cap) grow_list(list);
     ((int64_t*)list->data)[list->len] = elem;
@@ -1177,6 +1205,7 @@ int64_t runtime_list_len(LimeList list) {
 }
 
 // Return the element at `index`. Returns 0 if out of bounds.
+int64_t runtime_list_get(LimeList list, int64_t index) __attribute__((always_inline));
 int64_t runtime_list_get(LimeList list, int64_t index) {
     if (index >= 0 && index < list.len) {
         return ((int64_t*)list.data)[index];

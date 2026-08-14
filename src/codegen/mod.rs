@@ -58,7 +58,7 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_concat(i8*, i8*)\n");
     out.push_str("declare void @runtime_str_chars(ptr sret(%LimeList), ptr)\n");
     out.push_str("declare void @runtime_str_bytes(ptr sret(%LimeList), ptr)\n");
-    out.push_str("declare void @runtime_list_add(ptr, i64)\n");
+    out.push_str("declare void @runtime_list_add(ptr, i64) alwaysinline\n");
     out.push_str("declare void @runtime_list_set(ptr, i64, i64)\n\n");
     out.push_str("declare void @runtime_list_empty(ptr)\n");
     out.push_str("declare i64 @runtime_list_len(%LimeList)\n");
@@ -77,10 +77,11 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_from_i64(i64)\n");
     out.push_str("declare i8* @runtime_str_from_f64(double)\n");
     out.push_str("declare i8* @runtime_str_from_bool(i1)\n");
-    out.push_str("declare i64 @runtime_str_byte(i8*, i64)\n");
+    out.push_str("declare i64 @runtime_str_byte(i8* nocapture readonly, i64) nounwind willreturn\n");
     out.push_str("declare i8* @runtime_str_new(i64)\n");
     out.push_str("declare i8* @runtime_str_from_byte(i64)\n");
     out.push_str("declare i8* @runtime_str_push_byte(i8*, i64)\n");
+    out.push_str("declare i8* @runtime_str_push_byte_len(i8*, i64, i64)\n");
     // Phase B-3: extended string builtins
     out.push_str("declare i32 @runtime_str_is_empty(i8*)\n");
     out.push_str("declare i64 @runtime_str_find(i8*, i8*)\n");
@@ -90,7 +91,7 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_join(ptr, i8*)\n");
     out.push_str("declare i64 @runtime_str_to_int(i8*)\n");
     out.push_str("declare double @runtime_str_to_float(i8*)\n");
-    out.push_str("declare i32 @runtime_str_equals(i8*, i8*)\n");
+    out.push_str("declare i32 @runtime_str_equals(i8* nocapture readonly, i8* nocapture readonly) nounwind willreturn\n");
     out.push_str("declare i32 @runtime_str_compare(i8*, i8*)\n");
     out.push_str("declare double @runtime_math_abs(double)\n");
     out.push_str("declare double @runtime_math_sqrt(double)\n");

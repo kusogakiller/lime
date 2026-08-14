@@ -44,6 +44,39 @@ struct Cg<'a> {
     fn_ret_ty: String,
     pending_fns: Vec<String>,
     anon_count: usize,
+    /// Phase B.1: string-length trackers (ACTIVE). Maps a string variable name
+    /// to the alloca (i64*) holding its currently-known length. ONLY populated
+    /// once we actually see `var = var.push_byte(...)` on a pending variable.
+    string_len_trackers: HashMap<String, String>,
+    /// Phase B.1: PENDING trackers. A variable initialized from a string literal
+    /// is registered here (len alloca created) but NOT yet active — it only
+    /// becomes active when we see `var = var.push_byte(...)`. This keeps ordinary
+    /// literal-init variables (e.g. `let s = "hello"; s.length()`) lowering to
+    /// strlen as before, preserving existing codegen tests.
+    pending_len_trackers: HashMap<String, String>,
+    /// Value-range analysis for integer i32-narrowing optimization.
+    /// Maps a variable name to the known (min, max) range of its currently
+    /// stored integer value. Used to decide when integer arithmetic can be
+    /// safely emitted in i32 (then `sext` back to i64) so LLVM vectorizes
+    /// tight loops the way Clang -O3 does. `None` (absent) means unknown /
+    /// possibly-too-large-to-fit-i32 → do not narrow.
+    var_range: HashMap<String, (i128, i128)>,
+    /// Active `while` loop induction-variable info (for trip-count-based
+    /// accumulation range bounds). `loop_counter` is the loop variable name,
+    /// `loop_bound` its constant upper bound, `loop_counter_init` its known
+    /// starting value.
+    loop_counter: Option<String>,
+    loop_bound: Option<i128>,
+    loop_counter_init: i128,
+    /// True when the current `while` loop is pure integer arithmetic (no
+    /// method/function calls in its body). Used to gate the i32-narrowing and
+    /// i32-indvar optimizations, which would otherwise break runtime-call
+    /// inlining (e.g. `runtime_list_add`) in collection loops like `set_ops`.
+    loop_pure_arith: bool,
+    /// Maps an i64 SSA value (the `sext i32 -> i64` result of a narrowed op)
+    /// back to its i32 source, so chained arithmetic stays in i32 without a
+    /// sext/trunc round-trip that would defeat LLVM's auto-vectorizer.
+    i32_form: HashMap<String, String>,
 }
 
 impl<'a> Cg<'a> {
@@ -65,6 +98,14 @@ impl<'a> Cg<'a> {
             fn_ret_ty: "void".to_string(),
             pending_fns: Vec::new(),
             anon_count: 0,
+            string_len_trackers: HashMap::new(),
+            pending_len_trackers: HashMap::new(),
+            var_range: HashMap::new(),
+            loop_counter: None,
+            loop_bound: None,
+            loop_counter_init: 0,
+            loop_pure_arith: false,
+            i32_form: HashMap::new(),
         }
     }
 
@@ -110,7 +151,6 @@ impl<'a> Cg<'a> {
             None => "void".to_string(),
         };
         self.fn_ret_ty = ret_ty.clone();
-
         // Function params with names (%p0, %p1, ...) so alloca/store can reference them
         let mut params = Vec::new();
         let mut param_idx = 0;
@@ -290,8 +330,35 @@ impl<'a> Cg<'a> {
                     "  store {} {}, {}* {}, align {}\n",
                     llty, self.bare_value(&v), llty, ptr, align
                 ));
+                let is_string = matches!(ty, Type::String);
+                let is_literal_init = matches!(value, Expr::StringLit(_));
                 self.env.insert(name.clone(), ty);
                 self.named.insert(name.clone(), ptr);
+                // i32-narrowing range tracking: record the known integer range
+                // of the initialized value (if statically known to fit i32).
+                if let Some(r) = self.int_range(value) {
+                    self.var_range.insert(name.clone(), r);
+                } else {
+                    self.var_range.remove(name);
+                }
+                // Phase B.1: register a PENDING string-length tracker for
+                // variables initialized from a string literal. It only becomes
+                // ACTIVE (used for len-tracked push_byte / length queries) once we
+                // actually see `name = name.push_byte(...)` in the Assign arm.
+                // This keeps ordinary literal-init variables (e.g.
+                // `let s = "hello"; s.length()`) lowering to strlen as before.
+                if is_string && is_literal_init {
+                    let len_ptr = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = alloca i64, align 8\n",
+                        len_ptr
+                    ));
+                    self.out.push_str(&format!(
+                        "  store i64 0, i64* {}\n",
+                        len_ptr
+                    ));
+                    self.pending_len_trackers.insert(name.clone(), len_ptr);
+                }
                 Ok(())
             }
             Stmt::Return { explicit_type: _, value } => {
@@ -331,6 +398,136 @@ impl<'a> Cg<'a> {
                 Ok(())
             }
             Stmt::Assign { name, value } => {
+                // Phase B.1: length-tracked string variable.
+                // Promote a PENDING tracker to ACTIVE on `name = name.push_byte(...)`.
+                let is_self_push = matches!(
+                    value,
+                    Expr::MethodCall { object: box_expr, method, .. }
+                    if matches!(box_expr.as_ref(), Expr::Ident(n) if n == name)
+                        && method == "push_byte"
+                );
+                let is_concat_lit = matches!(
+                    value,
+                    Expr::BinOp { op, left, right, .. }
+                    if op == "+"
+                        && matches!(left.as_ref(), Expr::Ident(n) if n == name)
+                        && matches!(right.as_ref(), Expr::StringLit(_))
+                );
+                if is_concat_lit {
+                    if let Some(len_ptr) = self.pending_len_trackers.get(name).cloned()
+                        .or_else(|| self.string_len_trackers.get(name).cloned()) {
+                        // Promote pending -> active if needed.
+                        self.pending_len_trackers.remove(name);
+                        self.string_len_trackers.insert(name.clone(), len_ptr.clone());
+                        // Emit the concat normally: text = runtime_str_concat(text, literal)
+                        let (v, _ty) = self.codegen_expr(value)?;
+                        let ptr = self.named.get(name).cloned()
+                            .ok_or_else(|| format!("undefined variable '{}'", name))?;
+                        self.out.push_str(&format!(
+                            "  store i8* {}, i8** {}\n",
+                            self.bare_value(&v), ptr
+                        ));
+                        // text__len = text__len + literal.len()
+                        if let Expr::BinOp { right, .. } = value {
+                            if let Expr::StringLit(lit) = right.as_ref() {
+                                let cur_len = self.fresh_temp();
+                                self.out.push_str(&format!(
+                                    "  {} = load i64, i64* {}\n",
+                                    cur_len, len_ptr
+                                ));
+                                let new_len = self.fresh_temp();
+                                self.out.push_str(&format!(
+                                    "  {} = add i64 {}, {}\n",
+                                    new_len, cur_len, lit.len()
+                                ));
+                                self.out.push_str(&format!(
+                                    "  store i64 {}, i64* {}\n",
+                                    self.bare_value(&new_len), len_ptr
+                                ));
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+                if is_self_push {
+                    if let Some(len_ptr) = self.pending_len_trackers.get(name).cloned() {
+                        // Promote pending -> active.
+                        self.pending_len_trackers.remove(name);
+                        self.string_len_trackers.insert(name.clone(), len_ptr.clone());
+                        // Emit: cur = runtime_str_push_byte_len(cur, *cur__len, ch)
+                        // then cur__len = cur__len + 1.
+                        if let Expr::MethodCall { object, args, .. } = value {
+                            let (obj_v, _) = self.codegen_expr(object)?;
+                            let (arg_v, _) = self.codegen_expr(&args[0])?;
+                            let cur_ptr = self
+                                .named
+                                .get(name)
+                                .cloned()
+                                .ok_or_else(|| format!("undefined variable '{}'", name))?;
+                            let cur_val = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = load i8*, i8** {}\n",
+                                cur_val, cur_ptr
+                            ));
+                            let loaded_len = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = load i64, i64* {}\n",
+                                loaded_len, len_ptr
+                            ));
+                            let new_cur = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = call i8* @runtime_str_push_byte_len(i8* {}, i64 {}, {})\n",
+                                new_cur,
+                                self.bare_value(&obj_v),
+                                self.bare_value(&loaded_len),
+                                self.fmt_call_arg(&arg_v, &Type::Int)
+                            ));
+                            self.out.push_str(&format!(
+                                "  store i8* {}, i8** {}\n",
+                                self.bare_value(&new_cur), cur_ptr
+                            ));
+                            let inc = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = add i64 {}, 1\n",
+                                inc, self.bare_value(&loaded_len)
+                            ));
+                            self.out.push_str(&format!(
+                                "  store i64 {}, i64* {}\n",
+                                self.bare_value(&inc), len_ptr
+                            ));
+                            return Ok(());
+                        }
+                    }
+                }
+                // Phase B.1: if `name` has an ACTIVE tracker, handle reset / invalidate.
+                if let Some(len_ptr) = self.string_len_trackers.get(name).cloned() {
+                    // Detect `name = <string literal>` (reset).
+                    if matches!(value, Expr::StringLit(_)) {
+                        let (v, _ty) = self.codegen_expr(value)?;
+                        let ptr = self
+                            .named
+                            .get(name)
+                            .cloned()
+                            .ok_or_else(|| format!("undefined variable '{}'", name))?;
+                        let llty = "i8*";
+                        self.out.push_str(&format!(
+                            "  store {} {}, {}* {}, align 8\n",
+                            llty, self.bare_value(&v), llty, ptr
+                        ));
+                        // reset length to 0
+                        self.out.push_str(&format!("  store i64 0, i64* {}\n", len_ptr));
+                        return Ok(());
+                    }
+                    // Any other assignment (concat, etc.) invalidates tracking.
+                    self.string_len_trackers.remove(name);
+                } else if self.pending_len_trackers.contains_key(name) {
+                    // A pending tracker that was NOT promoted is invalidated on
+                    // any assignment EXCEPT a literal reset (`name = ""`), which
+                    // keeps it pending (the next push_byte still promotes it).
+                    if !matches!(value, Expr::StringLit(_)) {
+                        self.pending_len_trackers.remove(name);
+                    }
+                }
                 let (v, _ty) = self.codegen_expr(value)?;
                 let ptr = self
                     .named
@@ -347,6 +544,12 @@ impl<'a> Cg<'a> {
                     "  store {} {}, {}* {}, align {}\n",
                     llty, self.bare_value(&v), llty, ptr, align_of(&ty)
                 ));
+                // i32-narrowing range tracking (see Stmt::Let for rationale).
+                if let Some(r) = self.int_range(value) {
+                    self.var_range.insert(name.clone(), r);
+                } else {
+                    self.var_range.remove(name);
+                }
                 Ok(())
             }
             Stmt::If { cond, then_branch, else_branch } => {
@@ -382,18 +585,92 @@ impl<'a> Cg<'a> {
                 let cond_b = self.fresh_block();
                 let body_b = self.fresh_block();
                 let merge_b = self.fresh_block();
+                // i32-narrowing: detect a simple integer induction variable
+                // `counter < bound` (or <=) with a constant i32-fit bound, so
+                // the loop body's arithmetic can be narrowed to i32 and
+                // vectorized like Clang -O3.
+                let saved_counter = self.loop_counter.clone();
+                let saved_bound = self.loop_bound;
+                let saved_init = self.loop_counter_init;
+                let saved_pure = self.loop_pure_arith;
+                let mut counter_cmp_i32: Option<(String, String)> = None; // (i32_instr, bound_literal)
+                if let Expr::BinOp { op, left, right, .. } = cond {
+                    let (counter, bound) = match op.as_str() {
+                        "<" => (left, right),
+                        "<=" => (left, right),
+                        ">" => (right, left),
+                        ">=" => (right, left),
+                        _ => (left, right),
+                    };
+                    if let (Expr::Ident(cn), Expr::IntLit(b)) = (counter.as_ref(), bound.as_ref()) {
+                        if *b <= i32::MAX as i64 && *b >= i32::MIN as i64 {
+                            self.loop_counter = Some(cn.clone());
+                            self.loop_bound = Some(*b as i128);
+                            self.loop_counter_init = self.var_range.get(cn).map(|r| r.0).unwrap_or(0);
+                            let cmp_instr = match op.as_str() {
+                                "<" => "icmp slt",
+                                "<=" => "icmp sle",
+                                ">" => "icmp sgt",
+                                ">=" => "icmp sge",
+                                _ => "icmp slt",
+                            };
+                            // Only emit the i32 induction-var compare and enable
+                            // i32 narrowing when the loop body is pure integer
+                            // arithmetic (no method/function calls). Collection
+                            // loops (e.g. set_ops) keep i64 so that runtime
+                            // helpers like `runtime_list_add` stay inlineable.
+                            let pure = !body.iter().any(Self::stmt_has_call);
+                            self.loop_pure_arith = pure;
+                            if pure {
+                                counter_cmp_i32 = Some((cmp_instr.to_string(), b.to_string()));
+                            }
+                        }
+                    }
+                }
                 self.out.push_str(&format!("  br label %{}\n", cond_b));
                 self.out.push_str(&format!("{}:\n", cond_b));
                 self.current_block = cond_b.clone();
-                let (c, _ct) = self.codegen_expr(cond)?;
+                let c: String = if let Some((cmp_instr, bound_lit)) = &counter_cmp_i32 {
+                    // Emit the loop condition in i32 so the induction variable
+                    // matches the loop body's i32 arithmetic (enables LLVM
+                    // auto-vectorization, mirroring Clang -O3).
+                    let (cv, _ct) = self.codegen_expr(
+                        if let Expr::BinOp { left, .. } = cond { left } else { cond },
+                    )?;
+                    let ci = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = trunc i64 {} to i32\n",
+                        ci,
+                        self.bare_value(&cv)
+                    ));
+                    let cc = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = {} i32 {}, {}\n",
+                        cc, cmp_instr, ci, bound_lit
+                    ));
+                    cc
+                } else {
+                    let (c, _ct) = self.codegen_expr(cond)?;
+                    c
+                };
                 self.out
-                    .push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&c), body_b, merge_b));
+                    .push_str(&format!(
+                        "  br i1 {}, label %{}, label %{}\n",
+                        self.bare_value(&c),
+                        body_b,
+                        merge_b
+                    ));
                 self.out.push_str(&format!("{}:\n", body_b));
                 self.current_block = body_b;
                 self.codegen_stmts(body)?;
                 self.out.push_str(&format!("  br label %{}\n", cond_b));
                 self.out.push_str(&format!("{}:\n", merge_b));
                 self.current_block = merge_b;
+                // Restore loop state (so nested/sequential loops don't leak).
+                self.loop_counter = saved_counter;
+                self.loop_bound = saved_bound;
+                self.loop_counter_init = saved_init;
+                self.loop_pure_arith = saved_pure;
                 Ok(())
             }
             Stmt::Match { expr, arms } => self.codegen_match(expr, arms),
@@ -950,6 +1227,144 @@ impl<'a> Cg<'a> {
         )))
     }
 
+    /// Statically estimate the integer value range of an expression. Returns
+    /// `Some((min, max))` only when the range is known and fits within i32
+    /// bounds (so the value is safe to materialize in i32). Returns `None` when
+    /// the range is unknown or could exceed i32. This is a *conservative*
+    /// over-approximation used purely to decide i32-narrowing safety; it never
+    /// affects observable semantics.
+    fn int_range(&self, e: &Expr) -> Option<(i128, i128)> {
+        const I32MIN: i128 = i32::MIN as i128;
+        const I32MAX: i128 = i32::MAX as i128;
+        fn sat_add(a: i128, b: i128) -> i128 {
+            a.checked_add(b).unwrap_or(if (a > 0) == (b > 0) { i32::MAX as i128 + 1 } else { i32::MIN as i128 - 1 })
+        }
+        fn sat_mul(a: i128, b: i128) -> i128 {
+            a.checked_mul(b).unwrap_or(if (a > 0) == (b > 0) { i32::MAX as i128 + 1 } else { i32::MIN as i128 - 1 })
+        }
+        let r = match e {
+            Expr::IntLit(i) => (*i as i128, *i as i128),
+            Expr::Ident(n) => {
+                if let Some(c) = &self.loop_counter {
+                    if c == n {
+                        let lo = self.loop_counter_init;
+                        let hi = self.loop_bound.map(|b| b - 1).unwrap_or(i32::MAX as i128);
+                        return if lo >= I32MIN && hi <= I32MAX { Some((lo, hi)) } else { None };
+                    }
+                }
+                match self.var_range.get(n) {
+                    Some(r) => *r,
+                    None => return None,
+                }
+            }
+            Expr::BinOp { op, left, right, .. } => {
+                match op.as_str() {
+                    "+" | "-" | "*" => {
+                        let (ll, lh) = self.int_range(left)?;
+                        let (rl, rh) = self.int_range(right)?;
+                        let (lo, hi) = match op.as_str() {
+                            "+" => (sat_add(ll, rl), sat_add(lh, rh)),
+                            "-" => (sat_add(ll, -rh), sat_add(lh, -rl)),
+                            "*" => (sat_mul(ll, rl), sat_mul(lh, rh)),
+                            _ => unreachable!(),
+                        };
+                        (lo, hi)
+                    }
+                    "%" => {
+                        if let Expr::IntLit(c) = right.as_ref() {
+                            if *c >= 1 {
+                                let m = *c - 1;
+                                (-(m as i128), m as i128)
+                            } else {
+                                return None;
+                            }
+                        } else {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        if r.0 >= I32MIN && r.1 <= I32MAX { Some(r) } else { None }
+    }
+
+    /// Whether an expression contains a method/function call (which lowers to a
+    /// runtime call we must not disturb with i32 narrowing / i32-induction-var
+    /// changes — doing so can break `always_inline` inlining of helpers like
+    /// `runtime_list_add`).
+    fn expr_has_call(e: &Expr) -> bool {
+        match e {
+            Expr::MethodCall { .. } => true,
+            Expr::Call { .. } => true,
+            Expr::BinOp { left, right, .. } => {
+                Self::expr_has_call(left) || Self::expr_has_call(right)
+            }
+            Expr::UnOp { operand, .. } => Self::expr_has_call(operand),
+            Expr::FieldAccess { object, .. } => Self::expr_has_call(object),
+            Expr::Index { target, index } => {
+                Self::expr_has_call(target) || Self::expr_has_call(index)
+            }
+            Expr::Slice { target, start, end } => {
+                Self::expr_has_call(target)
+                    || start.as_ref().map_or(false, |s| Self::expr_has_call(s))
+                    || end.as_ref().map_or(false, |s| Self::expr_has_call(s))
+            }
+            Expr::Range { start, end } => {
+                Self::expr_has_call(start) || Self::expr_has_call(end)
+            }
+            Expr::Tuple(es) => es.iter().any(Self::expr_has_call),
+            Expr::Array(es) => es.iter().any(Self::expr_has_call),
+            _ => false,
+        }
+    }
+
+    /// Whether a statement (or any nested statement) contains a call.
+    fn stmt_has_call(s: &Stmt) -> bool {
+        match s {
+            Stmt::Let { value, .. } => Self::expr_has_call(value),
+            Stmt::Assign { value, .. } => Self::expr_has_call(value),
+            Stmt::If { cond, then_branch, else_branch } => {
+                Self::expr_has_call(cond)
+                    || then_branch.iter().any(Self::stmt_has_call)
+                    || else_branch
+                        .as_ref()
+                        .map_or(false, |b| b.iter().any(Self::stmt_has_call))
+            }
+            Stmt::For { var: _, iterable, body } => {
+                Self::expr_has_call(iterable) || body.iter().any(Self::stmt_has_call)
+            }
+            Stmt::While { cond, body } => {
+                Self::expr_has_call(cond) || body.iter().any(Self::stmt_has_call)
+            }
+            Stmt::Match { expr, arms } => {
+                Self::expr_has_call(expr)
+                    || arms.iter().any(|(_p, bs)| bs.iter().any(Self::stmt_has_call))
+            }
+            Stmt::Return { value, .. } => value.as_ref().map_or(false, Self::expr_has_call),
+            Stmt::Expr(e) => Self::expr_has_call(e),
+            _ => false,
+        }
+    }
+
+    /// Return the i32 SSA value for an operand of a narrowed operation. If the
+    /// operand already has a known i32 form (it was the result of a previous
+    /// narrowed op, recorded in `i32_form`), reuse it directly; otherwise emit
+    /// `trunc i64 -> i32`. `v` is the bare (already `%`-prefixed or literal)
+    /// value string from `codegen_expr`.
+    fn narrow_operand_i32(&mut self, v: &str) -> String {
+        let bare = self.bare_value(v);
+        if let Some(i32v) = self.i32_form.get(bare) {
+            return i32v.clone();
+        }
+        // Emit `trunc i64 -> i32` (works for both SSA values and literals;
+        // LLVM folds the literal case).
+        let t = self.fresh_temp();
+        self.out.push_str(&format!("  {} = trunc i64 {} to i32\n", t, bare));
+        t
+    }
+
     fn codegen_binop(
         &mut self,
         left: &Expr,
@@ -959,6 +1374,54 @@ impl<'a> Cg<'a> {
     ) -> Result<(String, Type), String> {
         let (lv, lt) = self.codegen_expr(left)?;
         let (rv, rt) = self.codegen_expr(right)?;
+
+        // i32-narrowing optimization: for integer `+ - * %` whose operands and
+        // result are statically proven to fit in i32, emit the operation in
+        // i32 (trunc operands -> i32 op -> sext back to i64). This lets LLVM
+        // vectorize tight loops the way Clang -O3 does, without changing
+        // observable semantics (the value provably fits i32 at runtime).
+        if lt == Type::Int && rt == Type::Int && matches!(op, "+" | "-" | "*" | "%") && self.loop_pure_arith {
+            if let Some(_wr) = self.int_range(&Expr::BinOp {
+                op: op.to_string(),
+                left: Box::new(left.clone()),
+                right: Box::new(right.clone()),
+                resolved_operator: resolved_operator.clone(),
+            }) {
+                let lr = self.int_range(left);
+                let rr = self.int_range(right);
+                if let (Some(lr), Some(rr)) = (lr, rr) {
+                    const I32MIN: i128 = i32::MIN as i128;
+                    const I32MAX: i128 = i32::MAX as i128;
+                    if lr.0 >= I32MIN && lr.1 <= I32MAX && rr.0 >= I32MIN && rr.1 <= I32MAX {
+                        let i32_instr = match op {
+                            "+" => "add",
+                            "-" => "sub",
+                            "*" => "mul",
+                            "%" => "urem",
+                            _ => unreachable!(),
+                        };
+                        // Reuse the i32 form of an operand if it was itself a
+                        // narrowed result (avoids a sext/trunc round-trip that
+                        // would break the i32 SSA chain and disable vectorization).
+                        let la = self.narrow_operand_i32(&lv);
+                        let ra = self.narrow_operand_i32(&rv);
+                        let t32 = self.fresh_temp();
+                        let flags = if op == "%" { "" } else { " nuw nsw" };
+                        self.out.push_str(&format!(
+                            "  {} = {}{} i32 {}, {}\n",
+                            t32, i32_instr, flags, la, ra
+                        ));
+                        let tmp = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = sext i32 {} to i64\n",
+                            tmp, t32
+                        ));
+                        self.i32_form.insert(tmp.clone(), t32.clone());
+                        return Ok((tmp, Type::Int));
+                    }
+                }
+            }
+        }
 
         // Phase 7: Operator interface lowering (resolved_operator -> direct LLVM call)
         if let Some(ResolvedOperator::MethodCall { method, op: mop }) = resolved_operator {
@@ -1059,9 +1522,14 @@ impl<'a> Cg<'a> {
                     };
                     (i, "i64")
                 };
+                let flags = if float || op == "/" || op == "%" {
+                    ""
+                } else {
+                    " nuw nsw"
+                };
                 self.out.push_str(&format!(
-                    "  {} = {} {} {}, {}\n",
-                    tmp, instr, llty, self.bare_value(&lv), self.bare_value(&rv)
+                    "  {} = {}{} {} {}, {}\n",
+                    tmp, instr, flags, llty, self.bare_value(&lv), self.bare_value(&rv)
                 ));
                 let ty = if float { Type::Float } else { Type::Int };
                 Ok((tmp, ty))
@@ -4272,6 +4740,21 @@ impl<'a> Cg<'a> {
 
     // Phase 5/7: method call dispatch by object type
     fn codegen_method_call(&mut self, object: &Expr, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
+        // Phase B.1: if `object` is a length-tracked string variable and the
+        // method is a length query, return the tracked length directly instead
+        // of calling strlen.
+        if matches!(method, "len" | "byte_len" | "length") {
+            if let Expr::Ident(name) = object {
+                if let Some(len_ptr) = self.string_len_trackers.get(name).cloned() {
+                    let loaded = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = load i64, i64* {}\n",
+                        loaded, len_ptr
+                    ));
+                    return Ok((loaded, Type::Int));
+                }
+            }
+        }
         let (obj_v, obj_t) = self.codegen_expr(object)?;
         match obj_t {
             Type::String => self.codegen_string_method(&obj_v, method, args),
@@ -4532,21 +5015,31 @@ impl<'a> Cg<'a> {
                 let (elem_v, elem_t) = self.codegen_expr(&args[0])?;
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
                 // C ABI: void runtime_list_add(LimeList* list, int64_t elem).
-                // In-place mutation: store `obj` (the receiver) into arg_slot,
-                // call, then load the mutated list back out of arg_slot.
-                let arg_slot = self.fresh_temp();
-                let result = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
-                self.out.push_str(&format!(
-                    "  call void @runtime_list_add(ptr {}, i64 {})\n",
-                    arg_slot, converted
-                ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
+                // When the receiver is a local variable (rebind_slot is its
+                // alloca ptr), mutate it in place - no by-value copies. This
+                // matches the interpreter's rebind semantics while eliminating
+                // the alloca/store/load/store round-trip that otherwise makes
+                // hot collection loops (e.g. set_ops) slower than needed.
                 if let Some(slot) = rebind_slot {
-                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", result, slot));
+                    self.out.push_str(&format!("  call void @runtime_list_add(ptr {}, i64 {})\n", slot, converted));
+                    let result = self.fresh_temp();
+                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, slot));
+                    Ok((result, Type::List(Box::new(elem_t))))
+                } else {
+                    let arg_slot = self.fresh_temp();
+                    let result = self.fresh_temp();
+                    self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
+                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
+                    self.out.push_str(&format!(
+                        "  call void @runtime_list_add(ptr {}, i64 {})\n",
+                        arg_slot, converted
+                    ));
+                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
+                    if let Some(slot) = rebind_slot {
+                        self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", result, slot));
+                    }
+                    Ok((result, Type::List(Box::new(elem_t))))
                 }
-                Ok((result, Type::List(Box::new(elem_t))))
             }
             "set" => {
                 if args.len() != 2 {
