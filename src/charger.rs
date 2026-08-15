@@ -92,6 +92,10 @@ pub struct CStruct {
     // pointer). When true the struct can be modeled as a real Lime struct;
     // otherwise it must be surfaced as an opaque handle with accessor shims.
     pub all_8byte: bool,
+    // Whether any field is a function pointer (CType::Function). Such structs
+    // are always surfaced as an opaque handle with setter shims that store
+    // native function pointers — Lime callbacks round-trip through the C table.
+    pub has_fn_ptr: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -196,6 +200,7 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
                         f.ty,
                         CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
                     ));
+                    let has_fp = fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
                     api.structs.push(CStruct {
                         name: tname.clone(),
                         fields: fields.clone(),
@@ -204,6 +209,7 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
                         is_union: false,
                         is_bitfield: false,
                         all_8byte: all_8,
+                        has_fn_ptr: has_fp,
                     });
                 }
             }
@@ -474,6 +480,7 @@ fn classify_node(
                     f.ty,
                     CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
                 ));
+                let has_fp = kept_fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
                 api.structs.push(CStruct {
                     name: name.clone(),
                     fields: kept_fields,
@@ -482,6 +489,7 @@ fn classify_node(
                     is_union,
                     is_bitfield: seen_bitfield,
                     all_8byte: all_8,
+                    has_fn_ptr: has_fp,
                 });
             } else if !is_implicit {
                 // Anonymous record body (e.g. `typedef struct { ... } Point;` or
@@ -569,6 +577,7 @@ fn classify_node(
                             f.ty,
                             CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
                         ));
+                        let has_fp = fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
                         api.structs.push(CStruct {
                             name: name.clone(),
                             fields,
@@ -577,6 +586,7 @@ fn classify_node(
                             is_union: is_union_typedef,
                             is_bitfield: false,
                             all_8byte: all_8,
+                            has_fn_ptr: has_fp,
                         });
                     }
                 }
@@ -909,6 +919,36 @@ fn gen_adapter_c_source(
         }
         s.push_str("\n");
         }
+        // Callback-table shims: a struct with function-pointer fields stores
+        // Lime callbacks (raw fn ptrs, ABI-compatible with C function pointers)
+        // into each field. Nullable callbacks get a separate NULL-setter so the
+        // C side's `if (t->f != NULL)` guard works without ever invoking a
+        // dangling/zero address.
+        if st.has_fn_ptr {
+            s.push_str(&format!(
+                "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
+                st.name, st.name
+            ));
+            for f in &st.fields {
+                if matches!(f.ty, CType::Function(..)) {
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}({}* t, void* f) {{ *(void**)(&t->{}) = f; }}\n",
+                        st.name, f.name, st.name, f.name
+                    ));
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}_null({}* t) {{ t->{} = 0; }}\n",
+                        st.name, f.name, st.name, f.name
+                    ));
+                } else {
+                    let c_ty = c_type_text(&f.ty);
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}({}* t, {} v) {{ t->{} = ({})v; }}\n",
+                        st.name, f.name, st.name, c_ty, f.name, c_ty
+                    ));
+                }
+            }
+            s.push_str("\n");
+        }
     }
     // Constant shims: `int lime_const_NAME() { return <value>; }` — surfaces a
     // C integer constant/macro as a zero-arg extern fn callable from Lime
@@ -1087,6 +1127,39 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
 
     // Structs first (Lime requires types to be visible before use).
     for s in &api.structs {
+        if s.has_fn_ptr {
+            // A struct containing function-pointer fields (a callback table /
+            // operations table / vtable-like C struct) is surfaced as an opaque
+            // handle. Lime callbacks round-trip through generated C setter shims
+            // that store the native function pointer into the C struct field.
+            // No library-specific code — any `T (*f)(...)` field is handled.
+            out.push_str(&format!("// Opaque handle for C callback-table struct '{}' (function-pointer fields); use lime_set_* shims\n", s.name));
+            out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
+            for f in &s.fields {
+                let lime_ty = lime_type_name(&f.ty);
+                if matches!(f.ty, CType::Function(..)) {
+                    // Function-pointer field: setter stores a Lime callback
+                    // (Callback == i8* raw fn ptr, ABI-compatible with the C
+                    // function pointer). Null-setter clears it to NULL.
+                    out.push_str(&format!(
+                        "extern fn lime_set_{}_{}(Opaque({}): a0, Callback: a1) \"lime_set_{}_{}\"\n",
+                        s.name, f.name, s.name, s.name, f.name
+                    ));
+                    out.push_str(&format!(
+                        "extern fn lime_set_{}_{}_null(Opaque({}): a0) \"lime_set_{}_{}_null\"\n",
+                        s.name, f.name, s.name, s.name, f.name
+                    ));
+                } else {
+                    // Non-function field (e.g. `void *userdata`): typed set.
+                    out.push_str(&format!(
+                        "extern fn lime_set_{}_{}(Opaque({}): a0, {}: a1) \"lime_set_{}_{}\"\n",
+                        s.name, f.name, s.name, lime_ty, s.name, f.name
+                    ));
+                }
+            }
+            out.push_str("\n");
+            continue;
+        }
         if s.is_union || s.is_bitfield {
             // Unions and bitfields cannot be modeled as Lime structs (Lime's
             // `int` is i64/8 bytes; overlapping members and sub-byte bitfields

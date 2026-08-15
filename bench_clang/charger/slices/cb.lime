@@ -1,0 +1,92 @@
+// Phase 1 Iteration 2: function-pointer tables (general mechanism).
+// Any C struct with function-pointer fields is surfaced as Opaque(Name) with
+// lime_set_* shims that store Lime callbacks into the C struct. Lime callbacks
+// round-trip through the C table back to Lime. No library-specific code.
+
+// Test B: three callback fields
+extern fn lime_make_MathOps() -> Opaque(MathOps) "lime_make_MathOps"
+extern fn lime_set_MathOps_add(Opaque(MathOps): a0, Callback: a1) "lime_set_MathOps_add"
+extern fn lime_set_MathOps_mul(Opaque(MathOps): a0, Callback: a1) "lime_set_MathOps_mul"
+extern fn lime_set_MathOps_sub(Opaque(MathOps): a0, Callback: a1) "lime_set_MathOps_sub"
+extern fn register_mathops(Opaque(MathOps): a0, Int: a1, Int: a2) -> Int "register_mathops"
+
+// Test C + F: callback + userdata, pointer callback parameter
+extern fn lime_make_Processor() -> Opaque(Processor) "lime_make_Processor"
+extern fn lime_set_Processor_userdata(Opaque(Processor): a0, Opaque(void): a1) "lime_set_Processor_userdata"
+extern fn lime_set_Processor_process(Opaque(Processor): a0, Callback: a1) "lime_set_Processor_process"
+extern fn run_processor(Opaque(Processor): a0) -> Int "run_processor"
+
+// Test D: nullable callback
+extern fn lime_make_Lifecycle() -> Opaque(Lifecycle) "lime_make_Lifecycle"
+extern fn lime_set_Lifecycle_run(Opaque(Lifecycle): a0, Callback: a1) "lime_set_Lifecycle_run"
+extern fn lime_set_Lifecycle_destroy(Opaque(Lifecycle): a0, Callback: a1) "lime_set_Lifecycle_destroy"
+extern fn lime_set_Lifecycle_destroy_null(Opaque(Lifecycle): a0) "lime_set_Lifecycle_destroy_null"
+extern fn run_lifecycle(Opaque(Lifecycle): a0, Int: a1) -> Int "run_lifecycle"
+
+// Test H: callback table retained by C
+extern fn install_and_run(Opaque(MathOps): a0) -> Int "install_and_run"
+
+// --- Lime callbacks (capture-free; ABI-compatible with C fn pointers) ---
+fn cadd(int: a, int: b):
+    return a + b
+fn cmul(int: a, int: b):
+    return a * b
+fn csub(int: a, int: b):
+    return a - b
+
+// Test C: userdata flows from C table into the callback
+fn cproc(Opaque(void): ud, Int: v):
+    return v + 1
+
+// Test D: destroy callback (must NOT be called when NULL)
+fn cdestroy():
+    print("DESTROY_CALLED")
+    print("\n")
+
+// Test D: run callback — signature must match C's `int (*run)(int)`
+fn crun(Int: a):
+    return a + 1
+
+fn main():
+    // Test B: three distinct callbacks
+    let ops = lime_make_MathOps()
+    lime_set_MathOps_add(ops, cadd)
+    lime_set_MathOps_mul(ops, cmul)
+    lime_set_MathOps_sub(ops, csub)
+    let r = register_mathops(ops, 3, 4)
+    // 3+4=7, 3*4=12, 3-4=-1 => 7+12-1 = 18
+    print(r)
+    print("\n")
+
+    // Test H: C retains the table and calls later
+    let r2 = install_and_run(ops)
+    // add(10,20)=30 + mul(10,20)=200 => 230
+    print(r2)
+    print("\n")
+
+    // Test C + F: userdata + pointer param
+    let p = lime_make_Processor()
+    lime_set_Processor_userdata(p, ops)   // reuse ops pointer as opaque userdata
+    lime_set_Processor_process(p, cproc)
+    let r3 = run_processor(p)
+    // cproc(ud=ops, v=41) => 41+1 = 42
+    print(r3)
+    print("\n")
+
+    // Test D: nullable callback — destroy supplied
+    let lc = lime_make_Lifecycle()
+    lime_set_Lifecycle_run(lc, crun)
+    lime_set_Lifecycle_destroy(lc, cdestroy)
+    let r4 = run_lifecycle(lc, 5)
+    // run(5)=6, destroy called => prints DESTROY_CALLED
+    print(r4)
+    print("\n")
+
+    // Test D: nullable callback — destroy NULL (must NOT call)
+    let lc2 = lime_make_Lifecycle()
+    lime_set_Lifecycle_run(lc2, crun)
+    lime_set_Lifecycle_destroy_null(lc2)
+    let r5 = run_lifecycle(lc2, 9)
+    // run(9)=10, destroy NULL => no print
+    print(r5)
+    print("\n")
