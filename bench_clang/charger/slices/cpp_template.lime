@@ -1,0 +1,16 @@
+// C++ vertical slice #6: template instantiation through an opaque handle.
+// The Lime side only ever touches the concrete instantiation Stack<long long>,
+// held as Opaque(Stack_long_long); template_args metadata is recorded by Charger.
+extern fn make_stack() -> Opaque(Stack_long_long) "?make_stack@@YAPEAV?$Stack@_J@@XZ"
+extern fn stack_push(Opaque(Stack_long_long): s, Int: v) -> Unit "?stack_push@@YAXPEAV?$Stack@_J@@_J@Z"
+extern fn stack_size(Opaque(Stack_long_long): s) -> Int "?stack_size@@YA_JPEAV?$Stack@_J@@@Z"
+extern fn stack_free(Opaque(Stack_long_long): s) -> Unit "?stack_free@@YAXPEAV?$Stack@_J@@@Z"
+
+fn main():
+    let s = make_stack()
+    stack_push(s, 5)
+    stack_push(s, 7)
+    let n = stack_size(s)   # expect 2 (two pushes into the template instance)
+    print(n)
+    print("\n")
+    stack_free(s)

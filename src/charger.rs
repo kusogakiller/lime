@@ -88,6 +88,15 @@ pub struct CStruct {
     pub base_classes: Vec<String>,
     pub has_vtable: bool,
     pub is_class: bool,
+    // Task #6: C++ template instantiation metadata. When this struct is a
+    // concrete template instantiation (e.g. `Stack<long long>`), `name` holds
+    // the normalized Lime-legal identifier (`Stack_long_long`) and the original
+    // template arguments are recorded here. `is_template_instantiation` is true
+    // only for such nodes. Advisory only — does not change Lime codegen
+    // (Architecture Gate: Opaque representation unchanged; the instantiation is
+    // surfaced to Lime as an `Opaque(Stack_long_long)` handle).
+    pub template_args: Vec<String>,
+    pub is_template_instantiation: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -181,6 +190,8 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
                         base_classes: Vec::new(),
                         has_vtable: false,
                         is_class: false,
+                        template_args: Vec::new(),
+                        is_template_instantiation: false,
                     });
                 }
             }
@@ -218,6 +229,46 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
             }
         }
     }
+
+    // Task #6: derive template instantiation metadata from the function
+    // signatures. A concrete instantiation referenced only as a pointer in the
+    // header (e.g. `Stack<long long>*`) may not appear as its own CXXRecordDecl
+    // in the AST (the header does not force instantiation), but its
+    // `Opaque("Stack<long long>")` type is present on every function that uses
+    // it. Capture those here so the template_args metadata is persisted even
+    // when the CXXRecordDecl branch above never sees the instantiation node.
+    let mut tmpl_names: Vec<String> = Vec::new();
+    for f in &api.functions {
+        let mut consider = |t: &CType| {
+            if let CType::Opaque(n) = t {
+                if n.contains('<') && !tmpl_names.contains(n) {
+                    tmpl_names.push(n.clone());
+                }
+            }
+        };
+        consider(&f.ret);
+        for p in &f.params {
+            consider(&p.ty);
+        }
+    }
+    for raw in tmpl_names {
+        let norm = normalize_template_name(&raw);
+        if api.structs.iter().any(|s| s.name == norm) {
+            continue;
+        }
+        api.structs.push(CStruct {
+            name: norm,
+            fields: Vec::new(),
+            size_bytes: None,
+            align_bytes: None,
+            base_classes: Vec::new(),
+            has_vtable: false,
+            is_class: true,
+            template_args: parse_template_args(&raw).unwrap_or_default(),
+            is_template_instantiation: true,
+        });
+    }
+
     api
 }
 
@@ -317,7 +368,62 @@ fn parse_c_function_ptr(q: &str) -> Option<CType> {
     Some(CType::Function(params, Box::new(ret)))
 }
 
-/// Mutable state threaded through AST normalization so we can associate
+/// Normalize a C++ template *type spelling* into a Lime-legal identifier
+/// fragment. The characters `<`, `>`, `,` and ` ` are mapped to `_`, runs of
+/// which are collapsed to a single `_`, and leading/trailing `_` are trimmed.
+///
+/// Examples:
+///   `Stack<long long>` -> `Stack_long_long`
+///   `std::vector<int>` -> `std_vector_int`
+///
+/// This is required because Lime's `Opaque(...)` type only accepts a bare
+/// identifier (see `parse_type` in lib.rs); a raw `Opaque(Stack<long long>)`
+/// would be a parse error (`<` is a separator token). Charger therefore keeps
+/// the Lime type name as `Opaque(Stack_long_long)` and records the original
+/// template spelling + arguments in the CIR lite / manifest for auditability.
+fn normalize_template_name(name: &str) -> String {
+    if !name.contains('<') {
+        return name.to_string();
+    }
+    let mut out = String::new();
+    let mut prev_underscore = false;
+    for c in name.chars() {
+        if c == '<' || c == '>' || c == ',' || c == ' ' {
+            if !prev_underscore {
+                out.push('_');
+                prev_underscore = true;
+            }
+        } else {
+            out.push(c);
+            prev_underscore = false;
+        }
+    }
+    out.trim_matches('_').to_string()
+}
+
+/// Extract the template arguments from a C++ template type spelling such as
+/// `Stack<long long>` -> `vec!["long long"]`. Returns `None` if `name` is not
+/// a (syntactically recognizable) template instantiation.
+fn parse_template_args(name: &str) -> Option<Vec<String>> {
+    let open = name.find('<')?;
+    let close = name.rfind('>')?;
+    if close <= open {
+        return None;
+    }
+    let inner = &name[open + 1..close];
+    let args: Vec<String> = split_top_level(inner)
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if args.is_empty() {
+        None
+    } else {
+        Some(args)
+    }
+}
+
+/// Mutable state threaded through AST normalization
 /// anonymous record bodies with the typedef names that name them, and track
 /// the enclosing class for inline methods.
 struct NormalizeCtx {
@@ -353,14 +459,30 @@ fn classify_node(
             }
             if !name.is_empty() && !is_implicit {
                 let is_class = node.get("tagUsed").and_then(|v| v.as_str()) == Some("class");
+                // Task #6: a record whose name is itself a template
+                // instantiation (e.g. `Stack<long long>`) — record the template
+                // arguments and normalize the struct name to a Lime-legal
+                // identifier (`Stack_long_long`). The Lime side sees this as an
+                // opaque handle (`Opaque(Stack_long_long)`).
+                let (s_name, s_targs, s_is_tmpl) = if name.contains('<') {
+                    (
+                        normalize_template_name(&name),
+                        parse_template_args(&name).unwrap_or_default(),
+                        true,
+                    )
+                } else {
+                    (name.clone(), Vec::new(), false)
+                };
                 api.structs.push(CStruct {
-                    name: name.clone(),
+                    name: s_name,
                     fields,
                     size_bytes: None,
                     align_bytes: None,
                     base_classes: Vec::new(),
                     has_vtable: false,
                     is_class,
+                    template_args: s_targs,
+                    is_template_instantiation: s_is_tmpl,
                 });
             } else if !is_implicit {
                 // Anonymous record body (e.g. `typedef struct { ... } Point;`)
@@ -414,14 +536,30 @@ fn classify_node(
                         }
                     }
                 }
+                // Task #6: a class whose name is itself a template
+                // instantiation (e.g. `Stack<long long>`) — record the template
+                // arguments and normalize the struct name to a Lime-legal
+                // identifier (`Stack_long_long`). The Lime side sees this as an
+                // opaque handle (`Opaque(Stack_long_long)`).
+                let (s_name, s_targs, s_is_tmpl) = if name.contains('<') {
+                    (
+                        normalize_template_name(&name),
+                        parse_template_args(&name).unwrap_or_default(),
+                        true,
+                    )
+                } else {
+                    (name.clone(), Vec::new(), false)
+                };
                 api.structs.push(CStruct {
-                    name: name.clone(),
+                    name: s_name,
                     fields: Vec::new(),
                     size_bytes: None,
                     align_bytes: None,
                     base_classes,
                     has_vtable: false,
                     is_class: true,
+                    template_args: s_targs,
+                    is_template_instantiation: s_is_tmpl,
                 });
             }
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
@@ -657,9 +795,15 @@ fn lime_type_name(t: &CType) -> String {
         CType::Pointer(inner) => lime_type_name(inner), // simplify: treat as pointee
         CType::Function(_, _) => "Callback".to_string(), // opaque C fn pointer, ABI = i8*
         CType::Struct(s) => s.clone(),
-        // Task #2: opaque C pointer handle (`struct X*` / `void*`). Emitted as
+        // Task #2/#6: opaque C pointer handle (`struct X*` / `void*` / a C++
+        // template instantiation such as `Stack<long long>*`). Emitted as
         // Lime's `Opaque(X)` type spelling, which lowers to a bare `ptr`.
-        CType::Opaque(s) => format!("Opaque({})", s),
+        // Task #6: a template instantiation name like `Stack<long long>` is
+        // normalized to `Stack_long_long` so the Lime parser accepts it
+        // (`Opaque(Stack<long long>)` would be a parse error since `<` is a
+        // separator token). The original spelling + args live in the CIR lite /
+        // manifest for auditability.
+        CType::Opaque(s) => format!("Opaque({})", normalize_template_name(s)),
         CType::Other(s) => s.clone(),
     }
 }
@@ -679,6 +823,28 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str) -> String {
 
     // Structs first (Lime requires types to be visible before use).
     for s in &api.structs {
+        // Task #6: a template instantiation (e.g. `Stack<long long>`, normalized
+        // to `Stack_long_long`) is surfaced to Lime purely as an opaque handle
+        // (`Opaque(Stack_long_long)`) — it needs no struct definition (cf.
+        // `Opaque(Widget)` in the cpp_ptr slice). Emit only an advisory comment
+        // carrying the template arguments; do not emit a placeholder struct body.
+        if s.is_template_instantiation {
+            let cpp_name = if s.template_args.is_empty() {
+                s.name.clone()
+            } else {
+                format!(
+                    "{}<{}>",
+                    s.name.split('_').next().unwrap_or_else(|| s.name.as_str()),
+                    s.template_args.join(", ")
+                )
+            };
+            out.push_str(&format!(
+                "// C++ {}: template_args=[{}]\n",
+                cpp_name,
+                s.template_args.join(", ")
+            ));
+            continue;
+        }
         // Task #5: surface inheritance / vtable metadata as Lime comments so a
         // human (and the audit) can see what Charger learned from the AST. The
         // Lime side still treats these as opaque handles — the comments are
@@ -813,6 +979,10 @@ pub struct Manifest {
     pub cpp_vtable_classes: Vec<String>,                // classes that own a vtable
     pub cpp_virtual_symbols: Vec<String>,               // mangled symbols of virtual methods
     pub cpp_destructor_symbols: Vec<String>,            // mangled symbols of destructors
+    // Task #6: C++ template instantiation metadata, persisted so the audit and
+    // downstream tooling can confirm Charger extracted it. Maps the normalized
+    // Lime type name (`Stack_long_long`) to its original template arguments.
+    pub cpp_template_instantiations: BTreeMap<String, Vec<String>>, // type -> template args
 }
 
 // ----------------------------------------------------------------------------
@@ -967,6 +1137,15 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         .filter(|f| f.is_destructor)
         .map(|f| f.symbol.clone())
         .collect();
+    // Task #6: derive C++ template instantiation metadata from the normalized
+    // API (auditable evidence that Charger captured the concrete instantiation
+    // `Stack<long long>` and its template arguments).
+    let mut cpp_template_instantiations: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for s in &api.structs {
+        if s.is_template_instantiation && !s.template_args.is_empty() {
+            cpp_template_instantiations.insert(s.name.clone(), s.template_args.clone());
+        }
+    }
 
     let manifest = Manifest {
         library: lib_name.clone(),
@@ -982,6 +1161,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         cpp_vtable_classes,
         cpp_virtual_symbols,
         cpp_destructor_symbols,
+        cpp_template_instantiations,
     };
     let manifest_toml = toml::to_string_pretty(&manifest)
         .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;

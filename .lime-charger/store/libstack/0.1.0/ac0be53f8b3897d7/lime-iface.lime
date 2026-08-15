@@ -1,0 +1,16 @@
+// Charger-generated Lime interface for 'libstack'
+// DO NOT EDIT: regenerate with `charger install`.
+
+struct Stack {
+}
+
+// C++ Stack<long long>: template_args=[long long]
+extern fn stack_new() -> Stack "Stack<T>"
+extern fn Stack____Stack<T>() -> Unit "~Stack<T>"
+extern fn stack_push(Stack: self, T: a0) -> Unit "push"
+extern fn stack_pop(Stack: self) -> T "pop"
+extern fn stack_size(Stack: self) -> Int "size"
+extern fn make_stack() -> Opaque(Stack_long_long) "?make_stack@@YAPEAV?$Stack@_J@@XZ"
+extern fn stack_push(Opaque(Stack_long_long): a0, Int: a1) -> Unit "?stack_push@@YAXPEAV?$Stack@_J@@_J@Z"
+extern fn stack_size(Opaque(Stack_long_long): a0) -> Int "?stack_size@@YA_JPEAV?$Stack@_J@@@Z"
+extern fn stack_free(Opaque(Stack_long_long): a0) -> Unit "?stack_free@@YAXPEAV?$Stack@_J@@@Z"
