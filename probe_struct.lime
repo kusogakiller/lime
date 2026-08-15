@@ -1,9 +1,0 @@
-struct P:
-    int: a
-    int: b
-    int: c
-
-fn main():
-    let p = P(1, 2, 3)
-    println(p.a)
-    println(p.c)
