@@ -1,0 +1,22 @@
+library = "libptr"
+version = "0.1.0"
+source_origin = "bench_clang/charger/testlibs/libptr"
+source_hash = "277530d2abd79904"
+dependencies = []
+artifact = "libptr.lib"
+artifact_hash = "9fbfeae2f7a5384b"
+symbols = [
+    "make_counter",
+    "counter_inc",
+    "counter_get",
+    "counter_free",
+]
+
+[abi]
+os = "windows"
+arch = "x86_64"
+compiler = "clang"
+compiler_version = "clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)"
+cxx_abi = "C"
+cxx_stdlib = "-"
+build_flags = []

@@ -1663,6 +1663,10 @@ impl<'a> Cg<'a> {
             Some("String") => Type::String,
             Some("Bool") => Type::Bool,
             Some("Unit") | Some("Void") | None => Type::Unit,
+            // Task #2: `opaque(Name)` is an opaque C pointer handle. It must NOT
+            // become a `Type::Struct`, or the sret/byval aggregate path below
+            // would kick in; a pointer is returned in RAX like any scalar.
+            Some(other) if other.starts_with("opaque(") => crate::extern_opaque_type(other),
             Some(other) => Type::Struct(other.to_string()),
         };
 
@@ -4691,7 +4695,8 @@ impl<'a> Cg<'a> {
 
     /// Extract bare value (strip type prefix) from a typed constant.
     fn bare_value<'b>(&self, v: &'b str) -> &'b str {
-        for p in &["i64 ", "double ", "i1 ", "i8* ", "void "] {
+        // "ptr " appears on Charger opaque-handle values (Task #2).
+        for p in &["i64 ", "double ", "i1 ", "i8* ", "ptr ", "void "] {
             if let Some(rest) = v.strip_prefix(p) {
                 return rest;
             }

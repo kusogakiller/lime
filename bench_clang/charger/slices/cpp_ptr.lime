@@ -1,0 +1,19 @@
+// C++ vertical slice #3: object lifetime through a C++ pointer (opaque handle).
+// new -> mutate through pointer -> read through pointer -> free.
+// Uses the mangled C++ symbol names emitted by Charger's AST analysis.
+extern fn widget_new(Int: a0, Int: a1) -> Opaque(Widget) "?widget_new@@YAPEAVWidget@@_J0@Z"
+extern fn widget_move(Opaque(Widget): a0, Int: a1, Int: a2) -> Unit "?widget_move@@YAXPEAVWidget@@_J1@Z"
+extern fn widget_area(Opaque(Widget): a0) -> Int "?widget_area@@YA_JPEAVWidget@@@Z"
+extern fn widget_get_x(Opaque(Widget): a0) -> Int "?widget_get_x@@YA_JPEAVWidget@@@Z"
+extern fn widget_free(Opaque(Widget): a0) -> Unit "?widget_free@@YAXPEAVWidget@@@Z"
+
+fn main():
+    let w = widget_new(3, 4)        # area = 12
+    widget_move(w, 1, 1)            # x=4, y=5  -> area = 20
+    let a = widget_area(w)
+    print(a)                        # expect 20
+    print("\n")
+    let x = widget_get_x(w)
+    print(x)                        # expect 4
+    print("\n")
+    widget_free(w)

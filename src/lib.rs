@@ -1308,6 +1308,26 @@ impl Parser {
                     self.advance();
                     return Ok("fn(...)".to_string());
                 }
+                if name == "Opaque" {
+                    // Task #2: opaque C pointer handle emitted by the Charger
+                    // FFI layer for `struct X*` / `void*`. Spelled
+                    // `Opaque(Name)` in Lime source; lowers to `ptr` (the C
+                    // pointer ABI). The handle is never dereferenced by Lime.
+                    self.advance();
+                    self.expect(Token::LParen)?;
+                    let inner = match self.current() {
+                        Token::Ident(n) => n.clone(),
+                        other => {
+                            return Err(format!(
+                                "Expected an opaque handle type name inside Opaque(...), got {:?}",
+                                other
+                            ))
+                        }
+                    };
+                    self.advance();
+                    self.expect(Token::RParen)?;
+                    return Ok(format!("opaque({})", inner));
+                }
                 let t = name.clone();
                 self.advance();
                 t
@@ -5238,6 +5258,13 @@ enum Type {
     Option(Box<Type>),
     Tuple(Vec<Type>),
     Fn(Vec<Type>, Box<Type>),
+    /// Charger FFI opaque handle: a C pointer to a type whose layout Lime does
+    /// not model (`struct X*`, `class X*`, `Counter*`, `void*`). The payload is
+    /// the pointee's C name, kept only for diagnostics/identity; the runtime
+    /// representation is a bare address (`ptr`, 8 bytes on x86_64), which is
+    /// exactly the C ABI for a pointer. Values are never dereferenced by Lime —
+    /// they are handed straight back to the native side.
+    Opaque(String),
     Unit,
     Unknown,
     Var(String),
@@ -5274,6 +5301,22 @@ impl TypeEnv {
 }
 
 // 鬮ｯ諛ｷ髮陷夲ｽｱ鬯ｪ・ｭ陷奇｣ｰ繝ｻ・ｭ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE -> Type 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ讓奇ｽｺ・ｽ陋ｻ・､鬯ｩ・ｪ繝ｻ・､驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ讖ｸ・ｽ・ｳ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｫ繝ｻ・ｪ繝ｻ縺､ﾂ鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE鬮ｯ蛹ｺ・ｻ繧托ｽｽ・ｽ繝ｻ・､鬮ｯ諛ｷ驕懊・・ｿ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬮ｮ謇九＃繝ｻ・｢隰・∞・ｽ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮｣蜴・ｽｽ・ｴ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｨ・ｾ陋ｹ繝ｻ・ｽ・ｽ繝ｻ・ｨ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
+/// Task #2 (Charger FFI): decode an `opaque(Name)` type spelling into
+/// `Type::Opaque(Name)`. This is the single decoder shared by the type checker,
+/// the inference pass and the codegen backend so an opaque C pointer handle is
+/// never mistaken for a Lime struct. Any other input falls back to
+/// `Type::Opaque("void")` (still a bare `ptr`), which keeps the ABI correct even
+/// if the pointee name is missing.
+pub(crate) fn extern_opaque_type(s: &str) -> Type {
+    let name = s
+        .strip_prefix("opaque(")
+        .and_then(|r| r.strip_suffix(')'))
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .unwrap_or("void");
+    Type::Opaque(name.to_string())
+}
+
 fn type_from_str(s: &str, defs: &Defs) -> Type {
     // Phase 2: return a memoized result if this exact type string was already
     // parsed (resolution is deterministic per immutable `Defs`).
@@ -5323,6 +5366,13 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
         // FFI layer for C callbacks). Treated as a raw function pointer.
         if rest.trim() == "..." {
             return Type::Fn(Vec::new(), Box::new(Type::Unit));
+        }
+    }
+    // Task #2: opaque C pointer handle `opaque(Name)` (produced by `parse_type`
+    // for the Charger-emitted `Opaque(Name)` spelling). Lowers to `ptr`.
+    if let Some(inner) = s.strip_prefix("opaque(") {
+        if let Some(inner) = inner.strip_suffix(')') {
+            return Type::Opaque(inner.trim().to_string());
         }
     }
     // Tuple types: (int, str)
@@ -5483,6 +5533,8 @@ fn type_to_string(ty: &Type) -> String {
             format!("fn({}) -> {}", param_strs.join(", "), type_to_string(ret))
         }
         Type::Json => "json".to_string(),
+        // Task #2: round-trips through `type_from_str` back to `Type::Opaque`.
+        Type::Opaque(name) => format!("opaque({})", name),
     }
 }
 
@@ -6085,6 +6137,8 @@ fn infer_type(
                         "String" => Type::String,
                         "Bool" => Type::Bool,
                         "Unit" | "Void" | "" => Type::Unit,
+                        // Task #2: `opaque(Name)` -> opaque C pointer handle.
+                        other if other.starts_with("opaque(") => extern_opaque_type(other),
                         other => Type::Struct(other.to_string()),
                     })
                     .unwrap_or(Type::Unit);
@@ -8700,6 +8754,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                             Some("String") => Type::String,
                             Some("Bool") => Type::Bool,
                             Some("Unit") | Some("Void") | None => Type::Unit,
+                            // Task #2: `opaque(Name)` -> opaque C pointer handle.
+                            Some(o) if o.starts_with("opaque(") => extern_opaque_type(o),
                             Some(o) => Type::Struct(o.to_string()),
                         });
                     }

@@ -1,0 +1,22 @@
+// C vertical slice #2: C pointer / opaque handle type.
+//
+// `Counter*` is surfaced to Lime as `Opaque(Counter)` — an 8-byte address the
+// Lime side never dereferences. The point of the slice is that the C library
+// MUTATES state through the pointer and Lime reads it back, so a by-value
+// aggregate copy would give the wrong answer (0 instead of 2).
+//
+// These declarations are exactly what `charger install libptr` emits into
+// .lime-charger/store/libptr/0.1.0/<toolhash>/lime-iface.lime.
+extern fn make_counter() -> Opaque(Counter) "make_counter"
+extern fn counter_inc(Opaque(Counter): c) -> Unit "counter_inc"
+extern fn counter_get(Opaque(Counter): c) -> Int "counter_get"
+extern fn counter_free(Opaque(Counter): c) -> Unit "counter_free"
+
+fn main():
+    let c = make_counter()
+    counter_inc(c)
+    counter_inc(c)
+    let v = counter_get(c)
+    print(v)
+    print("\n")
+    counter_free(c)

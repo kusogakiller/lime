@@ -804,6 +804,8 @@ fn extern_ret_type(s: Option<&str>) -> Type {
         Some("String") => Type::String,
         Some("Bool") => Type::Bool,
         Some("Unit") | Some("Void") | None => Type::Unit,
+        // Task #2: opaque C pointer handle -> `ptr` return slot (not sret).
+        Some(other) if other.starts_with("opaque(") => crate::extern_opaque_type(other),
         Some(other) => Type::Struct(other.to_string()),
     }
 }
@@ -828,6 +830,19 @@ fn extern_param_type(s: &str) -> Type {
             let ret_type = extern_param_type(ret_str.trim());
             return Type::Fn(param_types, Box::new(ret_type));
         }
+        // The opaque shorthand `fn(...)` is what `parse_type` produces for the
+        // Charger-emitted `Callback` type (Task #1). Without this arm it fell
+        // through to `Type::Struct("fn(...)")` and the declaration slot became
+        // `ptr byval(%fn)` — an undefined LLVM type that blocked object
+        // emission for any callback-taking extern.
+        if rest.trim() == "...)" || rest.trim() == "..." {
+            return Type::Fn(Vec::new(), Box::new(Type::Unit));
+        }
+    }
+    // Task #2: an opaque C pointer handle parameter (`struct X*` / `void*`) is
+    // declared as a bare `ptr` slot, not a struct (which would be `byval`).
+    if s.starts_with("opaque(") {
+        return crate::extern_opaque_type(s);
     }
     match s {
         "Int" => Type::Int,

@@ -209,7 +209,25 @@ fn parse_c_type(qual: &str) -> CType {
         if inner.contains("(*") {
             return CType::Pointer(Box::new(CType::Other(q.to_string())));
         }
-        return CType::Pointer(Box::new(parse_c_type(inner)));
+        let pointee = parse_c_type(inner);
+        // Task #2: a pointer to a type whose layout Lime does not model
+        // (`struct X*`, `class X*`, a typedef'd record like `Counter*`, or
+        // `void*`) is surfaced to Lime as an OPAQUE HANDLE. The Lime side keeps
+        // it as a bare address (`ptr`) and hands it straight back to the native
+        // side, so mutation performed through the pointer in C is observable.
+        // Simplifying such a pointer to its pointee (the pre-#2 behavior) would
+        // hand Lime a by-value aggregate copy and lose the indirection.
+        //
+        // Scalar pointers (`int*`, `double*`, `char*`) keep the existing
+        // `CType::Pointer` mapping so no established behavior changes.
+        match &pointee {
+            CType::Void => return CType::Opaque("void".to_string()),
+            CType::Struct(name) | CType::Opaque(name) | CType::Other(name) => {
+                return CType::Opaque(name.clone());
+            }
+            _ => {}
+        }
+        return CType::Pointer(Box::new(pointee));
     }
     match q {
         "int" | "unsigned int" | "short" | "unsigned short" | "long" | "unsigned long"
@@ -562,7 +580,9 @@ fn lime_type_name(t: &CType) -> String {
         CType::Pointer(inner) => lime_type_name(inner), // simplify: treat as pointee
         CType::Function(_, _) => "Callback".to_string(), // opaque C fn pointer, ABI = i8*
         CType::Struct(s) => s.clone(),
-        CType::Opaque(s) => s.clone(),
+        // Task #2: opaque C pointer handle (`struct X*` / `void*`). Emitted as
+        // Lime's `Opaque(X)` type spelling, which lowers to a bare `ptr`.
+        CType::Opaque(s) => format!("Opaque({})", s),
         CType::Other(s) => s.clone(),
     }
 }
@@ -601,7 +621,12 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str) -> String {
         let params_lime: Vec<String> = f
             .params
             .iter()
-            .map(|p| format!("{}: {}", p.name, lime_type_name(&p.ty)))
+            // `extern fn` parameters are spelled TYPE-FIRST (`Int: a0`), matching
+            // Lime's `parse_extern_fn` grammar. Emitting `a0: Int` (the pre-#2
+            // order) made the parser read `a0` as the type and `Int` as the name
+            // — harmless for bare scalars, but a hard parse error for a
+            // parameterized type such as `Opaque(Counter)`.
+            .map(|p| format!("{}: {}", lime_type_name(&p.ty), p.name))
             .collect();
         // Symbol literal: the linkable name (mangled for C++).
         if f.is_constructor {

@@ -33,6 +33,14 @@ pub fn llvm_type_name(ty: &Type) -> String {
         Type::Slice(_) => "i8*".to_string(), // Phase 0: placeholder
         Type::Tuple(_) => "i64".to_string(), // Phase 0: placeholder
         Type::Fn(_, _) => "i8*".to_string(), // function values are opaque pointers
+        // Task #2 (Charger FFI): an opaque C pointer handle is a bare address.
+        // Spelled `i8*` rather than `ptr` for the same reason `Type::String` and
+        // `Type::Fn` are: this backend composes pointer-to-slot types by string
+        // concatenation (`{llty}*` in `Stmt::Let`/loads), and `ptr*` is rejected
+        // by LLVM. `i8*` is the identical 8-byte address value and matches the C
+        // pointer ABI exactly, so the handle is handed straight back to native
+        // code without conversion.
+        Type::Opaque(_) => "i8*".to_string(),
         Type::Unit => "void".to_string(),
         Type::Unknown => "i64".to_string(), // Phase 0: placeholder
         Type::Var(_) => "i64".to_string(), // Phase 0: monomorphization
@@ -66,6 +74,7 @@ pub fn align_of(ty: &Type) -> usize {
         Type::Slice(_) => 8,
         Type::Tuple(_) => 8,
         Type::Fn(_, _) => 8,
+        Type::Opaque(_) => 8,
         Type::Struct(_) => 8,
         Type::State(_) => 8,
         Type::Interface(_, _) => 8,
@@ -81,6 +90,8 @@ pub fn zero_value_for_type(ty: &Type) -> String {
         Type::Float => "0.0".to_string(),
         Type::Bool => "false".to_string(),
         Type::Unit => "".to_string(),
+        // Opaque C pointer handle: the null pointer is its zero value.
+        Type::Opaque(_) => "null".to_string(),
         _ => "0".to_string(),
     }
 }
