@@ -1,0 +1,51 @@
+// Phase 1 Iteration 1: exact struct layout (sub-8-byte -> Opaque + adapter),
+// union semantics (Opaque + getter/setter), bitfield (Opaque + getter/setter).
+// All surfaced using existing Lime features (Opaque / Int / Float / extern fn
+// shims). No new Lime type categories (Architecture Gate respected).
+
+// Padded { char a; int b; short c; } -> a + b + c
+extern fn lime_make_Padded() -> Opaque(Padded) "lime_make_Padded"
+extern fn lime_set_Padded_a(Opaque(Padded): a0, Int: a1) "lime_set_Padded_a"
+extern fn lime_set_Padded_b(Opaque(Padded): a0, Int: a1) "lime_set_Padded_b"
+extern fn lime_set_Padded_c(Opaque(Padded): a0, Int: a1) "lime_set_Padded_c"
+extern fn padded_sum(Opaque(Padded): a0) -> Int "padded_sum"
+
+// Union U { int i; float f; long long ll; } (bytes[4] skipped: array)
+extern fn lime_make_U() -> Opaque(U) "lime_make_U"
+extern fn lime_set_U_i(Opaque(U): a0, Int: a1) "lime_set_U_i"
+extern fn u_as_int(Opaque(U): a0) -> Int "u_as_int"
+
+// Bitfield Flags { unsigned ready:1; error:1; mode:3; reserved:27; }
+extern fn lime_make_Flags() -> Opaque(Flags) "lime_make_Flags"
+extern fn lime_set_Flags_ready(Opaque(Flags): a0, Int: a1) "lime_set_Flags_ready"
+extern fn lime_set_Flags_mode(Opaque(Flags): a0, Int: a1) "lime_set_Flags_mode"
+extern fn flags_ready(Opaque(Flags): a0) -> Int "flags_ready"
+extern fn flags_mode(Opaque(Flags): a0) -> Int "flags_mode"
+
+fn main():
+    // Padded { a=1, b=2, c=3 } -> 1 + 2 + 3 = 6
+    let p = lime_make_Padded()
+    lime_set_Padded_a(p, 1)
+    lime_set_Padded_b(p, 2)
+    lime_set_Padded_c(p, 3)
+    let sum = padded_sum(p)
+    print(sum)           // expect 6
+    print("\n")
+
+    // Union: set i = 42, read back i = 42
+    let u = lime_make_U()
+    lime_set_U_i(u, 42)
+    let ui = u_as_int(u)
+    print(ui)            // expect 42
+    print("\n")
+
+    // Bitfield: ready=1, mode=5 -> flags_ready=1, flags_mode=5
+    let f = lime_make_Flags()
+    lime_set_Flags_ready(f, 1)
+    lime_set_Flags_mode(f, 5)
+    let r = flags_ready(f)
+    let m = flags_mode(f)
+    print(r)            // expect 1
+    print("\n")
+    print(m)            // expect 5
+    print("\n")

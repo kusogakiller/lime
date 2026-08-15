@@ -1,0 +1,44 @@
+// Charger-generated Lime interface for 'liblayout'
+// DO NOT EDIT: regenerate with `charger install`.
+
+// Opaque handle for C struct 'Padded' (sub-8-byte layout); use lime_*_get/set shims
+extern fn lime_make_Padded() -> Opaque(Padded) "lime_make_Padded"
+extern fn lime_get_Padded_a(Opaque(Padded): a0) -> Int "lime_get_Padded_a"
+extern fn lime_set_Padded_a(Opaque(Padded): a0, Int: a1) "lime_set_Padded_a"
+extern fn lime_get_Padded_b(Opaque(Padded): a0) -> Int "lime_get_Padded_b"
+extern fn lime_set_Padded_b(Opaque(Padded): a0, Int: a1) "lime_set_Padded_b"
+extern fn lime_get_Padded_c(Opaque(Padded): a0) -> Int "lime_get_Padded_c"
+extern fn lime_set_Padded_c(Opaque(Padded): a0, Int: a1) "lime_set_Padded_c"
+
+// Opaque handle for C struct 'Wrapper' (sub-8-byte layout); use lime_*_get/set shims
+extern fn lime_make_Wrapper() -> Opaque(Wrapper) "lime_make_Wrapper"
+extern fn lime_get_Wrapper_p(Opaque(Wrapper): a0) -> Padded "lime_get_Wrapper_p"
+extern fn lime_set_Wrapper_p(Opaque(Wrapper): a0, Padded: a1) "lime_set_Wrapper_p"
+extern fn lime_get_Wrapper_tag(Opaque(Wrapper): a0) -> Int "lime_get_Wrapper_tag"
+extern fn lime_set_Wrapper_tag(Opaque(Wrapper): a0, Int: a1) "lime_set_Wrapper_tag"
+
+// Opaque handle for C union 'U' (union/bitfield); use lime_*_get/set shims
+extern fn lime_make_U() -> Opaque(U) "lime_make_U"
+extern fn lime_get_U_i(Opaque(U): a0) -> Int "lime_get_U_i"
+extern fn lime_set_U_i(Opaque(U): a0, Int: a1) "lime_set_U_i"
+extern fn lime_get_U_f(Opaque(U): a0) -> Float "lime_get_U_f"
+extern fn lime_set_U_f(Opaque(U): a0, Float: a1) "lime_set_U_f"
+extern fn lime_get_U_ll(Opaque(U): a0) -> Int "lime_get_U_ll"
+extern fn lime_set_U_ll(Opaque(U): a0, Int: a1) "lime_set_U_ll"
+
+// Opaque handle for C struct 'Flags' (sub-8-byte layout); use lime_*_get/set shims
+extern fn lime_make_Flags() -> Opaque(Flags) "lime_make_Flags"
+extern fn lime_get_Flags_ready(Opaque(Flags): a0) -> Int "lime_get_Flags_ready"
+extern fn lime_set_Flags_ready(Opaque(Flags): a0, Int: a1) "lime_set_Flags_ready"
+extern fn lime_get_Flags_error(Opaque(Flags): a0) -> Int "lime_get_Flags_error"
+extern fn lime_set_Flags_error(Opaque(Flags): a0, Int: a1) "lime_set_Flags_error"
+extern fn lime_get_Flags_mode(Opaque(Flags): a0) -> Int "lime_get_Flags_mode"
+extern fn lime_set_Flags_mode(Opaque(Flags): a0, Int: a1) "lime_set_Flags_mode"
+extern fn lime_get_Flags_reserved(Opaque(Flags): a0) -> Int "lime_get_Flags_reserved"
+extern fn lime_set_Flags_reserved(Opaque(Flags): a0, Int: a1) "lime_set_Flags_reserved"
+
+extern fn padded_sum(Opaque(Padded): a0) -> Int "padded_sum"
+extern fn u_as_int(Opaque(U): a0) -> Int "u_as_int"
+extern fn flags_ready(Opaque(Flags): a0) -> Int "flags_ready"
+extern fn flags_mode(Opaque(Flags): a0) -> Int "flags_mode"
+extern fn wrapper_tag(Opaque(Wrapper): a0) -> Int "wrapper_tag"

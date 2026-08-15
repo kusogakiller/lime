@@ -81,6 +81,17 @@ pub struct CStruct {
     pub fields: Vec<CParam>, // (field_name, type)
     pub size_bytes: Option<u64>,
     pub align_bytes: Option<u64>,
+    // Phase 1 C ABI completeness: exact-layout markers. `is_union` records a C
+    // `union` (all members overlap at offset 0); `is_bitfield` records a struct
+    // containing at least one bitfield member. Both are surfaced to Lime as
+    // `Opaque(Name)` handles with generated C accessor shims, because Lime's
+    // `int` lowers to i64 (8 bytes) and cannot replicate sub-8-byte C layouts.
+    pub is_union: bool,
+    pub is_bitfield: bool,
+    // Whether every field is an 8-byte-wide type (long long / double /
+    // pointer). When true the struct can be modeled as a real Lime struct;
+    // otherwise it must be surfaced as an opaque handle with accessor shims.
+    pub all_8byte: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -181,11 +192,18 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
             // underlying type (e.g. `typedef struct {...} Point` -> `struct Point`).
             if stripped == tname && !api.structs.iter().any(|s| &s.name == tname) {
                 if let Some(fields) = &ctx.anon_struct {
+                    let all_8 = fields.iter().all(|f| matches!(
+                        f.ty,
+                        CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
+                    ));
                     api.structs.push(CStruct {
                         name: tname.clone(),
                         fields: fields.clone(),
                         size_bytes: None,
                         align_bytes: None,
+                        is_union: false,
+                        is_bitfield: false,
+                        all_8byte: all_8,
                     });
                 }
             }
@@ -287,6 +305,10 @@ fn type_from_json(t: &serde_json::Value) -> CType {
 
 fn parse_c_type(qual: &str) -> CType {
     let q = qual.trim();
+    // Strip leading `const ` qualifiers (e.g. `const Padded *` -> `Padded *`).
+    // `const`-ness is an ABI-irrelevant qualifier for our purposes; the pointee
+    // type name is what Lime surfaces (as `Opaque(Name)` / `Struct(Name)`).
+    let q = q.trim_start_matches("const ").trim();
     // Task #1: function pointer types such as `long long (*)(long long, long long)`
     // or `int (*fn)(int, int)`. Parse into `CType::Function` so the Lime iface
     // emits a `fn(...) -> ...` type (consumable as a C callback pointer).
@@ -348,7 +370,10 @@ fn parse_c_type(qual: &str) -> CType {
         "double" => CType::Double,
         "bool" | "_Bool" => CType::Bool,
         "void" => CType::Void,
-        "char" | "const char" | "char *" | "const char *" => CType::String, // treat C strings as Lime String
+        // Single `char` is a 1-byte scalar -> Lime Int (i64). Only `char *` /
+        // `const char *` are C strings (Lime String).
+        "char" | "const char" | "signed char" | "unsigned char" => CType::Int,
+        "char *" | "const char *" => CType::String, // treat C strings as Lime String
         s if s.starts_with("struct ") => CType::Struct(s["struct ".len()..].to_string()),
         s if s.starts_with("class ") => CType::Struct(s["class ".len()..].to_string()),
         s if s.starts_with("enum ") => CType::Int, // enums are ABI-compatible with int
@@ -419,11 +444,16 @@ fn classify_node(
             let tag_used = node.get("tagUsed").and_then(|v| v.as_str()).unwrap_or("");
             let is_union = tag_used == "union";
             let mut fields = Vec::new();
+            let mut seen_bitfield = false;
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for f in inner {
                     if f.get("kind").and_then(|v| v.as_str()) == Some("FieldDecl") {
                         let fname = f.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let fty = f.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                        // A bitfield member carries a `bitWidth` in the AST.
+                        if f.get("bitWidth").is_some() {
+                            seen_bitfield = true;
+                        }
                         if !fname.is_empty() {
                             fields.push(CParam { name: fname, ty: fty });
                         }
@@ -434,17 +464,24 @@ fn classify_node(
             // struct spelling so the value-type ABI width matches (a union's size
             // is its largest member). Keep the widest scalar/ptr member; fall back
             // to the last field if nothing obvious stands out.
-            let fields = if is_union {
-                widest_member(fields)
-            } else {
-                fields
-            };
             if !name.is_empty() && !is_implicit {
+                // A union is surfaced as an opaque handle with accessor shims
+                // (Lime cannot model overlapping members or sub-8-byte fields),
+                // so keep ALL members for the shim generator rather than
+                // collapsing to the widest member.
+                let kept_fields = if is_union { fields.clone() } else { fields.clone() };
+                let all_8 = kept_fields.iter().all(|f| matches!(
+                    f.ty,
+                    CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
+                ));
                 api.structs.push(CStruct {
                     name: name.clone(),
-                    fields,
+                    fields: kept_fields,
                     size_bytes: None,
                     align_bytes: None,
+                    is_union,
+                    is_bitfield: seen_bitfield,
+                    all_8byte: all_8,
                 });
             } else if !is_implicit {
                 // Anonymous record body (e.g. `typedef struct { ... } Point;` or
@@ -527,11 +564,19 @@ fn classify_node(
                 // named struct so Lime has a concrete type to use.
                 if let Some(fields) = ctx.anon_struct.take() {
                     if !underlying.contains("enum") {
+                        let is_union_typedef = underlying.contains("union");
+                        let all_8 = fields.iter().all(|f| matches!(
+                            f.ty,
+                            CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
+                        ));
                         api.structs.push(CStruct {
                             name: name.clone(),
                             fields,
                             size_bytes: None,
                             align_bytes: None,
+                            is_union: is_union_typedef,
+                            is_bitfield: false,
+                            all_8byte: all_8,
                         });
                     }
                 }
@@ -749,7 +794,8 @@ fn is_out_param(t: &CType) -> Option<String> {
 /// (`sqlite3*`); each `Pointer` adds one more level of indirection.
 fn c_type_text(t: &CType) -> String {
     match t {
-        CType::Int | CType::Long => "int".to_string(),
+        CType::Int => "int".to_string(),
+        CType::Long => "long long".to_string(),
         CType::Float => "float".to_string(),
         CType::Double => "double".to_string(),
         CType::Bool => "int".to_string(),
@@ -818,11 +864,52 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
 
 /// Generate the C source for every adapter shim. `header_name` is the library
 /// header to `#include` (e.g. "sqlite3.h") so the shim sees the real types.
-fn gen_adapter_c_source(adapters: &[AdapterSpec], constants: &[(String, i64)], header_name: &str) -> String {
+fn gen_adapter_c_source(
+    adapters: &[AdapterSpec],
+    constants: &[(String, i64)],
+    structs: &[CStruct],
+    header_name: &str,
+) -> String {
     let mut s = String::new();
-    s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const). DO NOT EDIT. */\n");
+    s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors). DO NOT EDIT. */\n");
     s.push_str("#include <stddef.h>\n#include <stdlib.h>\n");
     s.push_str(&format!("#include \"{}\"\n", header_name));
+    // Union / bitfield accessor shims: since Lime cannot model overlapping
+    // members or sub-byte bitfields (Lime `int` is i64), the record is surfaced
+    // as an opaque handle and these C shims do the real field access on the C
+    // side (using clang's own layout — the source of truth).
+    for st in structs {
+        // Generate accessor shims for any record Lime cannot model as a real
+        // struct: unions (overlapping members), bitfields (sub-byte fields),
+        // and sub-8-byte structs (char/short/int members — Lime's int is i64).
+        if st.is_union || st.is_bitfield || !st.all_8byte {
+            // Constructor allocating the record on the heap (Lime owns the pointer).
+        s.push_str(&format!(
+            "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
+            st.name, st.name
+        ));
+        for f in &st.fields {
+            // Skip array members (e.g. `char bytes[4]`) — C cannot pass/return
+            // arrays by value through a shim; they are accessed via pointer in
+            // real C code. Surface only scalar/aggregate members.
+            if let CType::Other(txt) = &f.ty {
+                if txt.contains('[') {
+                    continue;
+                }
+            }
+            let c_ty = c_type_text(&f.ty);
+            s.push_str(&format!(
+                "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
+                c_ty, st.name, f.name, st.name, c_ty, f.name
+            ));
+            s.push_str(&format!(
+                "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
+                st.name, f.name, st.name, c_ty, f.name, c_ty
+            ));
+        }
+        s.push_str("\n");
+        }
+    }
     // Constant shims: `int lime_const_NAME() { return <value>; }` — surfaces a
     // C integer constant/macro as a zero-arg extern fn callable from Lime
     // (Lime has no top-level `const`, so this preserves the value without a
@@ -907,12 +994,13 @@ fn gen_adapter_c_source(adapters: &[AdapterSpec], constants: &[(String, i64)], h
 fn build_adapters_into(
     adapters: &[AdapterSpec],
     constants: &[(String, i64)],
+    structs: &[CStruct],
     art_path: &Path,
     header: &Path,
     llvm_bindir: &str,
     lang: ApiKind,
 ) -> Result<(), String> {
-    if adapters.is_empty() && constants.is_empty() {
+    if adapters.is_empty() && constants.is_empty() && structs.is_empty() {
         return Ok(());
     }
     let header_name = header
@@ -920,7 +1008,7 @@ fn build_adapters_into(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-    let src = gen_adapter_c_source(adapters, constants, &header_name);
+    let src = gen_adapter_c_source(adapters, constants, structs, &header_name);
     let build_dir = std::env::temp_dir().join("charger_build_adapters");
     let _ = std::fs::create_dir_all(&build_dir);
     let c_path = build_dir.join("lime_adapters.c");
@@ -999,10 +1087,69 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
 
     // Structs first (Lime requires types to be visible before use).
     for s in &api.structs {
+        if s.is_union || s.is_bitfield {
+            // Unions and bitfields cannot be modeled as Lime structs (Lime's
+            // `int` is i64/8 bytes; overlapping members and sub-byte bitfields
+            // are unrepresentable). Surface as an opaque handle; accessor
+            // shims (generated in the adapter C source) provide typed get/set.
+            out.push_str(&format!("// Opaque handle for C {} '{}' (union/bitfield); use lime_*_get/set shims\n", if s.is_union { "union" } else { "bitfield struct" }, s.name));
+            out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
+            for f in &s.fields {
+                // Skip array members (C cannot pass/return arrays by value
+                // through a shim); matches the adapter C-source generator.
+                if let CType::Other(txt) = &f.ty {
+                    if txt.contains('[') {
+                        continue;
+                    }
+                }
+                let lime_ty = lime_type_name(&f.ty);
+                out.push_str(&format!(
+                    "extern fn lime_get_{}_{}(Opaque({}): a0) -> {} \"lime_get_{}_{}\"\n",
+                    s.name, f.name, s.name, lime_ty, s.name, f.name
+                ));
+                out.push_str(&format!(
+                    "extern fn lime_set_{}_{}(Opaque({}): a0, {}: a1) \"lime_set_{}_{}\"\n",
+                    s.name, f.name, s.name, lime_ty, s.name, f.name
+                ));
+            }
+            out.push_str("\n");
+            continue;
+        }
         if s.fields.is_empty() {
             // opaque / empty: emit as a unit-ish placeholder struct so the
             // type name resolves. (Future: ABI metadata drives real layout.)
             out.push_str(&format!("struct {} {{\n}}\n\n", s.name));
+            continue;
+        }
+        // A struct whose fields are ALL 8-byte-wide types (long long / double /
+        // pointer) can be modeled as a real Lime struct (Lime's scalars are all
+        // 8 bytes). Any sub-8-byte field (char/short/int) or aggregate that
+        // Lime cannot lay out must be surfaced as an opaque handle with accessor
+        // shims (clang owns the real layout — the source of truth).
+        let all_8byte = s.fields.iter().all(|f| matches!(
+            f.ty,
+            CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
+        ));
+        if !all_8byte {
+            out.push_str(&format!("// Opaque handle for C struct '{}' (sub-8-byte layout); use lime_*_get/set shims\n", s.name));
+            out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
+            for f in &s.fields {
+                if let CType::Other(txt) = &f.ty {
+                    if txt.contains('[') {
+                        continue;
+                    }
+                }
+                let lime_ty = lime_type_name(&f.ty);
+                out.push_str(&format!(
+                    "extern fn lime_get_{}_{}(Opaque({}): a0) -> {} \"lime_get_{}_{}\"\n",
+                    s.name, f.name, s.name, lime_ty, s.name, f.name
+                ));
+                out.push_str(&format!(
+                    "extern fn lime_set_{}_{}(Opaque({}): a0, {}: a1) \"lime_set_{}_{}\"\n",
+                    s.name, f.name, s.name, lime_ty, s.name, f.name
+                ));
+            }
+            out.push_str("\n");
             continue;
         }
         out.push_str(&format!("struct {} {{\n", s.name));
@@ -1232,7 +1379,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // the reused artifact (a stale artifact built by an older
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
-                build_adapters_into(&adapters, &api.constants, &art_dest, &header, llvm_bindir, lang)?;
+                build_adapters_into(&adapters, &api.constants, &api.structs, &art_dest, &header, llvm_bindir, lang)?;
                 let iface = generate_lime_iface(&api, &lib_name, &adapters);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
@@ -1315,7 +1462,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // 2b. Build out-param / null-callback adapter shims and insert them into
     // the prepared native artifact (so the Lime `extern fn` shim symbols
     // resolve at link time).
-    build_adapters_into(&adapters, &api.constants, &art_path, &header, llvm_bindir, lang)?;
+    build_adapters_into(&adapters, &api.constants, &api.structs, &art_path, &header, llvm_bindir, lang)?;
 
     // 2. AST extraction + normalization (already performed earlier; reuse it).
 
