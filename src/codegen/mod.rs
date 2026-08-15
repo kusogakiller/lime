@@ -809,6 +809,26 @@ fn extern_ret_type(s: Option<&str>) -> Type {
 }
 
 fn extern_param_type(s: &str) -> Type {
+    // Task #1: a C function-pointer parameter (`int (*)(int, int)`) is surfaced
+    // to Lime as a `fn(Int, Int) -> Int` type. Parse it into `Type::Fn` so the
+    // extern declaration encodes it as a raw function pointer (i8*) instead of a
+    // struct.
+    if let Some(rest) = s.strip_prefix("fn(") {
+        if let Some(arrow) = rest.find(") -> ") {
+            let params_str = &rest[..arrow];
+            let ret_str = &rest[arrow + 5..];
+            let param_types: Vec<Type> = if params_str.trim().is_empty() {
+                Vec::new()
+            } else {
+                params_str
+                    .split(',')
+                    .map(|p| extern_param_type(p.trim()))
+                    .collect()
+            };
+            let ret_type = extern_param_type(ret_str.trim());
+            return Type::Fn(param_types, Box::new(ret_type));
+        }
+    }
     match s {
         "Int" => Type::Int,
         "Float" => Type::Float,

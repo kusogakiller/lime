@@ -1,0 +1,7 @@
+fn myadd(int: a, int: b):
+    return a + b
+
+fn main():
+    let r = myadd(3, 4)
+    print(r)
+    print("\n")

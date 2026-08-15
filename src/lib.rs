@@ -1301,6 +1301,13 @@ impl Parser {
                 "bool".to_string()
             }
             Token::Ident(name) => {
+                if name == "Callback" {
+                    // Opaque C function-pointer type emitted by the Charger
+                    // FFI layer. Lowers to i8* (raw function pointer) and is
+                    // ABI-compatible with a capture-free Lime function symbol.
+                    self.advance();
+                    return Ok("fn(...)".to_string());
+                }
                 let t = name.clone();
                 self.advance();
                 t
@@ -5311,6 +5318,11 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
             };
             let ret_type = type_from_str(ret_str, defs);
             return Type::Fn(param_types, Box::new(ret_type));
+        }
+        // Opaque function-pointer shorthand `fn(...)` (emitted by the Charger
+        // FFI layer for C callbacks). Treated as a raw function pointer.
+        if rest.trim() == "..." {
+            return Type::Fn(Vec::new(), Box::new(Type::Unit));
         }
     }
     // Tuple types: (int, str)

@@ -1694,7 +1694,27 @@ impl<'a> Cg<'a> {
 
         // Build the LLVM argument list.
         let mut llvm_args: Vec<String> = Vec::new();
-        for a in args {
+        for (i, a) in args.iter().enumerate() {
+            // Task #1: capture-free Lime function passed as a C function-pointer
+            // callback. When the extern parameter's declared type is a function
+            // type (`fn(...) -> ...`), emit the bare function symbol address as a
+            // raw function pointer (`ptr @funcname`) instead of building a Lime
+            // closure wrapper (which would produce a `%LimeClosure*` incompatible
+            // with the C `fn` pointer ABI). The Lime function is emitted as a plain
+            // `define` with the standard C calling convention (no hidden args), so
+            // its address is directly callable from C.
+            let expected_ty = _params
+                .get(i)
+                .map(|(_, t)| t.as_str())
+                .unwrap_or("");
+            if expected_ty.starts_with("fn(") {
+                if let Expr::Ident(fnname) = a {
+                    if self.defs.functions.contains_key(fnname) {
+                        llvm_args.push(format!("ptr @{}", fnname));
+                        continue;
+                    }
+                }
+            }
             let (v, t) = self.codegen_expr(a)?;
             if matches!(t, Type::Struct(_)) {
                 // Aggregate passed by value -> store into a slot and pass a

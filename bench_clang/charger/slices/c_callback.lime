@@ -1,0 +1,11 @@
+// C vertical slice #1: pass a capture-free Lime function as a C callback
+// (function pointer) into the prepared libmathx `apply` function.
+extern fn apply(Callback: cb, Int: a0, Int: a1) -> Int "apply"
+
+fn myadd(int: a, int: b):
+    return a + b
+
+fn main():
+    let r = apply(myadd, 3, 4)
+    print(r)
+    print("\n")

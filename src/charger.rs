@@ -49,6 +49,7 @@ pub enum CType {
     Void,
     String,        // char* / const char*
     Pointer(Box<CType>),
+    Function(Vec<CType>, Box<CType>), // function pointer: fn(params) -> ret
     Struct(String), // named struct/class
     Opaque(String), // typedef / named but fields unknown
     Other(String),  // fallback: raw C type text
@@ -193,6 +194,14 @@ fn type_from_json(t: &serde_json::Value) -> CType {
 
 fn parse_c_type(qual: &str) -> CType {
     let q = qual.trim();
+    // Task #1: function pointer types such as `long long (*)(long long, long long)`
+    // or `int (*fn)(int, int)`. Parse into `CType::Function` so the Lime iface
+    // emits a `fn(...) -> ...` type (consumable as a C callback pointer).
+    if q.contains("(*") {
+        if let Some(ft) = parse_c_function_ptr(q) {
+            return ft;
+        }
+    }
     // normalize pointers
     if let Some(inner) = q.strip_suffix('*') {
         let inner = inner.trim();
@@ -218,6 +227,40 @@ fn parse_c_type(qual: &str) -> CType {
         s if s.starts_with("typedef ") => CType::Opaque(s["typedef ".len()..].to_string()),
         s => CType::Other(s.to_string()),
     }
+}
+
+/// Parse a C function-pointer type string into `CType::Function`.
+///
+/// Handles the common spellings emitted by clang's `qualType`:
+///   `long long (*)(long long, long long)`   (no name)
+///   `int (*fn)(int, int)`                    (named pointer)
+/// Returns `None` if the string is not a recognizable function-pointer type.
+fn parse_c_function_ptr(q: &str) -> Option<CType> {
+    // Locate the `(*` that marks a function pointer.
+    let star = q.find("(*")?;
+    // Return type is everything before the `(` that opens the `(*`.
+    let ret_part = q[..star].trim();
+    // Strip any trailing `*` (pointer-to-function-pointer) and whitespace.
+    let ret_part = ret_part.trim_end_matches('*').trim();
+    let ret = parse_c_type(ret_part);
+    // After `(*`, find the `)` that closes the pointer group, then the `(`
+    // that opens the parameter list, then its matching `)`.
+    let after_star = &q[star + 2..];
+    let ptr_close = after_star.find(')')?;
+    let rest = &after_star[ptr_close + 1..];
+    let params_open = rest.find('(')?;
+    let params_str = &rest[params_open + 1..];
+    let params_close = params_str.rfind(')')?;
+    let inner = &params_str[..params_close];
+    let mut params = Vec::new();
+    if !inner.trim().is_empty() {
+        for p in split_top_level(inner) {
+            let p = p.trim();
+            let ty_str = strip_param_name(p);
+            params.push(parse_c_type(ty_str.trim()));
+        }
+    }
+    Some(CType::Function(params, Box::new(ret)))
 }
 
 /// Mutable state threaded through AST normalization so we can associate
@@ -517,6 +560,7 @@ fn lime_type_name(t: &CType) -> String {
         CType::Void => "Unit".to_string(),
         CType::String => "String".to_string(),
         CType::Pointer(inner) => lime_type_name(inner), // simplify: treat as pointee
+        CType::Function(_, _) => "Callback".to_string(), // opaque C fn pointer, ABI = i8*
         CType::Struct(s) => s.clone(),
         CType::Opaque(s) => s.clone(),
         CType::Other(s) => s.clone(),

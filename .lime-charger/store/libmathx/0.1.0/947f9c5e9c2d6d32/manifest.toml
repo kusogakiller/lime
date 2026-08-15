@@ -4,7 +4,7 @@ source_origin = "bench_clang/charger/testlibs/libmathx"
 source_hash = "65394a4a8884b8ad"
 dependencies = []
 artifact = "libmathx.lib"
-artifact_hash = "8b45a7bffdb0f995"
+artifact_hash = "e282698f31bcbb86"
 symbols = [
     "add",
     "make_point",
