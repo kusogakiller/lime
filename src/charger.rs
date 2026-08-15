@@ -28,6 +28,7 @@
 
 use std::collections::HashMap;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -104,6 +105,13 @@ pub struct NormalizedApi {
     pub functions: Vec<CFunction>,
     pub structs: Vec<CStruct>,
     pub kind: ApiKind, // C or Cpp
+    // Real-world Phase A: the set of type names that are *record/handle* types
+    // (`sqlite3`, `sqlite3_stmt`, `sqlite3_blob`, … — i.e. `typedef struct X X;`
+    // or `class X`). These are surfaced to Lime as `Opaque(X)` handles (bare
+    // pointers). SCALAR typedefs (`sqlite3_int64`, `sqlite3_uint64`, …) are NOT
+    // in this set, so the adapter C-shim generator can render them as plain
+    // scalars (e.g. `sqlite3_int64`) instead of wrongly adding a `*`.
+    pub handle_types: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -160,11 +168,13 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
         functions: Vec::new(),
         structs: Vec::new(),
         kind: lang,
+        handle_types: BTreeSet::new(),
     };
     let mut ctx = NormalizeCtx {
         anon_struct: None,
         typedefs: Vec::new(),
         _pending_method_self: None,
+        handle_types: BTreeSet::new(),
     };
     if let Some(root) = ast.get("inner") {
         if let Some(arr) = root.as_array() {
@@ -309,7 +319,24 @@ fn parse_c_type(qual: &str) -> CType {
         // `CType::Pointer` mapping so no established behavior changes.
         match &pointee {
             CType::Void => return CType::Opaque("void".to_string()),
-            CType::Struct(name) | CType::Opaque(name) | CType::Other(name) => {
+            // Real-world Phase A: a *pointer to an opaque/named type* (`sqlite3 *`,
+            // `Widget *`, …) is a single-level handle and stays `Opaque(name)`
+            // (unchanged ABI / iface text). But a *pointer to a pointer* to an
+            // opaque type (`sqlite3 **`, `void **`) is the classic C out-param
+            // idiom: the callee writes the handle through the extra level of
+            // indirection. We must NOT collapse `sqlite3 **` into
+            // `Opaque(sqlite3)` — that loses the second level and makes the
+            // out-param indistinguishable from a plain handle.
+            //
+            // So a pointer whose pointee is already `Opaque(name)` is surfaced
+            // as `Pointer(Opaque(name))`, preserving the double indirection.
+            // `lime_type_name` renders both `Opaque(name)` and
+            // `Pointer(Opaque(name))` as `Opaque(name)`, so this does NOT change
+            // any existing single-pointer iface text. The out-param→return-value
+            // adapter (see `collect_out_param_adapters`) matches exactly
+            // `Pointer(Opaque(name))`.
+            CType::Opaque(name) => return CType::Pointer(Box::new(CType::Opaque(name.clone()))),
+            CType::Struct(name) | CType::Other(name) => {
                 return CType::Opaque(name.clone());
             }
             _ => {}
@@ -430,6 +457,9 @@ struct NormalizeCtx {
     anon_struct: Option<Vec<CParam>>,
     typedefs: Vec<(String, String)>,
     _pending_method_self: Option<String>,
+    // Real-world Phase A: type names that are record/handle types (surfaced
+    // to Lime as `Opaque(X)` handles). Distinguished from scalar typedefs.
+    handle_types: BTreeSet<String>,
 }
 
 fn classify_node(
@@ -809,6 +839,267 @@ fn lime_type_name(t: &CType) -> String {
 }
 
 // ----------------------------------------------------------------------------
+// Real-world Phase A: out-param → return-value adapter generation
+// ----------------------------------------------------------------------------
+//
+// Many real-world C APIs (SQLite is the canonical example) return resource
+// handles exclusively through *out-params* (`sqlite3 **`) because they have no
+// `sqlite3*` return value. Lime's `Opaque(name)` handle is a bare `ptr` and is
+// only ever received as a *return value* or a by-value parameter — it cannot
+// take the address of a local and hand it to C as an out-param. So Charger
+// bridges the missing information by generating a tiny C shim per out-param
+// function and re-spelling the Lime `extern fn` so the handle comes back as a
+// normal return value:
+//
+//   C:   int sqlite3_open(const char*, sqlite3**);
+//   shim (in the prepared native artifact):
+//     sqlite3* lime_out_sqlite3_open(const char* a0) {
+//         sqlite3* a1 = 0;
+//         sqlite3_open(a0, &a1);   // write handle through the out-param
+//         return a1;               // hand it back as a return value
+//     }
+//   Lime iface:
+//     extern fn sqlite3_open(String: a0) -> Opaque(sqlite3) "lime_out_sqlite3_open"
+//
+// No new Lime type or ABI is introduced: the shim is plain C reusing the
+// existing `Opaque` handle representation and the prepared native artifact. The
+// second bridge Charger provides here is the "null-callback" shim: a C function
+// whose trailing parameter is a `Callback` (function pointer) — e.g.
+// `sqlite3_exec` — is surfaced to Lime without that callback (and everything
+// after it), the shim passing `NULL` for the dropped arguments. Lime has no
+// null-pointer literal, so this is the only architecture-compliant way to call
+// such functions with a `NULL` callback/arg/errmsg.
+
+/// Detect a C out-param: a *pointer to a pointer* to an opaque/named type
+/// (`sqlite3 **`, `void **`), normalized to `CType::Pointer(Box::new(
+/// CType::Opaque(name)))`. A single-level handle (`sqlite3 *` →
+/// `CType::Opaque(name)`) is NOT an out-param.
+///
+/// Returns `Some(name)` (the opaque handle type name) when `t` is an out-param.
+fn is_out_param(t: &CType) -> Option<String> {
+    if let CType::Pointer(inner) = t {
+        if let CType::Opaque(name) = inner.as_ref() {
+            return Some(name.clone());
+        }
+    }
+    None
+}
+
+/// Render a `CType` as the C type text needed to declare a shim's parameters /
+/// locals. Opaque/Struct/Other named types are pointers in the C ABI
+/// (`sqlite3*`); each `Pointer` adds one more level of indirection.
+fn c_type_text(t: &CType) -> String {
+    match t {
+        CType::Int | CType::Long => "int".to_string(),
+        CType::Float => "float".to_string(),
+        CType::Double => "double".to_string(),
+        CType::Bool => "int".to_string(),
+        CType::Void => "void".to_string(),
+        // `CType::String` is the scalar `char`; a C string `char*` is modeled as
+        // `Pointer(String)` (an extra indirection), so render the base as `char`.
+        CType::String => "char".to_string(),
+        CType::Pointer(inner) => format!("{}*", c_type_text(inner)),
+        CType::Function(params, ret) => {
+            let ps: Vec<String> = params.iter().map(|p| c_type_text(p)).collect();
+            format!("{} (*)({})", c_type_text(ret), ps.join(", "))
+        }
+        CType::Struct(s) | CType::Opaque(s) => format!("{}*", s),
+        // `CType::Other(s)` is an unmodeled type spelling (e.g. a typedef'd
+        // scalar like `sqlite3_int64`, or a forward-declared record). Emit it
+        // verbatim — do NOT append `*` — because we cannot tell from the spelling
+        // alone whether it is a pointer; the parser already attached a
+        // `CType::Pointer` wrapper when one was present. Appending `*` here would
+        // wrongly turn `sqlite3_int64` into `sqlite3_int64*` and break adapter C.
+        CType::Other(s) => s.clone(),
+    }
+}
+
+/// A Charger-generated C shim that bridges a C idiom Lime cannot express
+/// directly: an out-param (handle returned through `**`, surfaced as a return
+/// value) and/or a trailing `NULL` callback (and the args after it).
+struct AdapterSpec {
+    lime_name: String,  // Lime-facing fn name (e.g. "sqlite3_open")
+    symbol: String,     // shim symbol (e.g. "lime_out_sqlite3_open")
+    real_symbol: String, // real C symbol (e.g. "sqlite3_open")
+    ret_name: Option<String>, // opaque handle type name when this is an out-param
+    ret: CType,         // real C return type (used when not an out-param)
+    params: Vec<CParam>, // original C params (for shim body)
+    out_idx: Option<usize>, // index of the out-param, if any
+    drop_from: Option<usize>, // drop this param and everything after (NULL callback)
+}
+
+/// Inspect the normalized API and emit an [`AdapterSpec`] for every function
+/// that needs a bridge: a function with an out-param (`Pointer(Opaque)`) and/or
+/// a trailing `Callback` parameter. Functions needing no bridge are skipped.
+fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
+    let mut out = Vec::new();
+    for f in &api.functions {
+        let out_idx = f.params.iter().position(|p| is_out_param(&p.ty).is_some());
+        // A `Callback` (CType::Function) trailing parameter is the common
+        // "optional callback + user data + errmsg" idiom; drop it and the
+        // params after it, passing NULL.
+        let drop_from = f.params.iter().position(|p| matches!(p.ty, CType::Function(_, _)));
+        if out_idx.is_none() && drop_from.is_none() {
+            continue;
+        }
+        let ret_name = out_idx.map(|i| is_out_param(&f.params[i].ty).unwrap());
+        out.push(AdapterSpec {
+            lime_name: sanitize_name(&f.name),
+            symbol: format!("lime_out_{}", sanitize_name(&f.name)),
+            real_symbol: f.symbol.clone(),
+            ret_name,
+            ret: f.ret.clone(),
+            params: f.params.clone(),
+            out_idx,
+            drop_from,
+        });
+    }
+    out
+}
+
+/// Generate the C source for every adapter shim. `header_name` is the library
+/// header to `#include` (e.g. "sqlite3.h") so the shim sees the real types.
+fn gen_adapter_c_source(adapters: &[AdapterSpec], header_name: &str) -> String {
+    let mut s = String::new();
+    s.push_str("/* Charger-generated adapter shims (out-param + null-callback). DO NOT EDIT. */\n");
+    s.push_str("#include <stddef.h>\n#include <stdlib.h>\n");
+    s.push_str(&format!("#include \"{}\"\n", header_name));
+    for a in adapters {
+        // Indices dropped from the Lime-facing signature.
+        let mut drop: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        if let Some(oi) = a.out_idx {
+            drop.insert(oi);
+        }
+        if let Some(df) = a.drop_from {
+            for i in df..a.params.len() {
+                drop.insert(i);
+            }
+        }
+        // Lime-facing parameter declarations (kept params only).
+        let mut decls: Vec<String> = Vec::new();
+        for (i, p) in a.params.iter().enumerate() {
+            if drop.contains(&i) {
+                continue;
+            }
+            decls.push(format!("{} a{}", c_type_text(&p.ty), i));
+        }
+        // Return type (C).
+        let ret_c = if let Some(name) = &a.ret_name {
+            format!("{}*", name) // out-param: return the handle pointer
+        } else {
+            c_type_text(&a.ret)
+        };
+        // Real call arguments.
+        let mut call_args: Vec<String> = Vec::new();
+        for (i, _p) in a.params.iter().enumerate() {
+            if Some(i) == a.out_idx {
+                call_args.push(format!("&a{}", i)); // write handle here
+            } else if drop.contains(&i) {
+                call_args.push("0".to_string()); // NULL
+            } else {
+                call_args.push(format!("a{}", i));
+            }
+        }
+        if let Some(oi) = a.out_idx {
+            // The local holding the handle is the pointee of the out-param.
+            let local_ty = if let CType::Pointer(inner) = &a.params[oi].ty {
+                c_type_text(inner)
+            } else {
+                format!("{}*", a.ret_name.as_deref().unwrap_or("void"))
+            };
+            s.push_str(&format!(
+                "{} {} ({}) {{\n    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
+                ret_c,
+                a.symbol,
+                decls.join(", "),
+                local_ty,
+                oi,
+                a.real_symbol,
+                call_args.join(", "),
+                oi
+            ));
+        } else {
+            s.push_str(&format!(
+                "{} {} ({}) {{\n    return {}({});\n}}\n\n",
+                ret_c,
+                a.symbol,
+                decls.join(", "),
+                a.real_symbol,
+                call_args.join(", ")
+            ));
+        }
+    }
+    s
+}
+
+/// Compile the adapter shims and insert them into the prepared native artifact
+/// (`art_path`). The shim `.c` is compiled with the same toolchain/flags and
+/// `#include`s the library header (found via `header`'s directory).
+fn build_adapters_into(
+    adapters: &[AdapterSpec],
+    art_path: &Path,
+    header: &Path,
+    llvm_bindir: &str,
+    lang: ApiKind,
+) -> Result<(), String> {
+    if adapters.is_empty() {
+        return Ok(());
+    }
+    let header_name = header
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let src = gen_adapter_c_source(adapters, &header_name);
+    let build_dir = std::env::temp_dir().join("charger_build_adapters");
+    let _ = std::fs::create_dir_all(&build_dir);
+    let c_path = build_dir.join("lime_adapters.c");
+    std::fs::write(&c_path, src).map_err(|e| format!("adapter gen failed: {}", e))?;
+    let obj_path = build_dir.join("lime_adapters.obj");
+    let clang = if lang == ApiKind::Cpp {
+        PathBuf::from(llvm_bindir).join("clang++.exe")
+    } else {
+        PathBuf::from(llvm_bindir).join("clang.exe")
+    };
+    let clang = if clang.exists() {
+        clang
+    } else {
+        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp { "clang++" } else { "clang" })
+    };
+    let mut cmd = Command::new(&clang);
+    cmd.arg("-O2").arg("-c");
+    if lang == ApiKind::Cpp {
+        cmd.arg("-std=c++17");
+    }
+    if let Some(dir) = header.parent() {
+        cmd.arg("-I").arg(dir);
+    }
+    cmd.arg(&c_path).arg("-o").arg(&obj_path);
+    let status = cmd
+        .status()
+        .map_err(|e| format!("adapter build failed: {} launch error: {}", clang.display(), e))?;
+    if !status.success() {
+        return Err(format!("adapter build failed: {} exited with {}", clang.display(), status));
+    }
+    let ar = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
+    let ar = if ar.exists() {
+        ar
+    } else {
+        PathBuf::from(llvm_bindir).join("llvm-ar")
+    };
+    let ar_status = Command::new(&ar)
+        .arg("r")
+        .arg(art_path)
+        .arg(&obj_path)
+        .status()
+        .map_err(|e| format!("adapter archive failed: {}", e))?;
+    if !ar_status.success() {
+        return Err("adapter archive failed".to_string());
+    }
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
 // Lime interface generation
 // ----------------------------------------------------------------------------
 
@@ -816,7 +1107,7 @@ fn lime_type_name(t: &CType) -> String {
 /// `extern` Lime declaration. Structs become Lime `struct` definitions whose
 /// field layout matches the C/C++ layout (field order/names/types only; the
 /// ABI metadata records size/align for verification).
-fn generate_lime_iface(api: &NormalizedApi, lib_name: &str) -> String {
+fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterSpec]) -> String {
     let mut out = String::new();
     out.push_str(&format!("// Charger-generated Lime interface for '{}'\n", lib_name));
     out.push_str("// DO NOT EDIT: regenerate with `charger install`.\n\n");
@@ -872,16 +1163,13 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str) -> String {
     }
 
     // Functions / methods.
+    let adapter_map: std::collections::HashMap<String, &AdapterSpec> =
+        adapters.iter().map(|a| (a.lime_name.clone(), a)).collect();
     for f in &api.functions {
         let ret_lime = lime_type_name(&f.ret);
         let params_lime: Vec<String> = f
             .params
             .iter()
-            // `extern fn` parameters are spelled TYPE-FIRST (`Int: a0`), matching
-            // Lime's `parse_extern_fn` grammar. Emitting `a0: Int` (the pre-#2
-            // order) made the parser read `a0` as the type and `Int` as the name
-            // — harmless for bare scalars, but a hard parse error for a
-            // parameterized type such as `Opaque(Counter)`.
             .map(|p| format!("{}: {}", lime_type_name(&p.ty), p.name))
             .collect();
         // Symbol literal: the linkable name (mangled for C++).
@@ -905,6 +1193,39 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str) -> String {
                 params_lime.join(", "),
                 ret_lime,
                 f.symbol
+            ));
+        } else if let Some(ad) = adapter_map.get(&sanitize_name(&f.name)) {
+            // Real-world Phase A: re-spell the Lime `extern fn` through a
+            // Charger shim. The out-param (if any) becomes the return value;
+            // dropped parameters (trailing NULL callback + its args) are
+            // omitted from the Lime signature.
+            let mut drop: std::collections::HashSet<usize> = std::collections::HashSet::new();
+            if let Some(oi) = ad.out_idx {
+                drop.insert(oi);
+            }
+            if let Some(df) = ad.drop_from {
+                for i in df..f.params.len() {
+                    drop.insert(i);
+                }
+            }
+            let params_lime: Vec<String> = f
+                .params
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !drop.contains(i))
+                .map(|(_, p)| format!("{}: {}", lime_type_name(&p.ty), p.name))
+                .collect();
+            let ret_lime = if ad.ret_name.is_some() {
+                format!("Opaque({})", ad.ret_name.as_ref().unwrap())
+            } else {
+                ret_lime.clone()
+            };
+            out.push_str(&format!(
+                "extern fn {}({}) -> {} \"{}\"\n",
+                ad.lime_name,
+                params_lime.join(", "),
+                ret_lime,
+                ad.symbol
             ));
         } else {
             out.push_str(&format!(
@@ -1023,15 +1344,34 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
 
     // Deterministic store key + cache inputs (cheap; no native build yet).
     let abi = detect_abi(llvm_bindir, lang);
-    let build_flags = if lang == ApiKind::Cpp {
+    let mut build_flags = if lang == ApiKind::Cpp {
         vec!["-O2".to_string(), "-std=c++17".to_string()]
     } else {
         vec!["-O2".to_string()]
     };
+    // SQLite amalgamation declares optional features (unlock-notify, snapshot,
+    // rtree) in the header but only compiles them when the matching SQLITE_ENABLE_*
+    // macro is set; otherwise the symbols are declared-but-undefined and the link
+    // step fails. Enable the commonly-declared optional features so the prepared
+    // artifact is self-contained. This is a SQLite-specific build flag, not a
+    // general ABI change.
+    if lib_name == "sqlite" {
+        build_flags.push("-DSQLITE_ENABLE_UNLOCK_NOTIFY".to_string());
+        build_flags.push("-DSQLITE_ENABLE_SNAPSHOT".to_string());
+        build_flags.push("-DSQLITE_ENABLE_RTREE".to_string());
+    }
     let tool_hash = toolchain_hash(&abi, &build_flags);
     let version = "0.1.0".to_string();
     let entry = store_root().join(&lib_name).join(&version).join(&tool_hash);
     let src_hash = hash_path(&src_path);
+
+    // AST analysis (cheap, no native build): derive the API surface AND the
+    // out-param / null-callback adapter shims before any native build. The
+    // normalized API is needed both for the cache-hit path (to (re)generate the
+    // iface + shims) and the full build path.
+    let ast = extract_ast_json(&header, lang, llvm_bindir)?;
+    let api = normalize(&ast, lang);
+    let adapters = collect_out_param_adapters(&api);
 
     // #8: artifact cache. If a store entry already exists whose manifest's
     // source_hash matches the current source_hash, the native artifact is
@@ -1039,16 +1379,31 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // is a true cache hit. Only a *changed* source (different source_hash)
     // triggers a rebuild (invalidation).
     if entry.exists() {
-        if let Some(m) = load_manifest(&entry) {
+        if let Some(mut m) = load_manifest(&entry) {
             if m.source_hash == src_hash {
                 println!(
                     "charger: cache hit for '{}' (hash={}), reusing artifact",
                     lib_name, src_hash
                 );
-                // Reuse the existing artifact; still derive the API surface
-                // (cheap AST analysis) so the result is complete.
-                let ast = extract_ast_json(&header, lang, llvm_bindir)?;
-                let api = normalize(&ast, lang);
+                // Even on a cache hit we must ensure the shim symbols live in
+                // the reused artifact (a stale artifact built by an older
+                // Charger lacks them) and (re)generate the iface with adapters.
+                let art_dest = entry.join(&m.artifact);
+                build_adapters_into(&adapters, &art_dest, &header, llvm_bindir, lang)?;
+                let iface = generate_lime_iface(&api, &lib_name, &adapters);
+                std::fs::write(entry.join("lime-iface.lime"), &iface)
+                    .map_err(|e| format!("Lime interface generation failed: {}", e))?;
+                // Persist the shim symbols so `lime build` can resolve the
+                // artifact when the Lime program references them.
+                for a in &adapters {
+                    if !m.symbols.contains(&a.symbol) {
+                        m.symbols.push(a.symbol.clone());
+                    }
+                }
+                let manifest_toml = toml::to_string_pretty(&m)
+                    .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;
+                std::fs::write(entry.join("manifest.toml"), manifest_toml)
+                    .map_err(|e| format!("artifact store failed: {}", e))?;
                 return Ok(InstallResult {
                     lib_name,
                     store_path: entry,
@@ -1114,16 +1469,19 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         return Err("native build failed: llvm-ar exited with error".to_string());
     }
 
-    // 2. AST extraction + normalization.
-    let ast = extract_ast_json(&header, lang, llvm_bindir)?;
-    let mut api = normalize(&ast, lang);
+    // 2b. Build out-param / null-callback adapter shims and insert them into
+    // the prepared native artifact (so the Lime `extern fn` shim symbols
+    // resolve at link time).
+    build_adapters_into(&adapters, &art_path, &header, llvm_bindir, lang)?;
+
+    // 2. AST extraction + normalization (already performed earlier; reuse it).
 
     // For C++ methods, ensure the receiver struct is recorded even if only
     // declared inline. (Vertical slice: structs come from RecordDecl.)
     // (No extra work needed for the slice; struct fields already captured.)
 
-    // 3. Lime interface generation.
-    let iface = generate_lime_iface(&api, &lib_name);
+    // 3. Lime interface generation (with out-param / null-callback adapters).
+    let iface = generate_lime_iface(&api, &lib_name, &adapters);
 
     // 5. Store. (abi / build_flags / tool_hash / version / entry were computed
     // earlier, before the cache-hit check, and are reused here.)
@@ -1143,7 +1501,14 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
 
     let art_hash = hash_file(&art_dest);
 
-    let symbols: Vec<String> = api.functions.iter().map(|f| f.symbol.clone()).collect();
+    let mut symbols: Vec<String> = api.functions.iter().map(|f| f.symbol.clone()).collect();
+    // Real-world Phase A: also record the adapter shim symbols so `lime build`
+    // can resolve the prepared artifact when the Lime program references them.
+    for a in &adapters {
+        if !symbols.contains(&a.symbol) {
+            symbols.push(a.symbol.clone());
+        }
+    }
 
     // Task #5: derive C++ inheritance / virtual-dispatch metadata from the
     // normalized API and persist it in the manifest (auditable evidence that

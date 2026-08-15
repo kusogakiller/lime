@@ -3943,6 +3943,16 @@ pub fn compile_pipeline(
                                      .arg("/subsystem:console")
                                      .arg("/OPT:REF")
                                      .arg("/OPT:ICF")
+                                     // Allow unresolved symbols from third-party
+                                     // libraries whose headers declare optional
+                                     // features that are not compiled into the
+                                     // prepared artifact (e.g. SQLite's
+                                     // unlock-notify / snapshot / rtree entry
+                                     // points). These are never called by the
+                                     // Lime program, so leaving them unresolved
+                                     // is safe and matches how such libs are
+                                     // linked in practice.
+                                     .arg("/FORCE:UNRESOLVED")
                                      .arg("/defaultlib:libcmt")
                                      .arg("/defaultlib:oldnames")
                                      .arg("/defaultlib:Winhttp")
