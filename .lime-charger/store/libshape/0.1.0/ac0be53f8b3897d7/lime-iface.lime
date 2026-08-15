@@ -1,0 +1,37 @@
+// Charger-generated Lime interface for 'libshape'
+// DO NOT EDIT: regenerate with `charger install`.
+
+// C++ Shape: bases=[] vtable=true
+struct Shape {
+}
+
+// C++ Circle: bases=[Shape] vtable=true
+struct Circle {
+}
+
+extern fn shape_area(Shape: self) -> Int "?area@Shape@@UEBA_JXZ"
+extern fn Shape____Shape() -> Unit "??_DShape@@QEAAXXZ"
+extern fn shape_operator=(Shape: self, const Shape &: a0) -> Shape & "??4Shape@@QEAAAEAV0@AEBV0@@Z"
+extern fn shape_new(const Shape &: a0) -> Shape "??0Shape@@QEAA@AEBV0@@Z"
+extern fn circle_new(Int: a0) -> Circle "??0Circle@@QEAA@_J@Z"
+extern fn circle_area(Circle: self) -> Int "?area@Circle@@UEBA_JXZ"
+extern fn circle_new(const Circle &: a0) -> Circle "??0Circle@@QEAA@AEBV0@@Z"
+extern fn circle_new(Circle &&: a0) -> Circle "??0Circle@@QEAA@$$QEAV0@@Z"
+extern fn circle_operator=(Circle: self, const Circle &: a0) -> Circle & "??4Circle@@QEAAAEAV0@AEBV0@@Z"
+extern fn circle_operator=(Circle: self, Circle &&: a0) -> Circle & "??4Circle@@QEAAAEAV0@$$QEAV0@@Z"
+extern fn Circle____Circle() -> Unit "??_DCircle@@QEAAXXZ"
+extern fn operator new(__size_t: a0) -> Opaque(void) "??2@YAPEAX_K@Z"
+extern fn operator new(__size_t: a0, std::align_val_t: a1) -> Opaque(void) "??2@YAPEAX_KW4align_val_t@std@@@Z"
+extern fn operator new[](__size_t: a0) -> Opaque(void) "??_U@YAPEAX_K@Z"
+extern fn operator new[](__size_t: a0, std::align_val_t: a1) -> Opaque(void) "??_U@YAPEAX_KW4align_val_t@std@@@Z"
+extern fn operator delete(Opaque(void): a0) -> Unit "??3@YAXPEAX@Z"
+extern fn operator delete(Opaque(void): a0, std::align_val_t: a1) -> Unit "??3@YAXPEAXW4align_val_t@std@@@Z"
+extern fn operator delete(Opaque(void): a0, __size_t: a1) -> Unit "??3@YAXPEAX_K@Z"
+extern fn operator delete(Opaque(void): a0, __size_t: a1, std::align_val_t: a2) -> Unit "??3@YAXPEAX_KW4align_val_t@std@@@Z"
+extern fn operator delete[](Opaque(void): a0) -> Unit "??_V@YAXPEAX@Z"
+extern fn operator delete[](Opaque(void): a0, std::align_val_t: a1) -> Unit "??_V@YAXPEAXW4align_val_t@std@@@Z"
+extern fn operator delete[](Opaque(void): a0, __size_t: a1) -> Unit "??_V@YAXPEAX_K@Z"
+extern fn operator delete[](Opaque(void): a0, __size_t: a1, std::align_val_t: a2) -> Unit "??_V@YAXPEAX_KW4align_val_t@std@@@Z"
+extern fn make_circle(Int: a0) -> Opaque(Shape) "?make_circle@@YAPEAVShape@@_J@Z"
+extern fn shape_area(Opaque(Shape): a0) -> Int "?shape_area@@YA_JPEAVShape@@@Z"
+extern fn shape_free(Opaque(Shape): a0) -> Unit "?shape_free@@YAXPEAVShape@@@Z"

@@ -27,6 +27,7 @@
 //   * The same store entry is never rebuilt for identical inputs.
 
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -72,6 +73,9 @@ pub struct CFunction {
     pub is_constructor: bool,
     pub is_const: bool,
     pub self_ty: Option<String>, // for methods: the class name
+    // C++ specifics (Task #5: inheritance / virtual dispatch metadata):
+    pub is_virtual: bool,   // declared `virtual` (or inherited virtual method)
+    pub is_destructor: bool, // is a destructor (CXXDestructorDecl)
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +183,38 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
                         is_class: false,
                     });
                 }
+            }
+        }
+    }
+    // Task #5: resolve `has_vtable` for every C++ class. A class owns a vtable
+    // if (a) it declares a `virtual` method, or (b) any of its base classes
+    // owns a vtable. clang only tags the *introducing* virtual declaration, so
+    // derived classes that merely override (e.g. `Circle::area`) need the base
+    // information propagated. Iterate to a fixpoint for deep hierarchies.
+    loop {
+        let to_mark: Vec<String> = api
+            .structs
+            .iter()
+            .filter(|s| !s.has_vtable)
+            .filter(|s| {
+                let direct = api.functions.iter().any(|f| {
+                    f.self_ty.as_deref() == Some(&s.name) && f.is_virtual
+                });
+                let via_base = s.base_classes.iter().any(|b| {
+                    api.structs
+                        .iter()
+                        .any(|o| &o.name == b && o.has_vtable)
+                });
+                direct || via_base
+            })
+            .map(|s| s.name.clone())
+            .collect();
+        if to_mark.is_empty() {
+            break;
+        }
+        for name in &to_mark {
+            if let Some(s) = api.structs.iter_mut().find(|s| &s.name == name) {
+                s.has_vtable = true;
             }
         }
     }
@@ -354,12 +390,36 @@ fn classify_node(
                 return;
             }
             if !api.structs.iter().any(|s| s.name == name) {
+                // Extract C++ base classes (Task #5). Each entry in the AST
+                // `bases` array carries `type.qualType` (e.g. "Shape" or
+                // "class Shape"). Strip the leading `class `/`struct ` prefix to
+                // recover the bare class name recorded in `base_classes`.
+                let mut base_classes = Vec::new();
+                if let Some(bases) = node.get("bases").and_then(|v| v.as_array()) {
+                    for b in bases {
+                        let q = b
+                            .get("type")
+                            .and_then(|t| t.get("qualType"))
+                            .and_then(|v| v.as_str())
+                            .or_else(|| b.get("qualType").and_then(|v| v.as_str()))
+                            .unwrap_or("");
+                        let nm = q
+                            .trim()
+                            .trim_start_matches("class ")
+                            .trim_start_matches("struct ")
+                            .trim()
+                            .to_string();
+                        if !nm.is_empty() && !base_classes.contains(&nm) {
+                            base_classes.push(nm);
+                        }
+                    }
+                }
                 api.structs.push(CStruct {
                     name: name.clone(),
                     fields: Vec::new(),
                     size_bytes: None,
                     align_bytes: None,
-                    base_classes: Vec::new(),
+                    base_classes,
                     has_vtable: false,
                     is_class: true,
                 });
@@ -403,6 +463,8 @@ fn classify_node(
                 is_constructor: false,
                 is_const: false,
                 self_ty: None,
+                is_virtual: false,
+                is_destructor: false,
             });
         }
         "CXXMethodDecl" | "CXXConstructorDecl" | "CXXDestructorDecl" => {
@@ -416,6 +478,19 @@ fn classify_node(
             let is_ctor = kind == "CXXConstructorDecl";
             let is_dtor = kind == "CXXDestructorDecl";
             let is_const = node.get("const").and_then(|v| v.as_bool()).unwrap_or(false);
+            // Task #5: a method declared `virtual` (or whose base declares it
+            // virtual) participates in the class vtable. clang tags the
+            // *introducing* declaration with `virtual: true`; overrides keep it
+            // `null`, which we treat as false here and recover via base-class
+            // propagation in `normalize`.
+            let is_virtual = node
+                .get("virtual")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                || node
+                    .get("isVirtual")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
             let symbol = node
                 .get("mangledName")
                 .and_then(|v| v.as_str())
@@ -449,6 +524,8 @@ fn classify_node(
                 is_constructor: is_ctor,
                 is_const,
                 self_ty: self_ty.clone(),
+                is_virtual,
+                is_destructor: is_dtor,
             });
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
@@ -602,6 +679,19 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str) -> String {
 
     // Structs first (Lime requires types to be visible before use).
     for s in &api.structs {
+        // Task #5: surface inheritance / vtable metadata as Lime comments so a
+        // human (and the audit) can see what Charger learned from the AST. The
+        // Lime side still treats these as opaque handles — the comments are
+        // advisory only and do not change codegen (Architecture Gate: Opaque
+        // representation unchanged).
+        if !s.base_classes.is_empty() || s.has_vtable {
+            out.push_str(&format!(
+                "// C++ {}: bases=[{}] vtable={}\n",
+                s.name,
+                s.base_classes.join(", "),
+                s.has_vtable
+            ));
+        }
         if s.fields.is_empty() {
             // opaque / empty: emit as a unit-ish placeholder struct so the
             // type name resolves. (Future: ABI metadata drives real layout.)
@@ -716,6 +806,13 @@ pub struct Manifest {
     pub artifact_hash: String,
     pub abi: AbiMeta,
     pub symbols: Vec<String>, // linkable symbols this artifact provides
+    // Task #5: C++ inheritance / virtual-dispatch metadata, persisted so the
+    // audit and downstream tooling can confirm Charger extracted it. Derived
+    // from the NormalizedApi (CIR lite) computed during `charger install`.
+    pub cpp_inheritance: BTreeMap<String, Vec<String>>, // class -> base classes
+    pub cpp_vtable_classes: Vec<String>,                // classes that own a vtable
+    pub cpp_virtual_symbols: Vec<String>,               // mangled symbols of virtual methods
+    pub cpp_destructor_symbols: Vec<String>,            // mangled symbols of destructors
 }
 
 // ----------------------------------------------------------------------------
@@ -842,6 +939,35 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
 
     let symbols: Vec<String> = api.functions.iter().map(|f| f.symbol.clone()).collect();
 
+    // Task #5: derive C++ inheritance / virtual-dispatch metadata from the
+    // normalized API and persist it in the manifest (auditable evidence that
+    // Charger's AST extraction captured base classes, vtables, virtual methods,
+    // and destructors).
+    let mut cpp_inheritance: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for s in &api.structs {
+        if !s.base_classes.is_empty() {
+            cpp_inheritance.insert(s.name.clone(), s.base_classes.clone());
+        }
+    }
+    let cpp_vtable_classes: Vec<String> = api
+        .structs
+        .iter()
+        .filter(|s| s.has_vtable)
+        .map(|s| s.name.clone())
+        .collect();
+    let cpp_virtual_symbols: Vec<String> = api
+        .functions
+        .iter()
+        .filter(|f| f.is_virtual)
+        .map(|f| f.symbol.clone())
+        .collect();
+    let cpp_destructor_symbols: Vec<String> = api
+        .functions
+        .iter()
+        .filter(|f| f.is_destructor)
+        .map(|f| f.symbol.clone())
+        .collect();
+
     let manifest = Manifest {
         library: lib_name.clone(),
         version: version.clone(),
@@ -852,6 +978,10 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         artifact_hash: art_hash,
         abi,
         symbols: symbols.clone(),
+        cpp_inheritance,
+        cpp_vtable_classes,
+        cpp_virtual_symbols,
+        cpp_destructor_symbols,
     };
     let manifest_toml = toml::to_string_pretty(&manifest)
         .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;
