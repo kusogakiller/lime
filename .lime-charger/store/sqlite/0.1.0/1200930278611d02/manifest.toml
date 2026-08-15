@@ -356,9 +356,6 @@ symbols = [
     "lime_out_sqlite3_rtree_geometry_callback",
     "lime_out_sqlite3_rtree_query_callback",
 ]
-cpp_vtable_classes = []
-cpp_virtual_symbols = []
-cpp_destructor_symbols = []
 
 [abi]
 os = "windows"
@@ -368,7 +365,3 @@ compiler_version = "clang version 22.1.8 (https://github.com/llvm/llvm-project c
 cxx_abi = "C"
 cxx_stdlib = "-"
 build_flags = []
-
-[cpp_inheritance]
-
-[cpp_template_instantiations]

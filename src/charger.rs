@@ -27,7 +27,6 @@
 //   * The same store entry is never rebuilt for identical inputs.
 
 use std::collections::HashMap;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -74,9 +73,6 @@ pub struct CFunction {
     pub is_constructor: bool,
     pub is_const: bool,
     pub self_ty: Option<String>, // for methods: the class name
-    // C++ specifics (Task #5: inheritance / virtual dispatch metadata):
-    pub is_virtual: bool,   // declared `virtual` (or inherited virtual method)
-    pub is_destructor: bool, // is a destructor (CXXDestructorDecl)
 }
 
 #[derive(Debug, Clone)]
@@ -85,19 +81,6 @@ pub struct CStruct {
     pub fields: Vec<CParam>, // (field_name, type)
     pub size_bytes: Option<u64>,
     pub align_bytes: Option<u64>,
-    // C++ specifics reserved for future implementation:
-    pub base_classes: Vec<String>,
-    pub has_vtable: bool,
-    pub is_class: bool,
-    // Task #6: C++ template instantiation metadata. When this struct is a
-    // concrete template instantiation (e.g. `Stack<long long>`), `name` holds
-    // the normalized Lime-legal identifier (`Stack_long_long`) and the original
-    // template arguments are recorded here. `is_template_instantiation` is true
-    // only for such nodes. Advisory only — does not change Lime codegen
-    // (Architecture Gate: Opaque representation unchanged; the instantiation is
-    // surfaced to Lime as an `Opaque(Stack_long_long)` handle).
-    pub template_args: Vec<String>,
-    pub is_template_instantiation: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -197,88 +180,11 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
                         fields: fields.clone(),
                         size_bytes: None,
                         align_bytes: None,
-                        base_classes: Vec::new(),
-                        has_vtable: false,
-                        is_class: false,
-                        template_args: Vec::new(),
-                        is_template_instantiation: false,
                     });
                 }
             }
         }
     }
-    // Task #5: resolve `has_vtable` for every C++ class. A class owns a vtable
-    // if (a) it declares a `virtual` method, or (b) any of its base classes
-    // owns a vtable. clang only tags the *introducing* virtual declaration, so
-    // derived classes that merely override (e.g. `Circle::area`) need the base
-    // information propagated. Iterate to a fixpoint for deep hierarchies.
-    loop {
-        let to_mark: Vec<String> = api
-            .structs
-            .iter()
-            .filter(|s| !s.has_vtable)
-            .filter(|s| {
-                let direct = api.functions.iter().any(|f| {
-                    f.self_ty.as_deref() == Some(&s.name) && f.is_virtual
-                });
-                let via_base = s.base_classes.iter().any(|b| {
-                    api.structs
-                        .iter()
-                        .any(|o| &o.name == b && o.has_vtable)
-                });
-                direct || via_base
-            })
-            .map(|s| s.name.clone())
-            .collect();
-        if to_mark.is_empty() {
-            break;
-        }
-        for name in &to_mark {
-            if let Some(s) = api.structs.iter_mut().find(|s| &s.name == name) {
-                s.has_vtable = true;
-            }
-        }
-    }
-
-    // Task #6: derive template instantiation metadata from the function
-    // signatures. A concrete instantiation referenced only as a pointer in the
-    // header (e.g. `Stack<long long>*`) may not appear as its own CXXRecordDecl
-    // in the AST (the header does not force instantiation), but its
-    // `Opaque("Stack<long long>")` type is present on every function that uses
-    // it. Capture those here so the template_args metadata is persisted even
-    // when the CXXRecordDecl branch above never sees the instantiation node.
-    let mut tmpl_names: Vec<String> = Vec::new();
-    for f in &api.functions {
-        let mut consider = |t: &CType| {
-            if let CType::Opaque(n) = t {
-                if n.contains('<') && !tmpl_names.contains(n) {
-                    tmpl_names.push(n.clone());
-                }
-            }
-        };
-        consider(&f.ret);
-        for p in &f.params {
-            consider(&p.ty);
-        }
-    }
-    for raw in tmpl_names {
-        let norm = normalize_template_name(&raw);
-        if api.structs.iter().any(|s| s.name == norm) {
-            continue;
-        }
-        api.structs.push(CStruct {
-            name: norm,
-            fields: Vec::new(),
-            size_bytes: None,
-            align_bytes: None,
-            base_classes: Vec::new(),
-            has_vtable: false,
-            is_class: true,
-            template_args: parse_template_args(&raw).unwrap_or_default(),
-            is_template_instantiation: true,
-        });
-    }
-
     api
 }
 
@@ -395,61 +301,6 @@ fn parse_c_function_ptr(q: &str) -> Option<CType> {
     Some(CType::Function(params, Box::new(ret)))
 }
 
-/// Normalize a C++ template *type spelling* into a Lime-legal identifier
-/// fragment. The characters `<`, `>`, `,` and ` ` are mapped to `_`, runs of
-/// which are collapsed to a single `_`, and leading/trailing `_` are trimmed.
-///
-/// Examples:
-///   `Stack<long long>` -> `Stack_long_long`
-///   `std::vector<int>` -> `std_vector_int`
-///
-/// This is required because Lime's `Opaque(...)` type only accepts a bare
-/// identifier (see `parse_type` in lib.rs); a raw `Opaque(Stack<long long>)`
-/// would be a parse error (`<` is a separator token). Charger therefore keeps
-/// the Lime type name as `Opaque(Stack_long_long)` and records the original
-/// template spelling + arguments in the CIR lite / manifest for auditability.
-fn normalize_template_name(name: &str) -> String {
-    if !name.contains('<') {
-        return name.to_string();
-    }
-    let mut out = String::new();
-    let mut prev_underscore = false;
-    for c in name.chars() {
-        if c == '<' || c == '>' || c == ',' || c == ' ' {
-            if !prev_underscore {
-                out.push('_');
-                prev_underscore = true;
-            }
-        } else {
-            out.push(c);
-            prev_underscore = false;
-        }
-    }
-    out.trim_matches('_').to_string()
-}
-
-/// Extract the template arguments from a C++ template type spelling such as
-/// `Stack<long long>` -> `vec!["long long"]`. Returns `None` if `name` is not
-/// a (syntactically recognizable) template instantiation.
-fn parse_template_args(name: &str) -> Option<Vec<String>> {
-    let open = name.find('<')?;
-    let close = name.rfind('>')?;
-    if close <= open {
-        return None;
-    }
-    let inner = &name[open + 1..close];
-    let args: Vec<String> = split_top_level(inner)
-        .iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if args.is_empty() {
-        None
-    } else {
-        Some(args)
-    }
-}
-
 /// Mutable state threaded through AST normalization
 /// anonymous record bodies with the typedef names that name them, and track
 /// the enclosing class for inline methods.
@@ -488,109 +339,16 @@ fn classify_node(
                 }
             }
             if !name.is_empty() && !is_implicit {
-                let is_class = node.get("tagUsed").and_then(|v| v.as_str()) == Some("class");
-                // Task #6: a record whose name is itself a template
-                // instantiation (e.g. `Stack<long long>`) — record the template
-                // arguments and normalize the struct name to a Lime-legal
-                // identifier (`Stack_long_long`). The Lime side sees this as an
-                // opaque handle (`Opaque(Stack_long_long)`).
-                let (s_name, s_targs, s_is_tmpl) = if name.contains('<') {
-                    (
-                        normalize_template_name(&name),
-                        parse_template_args(&name).unwrap_or_default(),
-                        true,
-                    )
-                } else {
-                    (name.clone(), Vec::new(), false)
-                };
                 api.structs.push(CStruct {
-                    name: s_name,
+                    name: name.clone(),
                     fields,
                     size_bytes: None,
                     align_bytes: None,
-                    base_classes: Vec::new(),
-                    has_vtable: false,
-                    is_class,
-                    template_args: s_targs,
-                    is_template_instantiation: s_is_tmpl,
                 });
             } else if !is_implicit {
                 // Anonymous record body (e.g. `typedef struct { ... } Point;`)
                 // — remember for a following TypedefDecl.
                 ctx.anon_struct = Some(fields);
-            }
-            if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
-                for c in inner {
-                    classify_node(c, api, ctx, Some(name.clone()), lang);
-                }
-            }
-        }
-        "CXXRecordDecl" => {
-            // C++ class/struct: capture the class name so inline methods get a
-            // correct `self` receiver type. Emit an opaque struct placeholder so
-            // the Lime type name resolves (full layout is recorded in ABI
-            // metadata for future precise layout). Field extraction here is
-            // omitted for the vertical slice; the receiver is passed by value.
-            let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            // Skip implicit compiler-injected records (e.g. _GUID, type_info)
-            // and the inner re-declaration/definition copy of a class. These
-            // duplicate the real members already present under the non-implicit
-            // declaration, so we must NOT recurse into them (that would
-            // double-classify the members).
-            let is_implicit = node.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
-            if is_implicit || name.is_empty() {
-                return;
-            }
-            if !api.structs.iter().any(|s| s.name == name) {
-                // Extract C++ base classes (Task #5). Each entry in the AST
-                // `bases` array carries `type.qualType` (e.g. "Shape" or
-                // "class Shape"). Strip the leading `class `/`struct ` prefix to
-                // recover the bare class name recorded in `base_classes`.
-                let mut base_classes = Vec::new();
-                if let Some(bases) = node.get("bases").and_then(|v| v.as_array()) {
-                    for b in bases {
-                        let q = b
-                            .get("type")
-                            .and_then(|t| t.get("qualType"))
-                            .and_then(|v| v.as_str())
-                            .or_else(|| b.get("qualType").and_then(|v| v.as_str()))
-                            .unwrap_or("");
-                        let nm = q
-                            .trim()
-                            .trim_start_matches("class ")
-                            .trim_start_matches("struct ")
-                            .trim()
-                            .to_string();
-                        if !nm.is_empty() && !base_classes.contains(&nm) {
-                            base_classes.push(nm);
-                        }
-                    }
-                }
-                // Task #6: a class whose name is itself a template
-                // instantiation (e.g. `Stack<long long>`) — record the template
-                // arguments and normalize the struct name to a Lime-legal
-                // identifier (`Stack_long_long`). The Lime side sees this as an
-                // opaque handle (`Opaque(Stack_long_long)`).
-                let (s_name, s_targs, s_is_tmpl) = if name.contains('<') {
-                    (
-                        normalize_template_name(&name),
-                        parse_template_args(&name).unwrap_or_default(),
-                        true,
-                    )
-                } else {
-                    (name.clone(), Vec::new(), false)
-                };
-                api.structs.push(CStruct {
-                    name: s_name,
-                    fields: Vec::new(),
-                    size_bytes: None,
-                    align_bytes: None,
-                    base_classes,
-                    has_vtable: false,
-                    is_class: true,
-                    template_args: s_targs,
-                    is_template_instantiation: s_is_tmpl,
-                });
             }
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
@@ -631,75 +389,7 @@ fn classify_node(
                 is_constructor: false,
                 is_const: false,
                 self_ty: None,
-                is_virtual: false,
-                is_destructor: false,
             });
-        }
-        "CXXMethodDecl" | "CXXConstructorDecl" | "CXXDestructorDecl" => {
-            let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            if name.is_empty() {
-                return;
-            }
-            let self_ty = self_ty.clone();
-            let ftype = node.get("type").cloned().unwrap_or(serde_json::Value::Null);
-            let (mut params, ret_ty) = params_and_ret(&ftype);
-            let is_ctor = kind == "CXXConstructorDecl";
-            let is_dtor = kind == "CXXDestructorDecl";
-            let is_const = node.get("const").and_then(|v| v.as_bool()).unwrap_or(false);
-            // Task #5: a method declared `virtual` (or whose base declares it
-            // virtual) participates in the class vtable. clang tags the
-            // *introducing* declaration with `virtual: true`; overrides keep it
-            // `null`, which we treat as false here and recover via base-class
-            // propagation in `normalize`.
-            let is_virtual = node
-                .get("virtual")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-                || node
-                    .get("isVirtual")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-            let symbol = node
-                .get("mangledName")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&name)
-                .to_string();
-            // Receiver is the first Lime-facing parameter.
-            let mut all_params = Vec::new();
-            if !is_ctor && !is_dtor {
-                all_params.push(CParam {
-                    name: "self".to_string(),
-                    ty: CType::Struct(self_ty.clone().unwrap_or_default()),
-                });
-            }
-            all_params.append(&mut params);
-            let disp_name = if is_ctor {
-                format!("{}::{}", self_ty.clone().unwrap_or_default(), name)
-            } else if is_dtor {
-                format!("{}::~{}", self_ty.clone().unwrap_or_default(), name)
-            } else {
-                match &self_ty {
-                    Some(s) => format!("{}::{}", s, name),
-                    None => name.clone(),
-                }
-            };
-            api.functions.push(CFunction {
-                name: disp_name,
-                symbol,
-                params: all_params,
-                ret: if is_ctor { CType::Void } else { ret_ty },
-                is_method: !is_ctor && !is_dtor,
-                is_constructor: is_ctor,
-                is_const,
-                self_ty: self_ty.clone(),
-                is_virtual,
-                is_destructor: is_dtor,
-            });
-            if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
-                for c in inner {
-                    classify_node(c, api, ctx, self_ty.clone(), lang);
-                }
-            }
         }
         _ => {
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
@@ -833,7 +523,7 @@ fn lime_type_name(t: &CType) -> String {
         // (`Opaque(Stack<long long>)` would be a parse error since `<` is a
         // separator token). The original spelling + args live in the CIR lite /
         // manifest for auditability.
-        CType::Opaque(s) => format!("Opaque({})", normalize_template_name(s)),
+        CType::Opaque(s) => format!("Opaque({})", s),
         CType::Other(s) => s.clone(),
     }
 }
@@ -1114,41 +804,6 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
 
     // Structs first (Lime requires types to be visible before use).
     for s in &api.structs {
-        // Task #6: a template instantiation (e.g. `Stack<long long>`, normalized
-        // to `Stack_long_long`) is surfaced to Lime purely as an opaque handle
-        // (`Opaque(Stack_long_long)`) — it needs no struct definition (cf.
-        // `Opaque(Widget)` in the cpp_ptr slice). Emit only an advisory comment
-        // carrying the template arguments; do not emit a placeholder struct body.
-        if s.is_template_instantiation {
-            let cpp_name = if s.template_args.is_empty() {
-                s.name.clone()
-            } else {
-                format!(
-                    "{}<{}>",
-                    s.name.split('_').next().unwrap_or_else(|| s.name.as_str()),
-                    s.template_args.join(", ")
-                )
-            };
-            out.push_str(&format!(
-                "// C++ {}: template_args=[{}]\n",
-                cpp_name,
-                s.template_args.join(", ")
-            ));
-            continue;
-        }
-        // Task #5: surface inheritance / vtable metadata as Lime comments so a
-        // human (and the audit) can see what Charger learned from the AST. The
-        // Lime side still treats these as opaque handles — the comments are
-        // advisory only and do not change codegen (Architecture Gate: Opaque
-        // representation unchanged).
-        if !s.base_classes.is_empty() || s.has_vtable {
-            out.push_str(&format!(
-                "// C++ {}: bases=[{}] vtable={}\n",
-                s.name,
-                s.base_classes.join(", "),
-                s.has_vtable
-            ));
-        }
         if s.fields.is_empty() {
             // opaque / empty: emit as a unit-ish placeholder struct so the
             // type name resolves. (Future: ABI metadata drives real layout.)
@@ -1293,17 +948,6 @@ pub struct Manifest {
     pub artifact_hash: String,
     pub abi: AbiMeta,
     pub symbols: Vec<String>, // linkable symbols this artifact provides
-    // Task #5: C++ inheritance / virtual-dispatch metadata, persisted so the
-    // audit and downstream tooling can confirm Charger extracted it. Derived
-    // from the NormalizedApi (CIR lite) computed during `charger install`.
-    pub cpp_inheritance: BTreeMap<String, Vec<String>>, // class -> base classes
-    pub cpp_vtable_classes: Vec<String>,                // classes that own a vtable
-    pub cpp_virtual_symbols: Vec<String>,               // mangled symbols of virtual methods
-    pub cpp_destructor_symbols: Vec<String>,            // mangled symbols of destructors
-    // Task #6: C++ template instantiation metadata, persisted so the audit and
-    // downstream tooling can confirm Charger extracted it. Maps the normalized
-    // Lime type name (`Stack_long_long`) to its original template arguments.
-    pub cpp_template_instantiations: BTreeMap<String, Vec<String>>, // type -> template args
 }
 
 // ----------------------------------------------------------------------------
@@ -1510,44 +1154,6 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         }
     }
 
-    // Task #5: derive C++ inheritance / virtual-dispatch metadata from the
-    // normalized API and persist it in the manifest (auditable evidence that
-    // Charger's AST extraction captured base classes, vtables, virtual methods,
-    // and destructors).
-    let mut cpp_inheritance: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for s in &api.structs {
-        if !s.base_classes.is_empty() {
-            cpp_inheritance.insert(s.name.clone(), s.base_classes.clone());
-        }
-    }
-    let cpp_vtable_classes: Vec<String> = api
-        .structs
-        .iter()
-        .filter(|s| s.has_vtable)
-        .map(|s| s.name.clone())
-        .collect();
-    let cpp_virtual_symbols: Vec<String> = api
-        .functions
-        .iter()
-        .filter(|f| f.is_virtual)
-        .map(|f| f.symbol.clone())
-        .collect();
-    let cpp_destructor_symbols: Vec<String> = api
-        .functions
-        .iter()
-        .filter(|f| f.is_destructor)
-        .map(|f| f.symbol.clone())
-        .collect();
-    // Task #6: derive C++ template instantiation metadata from the normalized
-    // API (auditable evidence that Charger captured the concrete instantiation
-    // `Stack<long long>` and its template arguments).
-    let mut cpp_template_instantiations: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for s in &api.structs {
-        if s.is_template_instantiation && !s.template_args.is_empty() {
-            cpp_template_instantiations.insert(s.name.clone(), s.template_args.clone());
-        }
-    }
-
     let manifest = Manifest {
         library: lib_name.clone(),
         version: version.clone(),
@@ -1558,11 +1164,6 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         artifact_hash: art_hash,
         abi,
         symbols: symbols.clone(),
-        cpp_inheritance,
-        cpp_vtable_classes,
-        cpp_virtual_symbols,
-        cpp_destructor_symbols,
-        cpp_template_instantiations,
     };
     let manifest_toml = toml::to_string_pretty(&manifest)
         .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;

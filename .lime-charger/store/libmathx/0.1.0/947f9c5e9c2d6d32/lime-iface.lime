@@ -9,5 +9,5 @@ struct Point {
 extern fn add(Int: a0, Int: a1) -> Int "add"
 extern fn make_point(Int: a0, Int: a1) -> Point "make_point"
 extern fn point_sum(Point: a0) -> Int "point_sum"
-extern fn apply(Callback: a0, Int: a1, Int: a2) -> Int "apply"
+extern fn apply() -> Int "lime_out_apply"
 extern fn square(Int: a0) -> Int "square"
