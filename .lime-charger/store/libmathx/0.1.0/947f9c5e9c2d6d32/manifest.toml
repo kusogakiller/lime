@@ -1,0 +1,23 @@
+library = "libmathx"
+version = "0.1.0"
+source_origin = "bench_clang/charger/testlibs/libmathx"
+source_hash = "65394a4a8884b8ad"
+dependencies = []
+artifact = "libmathx.lib"
+artifact_hash = "8b45a7bffdb0f995"
+symbols = [
+    "add",
+    "make_point",
+    "point_sum",
+    "apply",
+    "square",
+]
+
+[abi]
+os = "windows"
+arch = "x86_64"
+compiler = "clang"
+compiler_version = "clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)"
+cxx_abi = "C"
+cxx_stdlib = "-"
+build_flags = []

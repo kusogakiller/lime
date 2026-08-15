@@ -1,0 +1,635 @@
+{
+  "id": "0x2123a8a5a90",
+  "kind": "TranslationUnitDecl",
+  "loc": {},
+  "range": {
+    "begin": {},
+    "end": {}
+  },
+  "inner": [
+    {
+      "id": "0x2123a8a6310",
+      "kind": "CXXRecordDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "_GUID",
+      "tagUsed": "struct",
+      "inner": [
+        {
+          "id": "0x2123a8a63a0",
+          "kind": "TypeVisibilityAttr",
+          "range": {
+            "begin": {},
+            "end": {}
+          },
+          "implicit": true
+        }
+      ]
+    },
+    {
+      "id": "0x2123a8a6538",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__int128_t",
+      "type": {
+        "qualType": "__int128"
+      },
+      "inner": [
+        {
+          "id": "0x2123a8a6060",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2123a8a65a8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__uint128_t",
+      "type": {
+        "qualType": "unsigned __int128"
+      },
+      "inner": [
+        {
+          "id": "0x2123a8a6080",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned __int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2123a8a6968",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__NSConstantString",
+      "type": {
+        "qualType": "__NSConstantString_tag"
+      },
+      "inner": [
+        {
+          "id": "0x2123a8a6920",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "__NSConstantString_tag"
+          },
+          "decl": {
+            "id": "0x2123a8a6600",
+            "kind": "CXXRecordDecl",
+            "name": "__NSConstantString_tag"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2123a8a69c0",
+      "kind": "CXXRecordDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "type_info",
+      "tagUsed": "class",
+      "inner": [
+        {
+          "id": "0x2123a8a6a50",
+          "kind": "TypeVisibilityAttr",
+          "range": {
+            "begin": {},
+            "end": {}
+          },
+          "implicit": true
+        }
+      ]
+    },
+    {
+      "id": "0x2123a907ef0",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "size_t",
+      "type": {
+        "desugaredQualType": "unsigned long long",
+        "qualType": "__size_t"
+      },
+      "inner": [
+        {
+          "id": "0x2123a907ec0",
+          "kind": "PredefinedSugarType",
+          "type": {
+            "qualType": "__size_t"
+          },
+          "inner": [
+            {
+              "id": "0x2123a8a5c80",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "unsigned long long"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2123a8a6458",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_ms_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x2123a8a6410",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x2123a8a5b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2123a8a64c8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x2123a8a6410",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x2123a8a5b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2123a907f48",
+      "kind": "CXXRecordDecl",
+      "loc": {
+        "offset": 47,
+        "file": "testlibs/libwidget/libwidget.h",
+        "line": 4,
+        "col": 7,
+        "tokLen": 6
+      },
+      "range": {
+        "begin": {
+          "offset": 41,
+          "col": 1,
+          "tokLen": 5
+        },
+        "end": {
+          "offset": 221,
+          "line": 14,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "Widget",
+      "tagUsed": "class",
+      "completeDefinition": true,
+      "definitionData": {
+        "canConstDefaultInit": true,
+        "canPassInRegisters": true,
+        "copyAssign": {
+          "hasConstParam": true,
+          "implicitHasConstParam": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "copyCtor": {
+          "hasConstParam": true,
+          "implicitHasConstParam": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "defaultCtor": {},
+        "dtor": {
+          "irrelevant": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "hasUserDeclaredConstructor": true,
+        "isStandardLayout": true,
+        "isTriviallyCopyable": true,
+        "moveAssign": {
+          "exists": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        },
+        "moveCtor": {
+          "exists": true,
+          "needsImplicit": true,
+          "simple": true,
+          "trivial": true
+        }
+      },
+      "inner": [
+        {
+          "id": "0x2123a908040",
+          "kind": "CXXRecordDecl",
+          "loc": {
+            "offset": 47,
+            "line": 4,
+            "col": 7,
+            "tokLen": 6
+          },
+          "range": {
+            "begin": {
+              "offset": 41,
+              "col": 1,
+              "tokLen": 5
+            },
+            "end": {
+              "offset": 47,
+              "col": 7,
+              "tokLen": 6
+            }
+          },
+          "isImplicit": true,
+          "name": "Widget",
+          "tagUsed": "class"
+        },
+        {
+          "id": "0x2123a9080d0",
+          "kind": "AccessSpecDecl",
+          "loc": {
+            "offset": 56,
+            "line": 5,
+            "col": 1,
+            "tokLen": 6
+          },
+          "range": {
+            "begin": {
+              "offset": 56,
+              "col": 1,
+              "tokLen": 6
+            },
+            "end": {
+              "offset": 62,
+              "col": 7,
+              "tokLen": 1
+            }
+          },
+          "access": "public"
+        },
+        {
+          "id": "0x2123a908330",
+          "kind": "CXXConstructorDecl",
+          "loc": {
+            "offset": 68,
+            "line": 6,
+            "col": 5,
+            "tokLen": 6
+          },
+          "range": {
+            "begin": {
+              "offset": 68,
+              "col": 5,
+              "tokLen": 6
+            },
+            "end": {
+              "offset": 87,
+              "col": 24,
+              "tokLen": 1
+            }
+          },
+          "name": "Widget",
+          "mangledName": "??0Widget@@QEAA@HH@Z",
+          "type": {
+            "qualType": "void (int, int)"
+          },
+          "inner": [
+            {
+              "id": "0x2123a908178",
+              "kind": "ParmVarDecl",
+              "loc": {
+                "offset": 79,
+                "col": 16,
+                "tokLen": 1
+              },
+              "range": {
+                "begin": {
+                  "offset": 75,
+                  "col": 12,
+                  "tokLen": 3
+                },
+                "end": {
+                  "offset": 79,
+                  "col": 16,
+                  "tokLen": 1
+                }
+              },
+              "name": "x",
+              "type": {
+                "qualType": "int"
+              }
+            },
+            {
+              "id": "0x2123a908200",
+              "kind": "ParmVarDecl",
+              "loc": {
+                "offset": 86,
+                "col": 23,
+                "tokLen": 1
+              },
+              "range": {
+                "begin": {
+                  "offset": 82,
+                  "col": 19,
+                  "tokLen": 3
+                },
+                "end": {
+                  "offset": 86,
+                  "col": 23,
+                  "tokLen": 1
+                }
+              },
+              "name": "y",
+              "type": {
+                "qualType": "int"
+              }
+            }
+          ]
+        },
+        {
+          "id": "0x2123a908478",
+          "kind": "CXXMethodDecl",
+          "loc": {
+            "offset": 98,
+            "line": 7,
+            "col": 9,
+            "tokLen": 4
+          },
+          "range": {
+            "begin": {
+              "offset": 94,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 105,
+              "col": 16,
+              "tokLen": 5
+            }
+          },
+          "name": "area",
+          "mangledName": "?area@Widget@@QEBAHXZ",
+          "type": {
+            "qualType": "int () const"
+          }
+        },
+        {
+          "id": "0x2123a908618",
+          "kind": "CXXMethodDecl",
+          "loc": {
+            "offset": 120,
+            "line": 8,
+            "col": 9,
+            "tokLen": 4
+          },
+          "range": {
+            "begin": {
+              "offset": 116,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 136,
+              "col": 25,
+              "tokLen": 5
+            }
+          },
+          "name": "area",
+          "mangledName": "?area@Widget@@QEBAHH@Z",
+          "type": {
+            "qualType": "int (int) const"
+          },
+          "inner": [
+            {
+              "id": "0x2123a908538",
+              "kind": "ParmVarDecl",
+              "loc": {
+                "offset": 129,
+                "col": 18,
+                "tokLen": 5
+              },
+              "range": {
+                "begin": {
+                  "offset": 125,
+                  "col": 14,
+                  "tokLen": 3
+                },
+                "end": {
+                  "offset": 129,
+                  "col": 18,
+                  "tokLen": 5
+                }
+              },
+              "name": "scale",
+              "type": {
+                "qualType": "int"
+              }
+            }
+          ]
+        },
+        {
+          "id": "0x2123a908700",
+          "kind": "CXXMethodDecl",
+          "loc": {
+            "offset": 151,
+            "line": 9,
+            "col": 9,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 147,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 159,
+              "col": 17,
+              "tokLen": 5
+            }
+          },
+          "name": "get_x",
+          "mangledName": "?get_x@Widget@@QEBAHXZ",
+          "type": {
+            "qualType": "int () const"
+          }
+        },
+        {
+          "id": "0x2123a9087c0",
+          "kind": "VarDecl",
+          "loc": {
+            "offset": 181,
+            "line": 10,
+            "col": 16,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 170,
+              "col": 5,
+              "tokLen": 6
+            },
+            "end": {
+              "offset": 181,
+              "col": 16,
+              "tokLen": 5
+            }
+          },
+          "name": "count",
+          "mangledName": "?count@Widget@@2HA",
+          "type": {
+            "qualType": "int"
+          },
+          "storageClass": "static"
+        },
+        {
+          "id": "0x2123a908828",
+          "kind": "AccessSpecDecl",
+          "loc": {
+            "offset": 188,
+            "line": 11,
+            "col": 1,
+            "tokLen": 7
+          },
+          "range": {
+            "begin": {
+              "offset": 188,
+              "col": 1,
+              "tokLen": 7
+            },
+            "end": {
+              "offset": 195,
+              "col": 8,
+              "tokLen": 1
+            }
+          },
+          "access": "private"
+        },
+        {
+          "id": "0x2123a908870",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 205,
+            "line": 12,
+            "col": 9,
+            "tokLen": 2
+          },
+          "range": {
+            "begin": {
+              "offset": 201,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 205,
+              "col": 9,
+              "tokLen": 2
+            }
+          },
+          "name": "x_",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x2123a9088e0",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 217,
+            "line": 13,
+            "col": 9,
+            "tokLen": 2
+          },
+          "range": {
+            "begin": {
+              "offset": 213,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 217,
+              "col": 9,
+              "tokLen": 2
+            }
+          },
+          "name": "y_",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    }
+  ]
+}

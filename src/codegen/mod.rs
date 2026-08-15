@@ -19,6 +19,7 @@ use crate::Stmt;
 use crate::Expr;
 use crate::FunctionDef;
 use crate::MemoryPlace;
+use crate::Type;
 use crate::type_from_str;
 use std::collections::HashMap;
 use crate::codegen::types::llvm_type_name;
@@ -368,6 +369,10 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
 
     // Aggregate type declarations
     emit_aggregate_decls(&mut out, defs);
+
+    // Charger FFI: declare native extern symbols so the linker can resolve
+    // them. Signatures use sret/byval to match the Windows x64 MSVC ABI.
+    emit_extern_declarations(&mut out, defs);
 
     // Phase 5: collect string literals and emit globals
     let string_literals = collect_string_literals(defs);
@@ -729,6 +734,89 @@ fn emit_aggregate_decls(out: &mut String, defs: &Defs) {
         out.push_str(&format!("%{} = type {{ i32, [4 x i64] }}\n", sname));
     }
     out.push('\n');
+}
+
+/// Declare Charger FFI extern symbols at the LLVM module level so calls to
+/// them verify and link. Struct returns use `sret` (or a plain `this` pointer
+/// for C++ constructors/destructors); struct arguments use `byval`.
+fn emit_extern_declarations(out: &mut String, defs: &Defs) {
+    for ((_name, _arity), (symbol, params, ret)) in &defs.extern_symbols {
+        let rt = extern_ret_type(ret.as_deref());
+        let is_this_return = symbol.starts_with("??0") || symbol.starts_with("??1");
+
+        let mut param_decls: Vec<String> = Vec::new();
+        for (first, second) in params {
+            // `params` is stored as (name, type); robustly extract the *type*
+            // element: it is either a known scalar keyword (Int/Float/String/
+            // Bool/Unit/Void) or a struct name. The name element is never a
+            // type keyword, so the type is whichever element is not a plain
+            // identifier that equals the parameter name. Simplest robust rule:
+            // pick the element that is a known scalar keyword, else the element
+            // that is NOT the parameter name (struct types are not valid names
+            // in the scalar set, so the type is the non-name element).
+            let ptype = if matches!(first.as_str(), "Int" | "Float" | "String" | "Bool" | "Unit" | "Void") {
+                first.clone()
+            } else if matches!(second.as_str(), "Int" | "Float" | "String" | "Bool" | "Unit" | "Void") {
+                second.clone()
+            } else if first == "Point" || first == "Widget" || first.starts_with("__") {
+                // first is the struct type name (type, name) ordering
+                first.clone()
+            } else {
+                // default: second element is the type (name, type) ordering
+                second.clone()
+            };
+            let pt = extern_param_type(&ptype);
+            if matches!(pt, Type::Struct(_)) {
+                param_decls.push(format!("ptr byval({})", llvm_type_name(&pt)));
+            } else {
+                param_decls.push(llvm_type_name(&pt));
+            }
+        }
+
+        if matches!(rt, Type::Struct(_)) {
+            if is_this_return {
+                let mut decls = vec!["ptr".to_string()];
+                decls.extend(param_decls);
+                out.push_str(&format!("declare void @\"{}\"({})\n", symbol, decls.join(", ")));
+            } else {
+                let mut decls = vec![format!("ptr sret({})", llvm_type_name(&rt))];
+                decls.extend(param_decls);
+                out.push_str(&format!("declare void @\"{}\"({})\n", symbol, decls.join(", ")));
+            }
+        } else {
+            out.push_str(&format!(
+                "declare {} @\"{}\"({})\n",
+                llvm_type_name(&rt),
+                symbol,
+                param_decls.join(", ")
+            ));
+        }
+    }
+    if !defs.extern_symbols.is_empty() {
+        out.push('\n');
+    }
+}
+
+fn extern_ret_type(s: Option<&str>) -> Type {
+    match s {
+        Some("Int") => Type::Int,
+        Some("Float") => Type::Float,
+        Some("String") => Type::String,
+        Some("Bool") => Type::Bool,
+        Some("Unit") | Some("Void") | None => Type::Unit,
+        Some(other) => Type::Struct(other.to_string()),
+    }
+}
+
+fn extern_param_type(s: &str) -> Type {
+    match s {
+        "Int" => Type::Int,
+        "Float" => Type::Float,
+        "String" => Type::String,
+        "Bool" => Type::Bool,
+        "Unit" | "Void" => Type::Unit,
+        other => Type::Struct(other.to_string()),
+    }
 }
 
 fn emit_main_wrapper(out: &mut String, defs: &Defs) {

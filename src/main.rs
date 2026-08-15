@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use lime::{compile_pipeline, CompileMode, CompileOptions, CompileReport, format_lime_source};
+use lime::{charger, compile_pipeline, CompileMode, CompileOptions, CompileReport, format_lime_source};
 
 fn print_usage() {
     eprintln!("Lime compiler");
@@ -123,6 +123,56 @@ fn cli_fmt(path: &str, write: bool) {
     }
 }
 
+// Detect the LLVM toolchain bindir from the environment or a known location.
+fn llvm_bindir() -> String {
+    if let Ok(p) = std::env::var("LIME_LLVM_BIN") {
+        return p;
+    }
+    // Fallback: derive from `clang` on PATH if present.
+    ".".to_string()
+}
+
+fn cli_charger(sub: &str, rest: &[String]) {
+    match sub {
+        "install" => {
+            let source = match rest.iter().find(|a| !a.starts_with("--")) {
+                Some(s) => s.clone(),
+                None => {
+                    eprintln!("charger install <library-source-or-dir>");
+                    std::process::exit(1);
+                }
+            };
+            match charger::install(&source, &llvm_bindir()) {
+                Ok(r) => {
+                    println!("charger: installed '{}' -> {}", r.lib_name, r.store_path.display());
+                    println!("  functions: {}", r.api.functions.len());
+                    println!("  structs:   {}", r.api.structs.len());
+                }
+                Err(e) => {
+                    eprintln!("charger install failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "list" => {
+            let installed = charger::list_installed();
+            if installed.is_empty() {
+                println!("charger: no libraries installed");
+            } else {
+                println!("charger: installed libraries:");
+                for l in installed {
+                    println!("  {}", l);
+                }
+            }
+        }
+        other => {
+            eprintln!("charger: unknown subcommand '{}'", other);
+            eprintln!("usage: lime charger install <source> | list");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -161,6 +211,14 @@ fn main() {
             let path = args[2..].iter().find(|a| !a.starts_with("--")).cloned();
             match path {
                 Some(p) => cli_fmt(&p, write),
+                None => { print_usage(); return; }
+            }
+        }
+        "charger" => {
+            let sub = args.get(2).map(|s| s.as_str());
+            let rest = if args.len() > 3 { &args[3..] } else { &[] };
+            match sub {
+                Some(s) => cli_charger(s, rest),
                 None => { print_usage(); return; }
             }
         }

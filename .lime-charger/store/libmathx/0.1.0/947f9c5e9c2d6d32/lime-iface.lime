@@ -1,0 +1,13 @@
+// Charger-generated Lime interface for 'libmathx'
+// DO NOT EDIT: regenerate with `charger install`.
+
+struct Point {
+    x: Int
+    y: Int
+}
+
+extern fn add(a0: Int, a1: Int) -> Int "add"
+extern fn make_point(a0: Int, a1: Int) -> Point "make_point"
+extern fn point_sum(a0: Point) -> Int "point_sum"
+extern fn apply(a0: long long (*)(long long, long long), a1: Int, a2: Int) -> Int "apply"
+extern fn square(a0: Int) -> Int "square"

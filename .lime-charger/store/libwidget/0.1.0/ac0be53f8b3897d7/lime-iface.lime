@@ -1,0 +1,10 @@
+// Charger-generated Lime interface for 'libwidget'
+// DO NOT EDIT: regenerate with `charger install`.
+
+struct Widget {
+}
+
+extern fn widget_new(a0: Int, a1: Int) -> Widget "??0Widget@@QEAA@_J0@Z"
+extern fn widget_area(self: Widget) -> Int "?area@Widget@@QEBA_JXZ"
+extern fn widget_area(self: Widget, a0: Int) -> Int "?area@Widget@@QEBA_J_J@Z"
+extern fn widget_get_x(self: Widget) -> Int "?get_x@Widget@@QEBA_JXZ"

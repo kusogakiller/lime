@@ -1645,8 +1645,133 @@ impl<'a> Cg<'a> {
         }
     }
 
+    /// Charger FFI call: emit a direct call to a native (possibly mangled)
+    /// symbol. The callee is not defined in Lime IR; its implementation comes
+    /// from the prepared Charger native artifact linked into the final binary.
+    fn codegen_extern_call(
+        &mut self,
+        _func: &str,
+        symbol: &str,
+        _params: &[(String, String)],
+        ret: Option<&str>,
+        args: &[Expr],
+    ) -> Result<(String, Type), String> {
+        // Determine the Lime return type for the result.
+        let ret_ty = match ret {
+            Some("Int") => Type::Int,
+            Some("Float") => Type::Float,
+            Some("String") => Type::String,
+            Some("Bool") => Type::Bool,
+            Some("Unit") | Some("Void") | None => Type::Unit,
+            Some(other) => Type::Struct(other.to_string()),
+        };
+
+        // Windows x64 (MSVC) ABI: aggregates larger than 8 bytes are never
+        // passed or returned in registers. A struct RETURN is delivered either
+        // via a hidden `sret` pointer (most C/C++ functions) or, for C++
+        // constructors/destructors, via the `this` pointer returned in RAX
+        // (the first argument IS the destination object). A struct ARGUMENT is
+        // passed by pointer (`byval`). We lower both here so Lime's SSA
+        // aggregate struct values (e.g. `%Point`/`%Widget`) interoperate with
+        // the prepared native artifacts.
+        let is_ret_struct = matches!(ret_ty, Type::Struct(_));
+        // C++ constructors/destructors return `this` in RAX (plain pointer
+        // first argument) instead of using `sret`.
+        let is_this_return = symbol.starts_with("??0") || symbol.starts_with("??1");
+
+        // Destination for a struct return.
+        let sret_dst = if is_ret_struct {
+            let d = self.fresh_temp();
+            self.out.push_str(&format!(
+                "  {} = alloca {}, align 8\n",
+                d,
+                llvm_type_name(&ret_ty)
+            ));
+            Some(d)
+        } else {
+            None
+        };
+
+        // Build the LLVM argument list.
+        let mut llvm_args: Vec<String> = Vec::new();
+        for a in args {
+            let (v, t) = self.codegen_expr(a)?;
+            if matches!(t, Type::Struct(_)) {
+                // Aggregate passed by value -> store into a slot and pass a
+                // `byval` pointer so the callee reads the correct layout.
+                let slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca {}, align 8\n",
+                    slot,
+                    llvm_type_name(&t)
+                ));
+                self.out.push_str(&format!(
+                    "  store {} {}, ptr {}, align 8\n",
+                    llvm_type_name(&t),
+                    self.bare_value(&v),
+                    slot
+                ));
+                llvm_args.push(format!("ptr byval({}) {}", llvm_type_name(&t), slot));
+            } else {
+                llvm_args.push(self.fmt_call_arg(&v, &t));
+            }
+        }
+
+        if let Some(d) = &sret_dst {
+            if is_this_return {
+                // Constructor/destructor: `this` is the first plain pointer arg.
+                llvm_args.insert(0, format!("ptr {}", d));
+            } else {
+                // Ordinary struct return: hidden `sret` pointer as first arg.
+                llvm_args.insert(0, format!("ptr sret({}) {}", llvm_type_name(&ret_ty), d));
+            }
+        }
+
+        if is_ret_struct {
+            self.out.push_str(&format!(
+                "  call void @\"{}\"({})\n",
+                symbol,
+                llvm_args.join(", ")
+            ));
+            let val = self.fresh_temp();
+            self.out.push_str(&format!(
+                "  {} = load {}, ptr {}, align 8\n",
+                val,
+                llvm_type_name(&ret_ty),
+                sret_dst.unwrap()
+            ));
+            Ok((val, ret_ty))
+        } else if ret_ty == Type::Unit {
+            self.out.push_str(&format!(
+                "  call void @\"{}\"({})\n",
+                symbol,
+                llvm_args.join(", ")
+            ));
+            Ok((String::new(), Type::Unit))
+        } else {
+            let tmp = self.fresh_temp();
+            self.out.push_str(&format!(
+                "  {} = call {} @\"{}\"({})\n",
+                tmp,
+                llvm_type_name(&ret_ty),
+                symbol,
+                llvm_args.join(", ")
+            ));
+            Ok((format!("{} {}", llvm_type_name(&ret_ty), tmp), ret_ty))
+        }
+    }
+
     /// Phase 2+3: function call codegen (builtin / struct ctor / user functions)
     fn codegen_call(&mut self, func: &str, args: &[Expr]) -> Result<(String, Type), String> {
+        // Charger FFI: if `func` is a declared extern symbol, emit a direct
+        // native call to its linkable (possibly mangled) name. No `define` is
+        // emitted for the callee; the symbol is supplied by the prepared
+        // Charger native artifact injected at link time.
+        if let Some((symbol, params, ret)) =
+            self.defs.extern_symbols.get(&(func.to_string(), args.len()))
+        {
+            return self.codegen_extern_call(func, symbol, params, ret.as_deref(), args);
+        }
         // Builtin print/println
         if func == "print" || func == "println" {
             let add_nl = func == "println";
