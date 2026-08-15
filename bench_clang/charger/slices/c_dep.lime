@@ -1,0 +1,13 @@
+// C dependency-graph vertical slice (#7): call into the prepared `libapp`
+// library. `libapp`'s `app_compute` internally calls `common_add` from the
+// `libc_common` dependency library. Charger records the dependency (via the
+// `#include "libc_common.h"` directive) and links BOTH native artifacts, so
+// `common_add` resolves at link time.
+//
+// Expected output: 6   (app_compute(3) = common_add(3, 3) = 6)
+extern fn app_compute(x: Int) -> Int "app_compute"
+
+fn main():
+    let r = app_compute(3)
+    print(r)
+    print("\n")

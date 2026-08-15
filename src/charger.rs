@@ -1016,6 +1016,53 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "libcharger".to_string());
+
+    // #7: detect dependencies (and the include dirs needed to compile the
+    // dependent sources) from local `#include "..."` directives in this lib.
+    let (deps, include_dirs) = detect_dependencies(&sources, &header, &lib_name);
+
+    // Deterministic store key + cache inputs (cheap; no native build yet).
+    let abi = detect_abi(llvm_bindir, lang);
+    let build_flags = if lang == ApiKind::Cpp {
+        vec!["-O2".to_string(), "-std=c++17".to_string()]
+    } else {
+        vec!["-O2".to_string()]
+    };
+    let tool_hash = toolchain_hash(&abi, &build_flags);
+    let version = "0.1.0".to_string();
+    let entry = store_root().join(&lib_name).join(&version).join(&tool_hash);
+    let src_hash = hash_path(&src_path);
+
+    // #8: artifact cache. If a store entry already exists whose manifest's
+    // source_hash matches the current source_hash, the native artifact is
+    // reusable: skip the native rebuild and reuse the prepared artifact. This
+    // is a true cache hit. Only a *changed* source (different source_hash)
+    // triggers a rebuild (invalidation).
+    if entry.exists() {
+        if let Some(m) = load_manifest(&entry) {
+            if m.source_hash == src_hash {
+                println!(
+                    "charger: cache hit for '{}' (hash={}), reusing artifact",
+                    lib_name, src_hash
+                );
+                // Reuse the existing artifact; still derive the API surface
+                // (cheap AST analysis) so the result is complete.
+                let ast = extract_ast_json(&header, lang, llvm_bindir)?;
+                let api = normalize(&ast, lang);
+                return Ok(InstallResult {
+                    lib_name,
+                    store_path: entry,
+                    api,
+                });
+            } else {
+                println!(
+                    "charger: source changed for '{}' (stored={}, current={}); rebuilding",
+                    lib_name, m.source_hash, src_hash
+                );
+            }
+        }
+    }
+
     let build_dir = std::env::temp_dir().join(format!("charger_build_{}", lib_name));
     let _ = std::fs::create_dir_all(&build_dir);
     let obj_path = build_dir.join(format!("{}.obj", lib_name));
@@ -1033,6 +1080,9 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     cmd.arg("-O2").arg("-c");
     if lang == ApiKind::Cpp {
         cmd.arg("-std=c++17");
+    }
+    for inc in &include_dirs {
+        cmd.arg("-I").arg(inc);
     }
     for s in &sources {
         cmd.arg(s);
@@ -1075,21 +1125,8 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // 3. Lime interface generation.
     let iface = generate_lime_iface(&api, &lib_name);
 
-    // 4. ABI metadata.
-    let abi = detect_abi(llvm_bindir, lang);
-    let build_flags = if lang == ApiKind::Cpp {
-        vec!["-O2".to_string(), "-std=c++17".to_string()]
-    } else {
-        vec!["-O2".to_string()]
-    };
-    let tool_hash = toolchain_hash(&abi, &build_flags);
-
-    // 5. Store.
-    let version = "0.1.0".to_string();
-    let entry = store_root()
-        .join(&lib_name)
-        .join(&version)
-        .join(&tool_hash);
+    // 5. Store. (abi / build_flags / tool_hash / version / entry were computed
+    // earlier, before the cache-hit check, and are reused here.)
     let _ = std::fs::create_dir_all(&entry);
 
     let art_dest = entry.join(&art_name);
@@ -1104,7 +1141,6 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     std::fs::write(entry.join("abi.json"), abi_json)
         .map_err(|e| format!("ABI extraction failed: {}", e))?;
 
-    let src_hash = hash_path(&src_path);
     let art_hash = hash_file(&art_dest);
 
     let symbols: Vec<String> = api.functions.iter().map(|f| f.symbol.clone()).collect();
@@ -1152,7 +1188,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         version: version.clone(),
         source_origin: source.to_string(),
         source_hash: src_hash,
-        dependencies: Vec::new(),
+        dependencies: deps,
         artifact: art_name.clone(),
         artifact_hash: art_hash,
         abi,
@@ -1209,6 +1245,106 @@ fn collect_sources(path: &Path) -> Result<(ApiKind, Vec<PathBuf>, Option<PathBuf
     }
     let lang = if has_cpp { ApiKind::Cpp } else { ApiKind::C };
     Ok((lang, sources, header))
+}
+
+/// #7: strip a recognized C/C++ header extension from a filename stem.
+fn strip_header_ext(name: &str) -> String {
+    if name.ends_with(".hpp") || name.ends_with(".hh") {
+        name[..name.len() - 4].to_string()
+    } else if name.ends_with(".h") {
+        name[..name.len() - 2].to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+/// #7: dependency graph.
+///
+/// Scans the library's source/header text for local `#include "..."`
+/// directives and resolves each included header name to a *prepared* Charger
+/// library already present in the store (i.e. one that was `charger install`-ed
+/// beforehand). A header `libc_common.h` maps to the library name `libc_common`.
+///
+/// Returns:
+///   * `deps`       — dependency library names recorded in the manifest.
+///   * `include_dirs` — directories (`-I`) needed so the dependent compiles
+///                      (the dependency's source directory, so its header can
+///                      be found by the compiler).
+///
+/// Detection is conservative: only include names that resolve to an existing
+/// store entry and are not the library being installed are treated as
+/// dependencies. This keeps the slice honest (no fabricated edges) while
+/// extending — not changing — the existing store/hash/lookup foundation.
+fn detect_dependencies(
+    sources: &[PathBuf],
+    header: &Path,
+    lib_name: &str,
+) -> (Vec<String>, Vec<PathBuf>) {
+    let mut deps: Vec<String> = Vec::new();
+    let mut include_dirs: Vec<PathBuf> = Vec::new();
+    let mut include_seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut candidates: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Collect all source/header text.
+    let mut texts: Vec<String> = Vec::new();
+    for s in sources {
+        if let Ok(t) = std::fs::read_to_string(s) {
+            texts.push(t);
+        }
+    }
+    if let Ok(t) = std::fs::read_to_string(header) {
+        texts.push(t);
+    }
+
+    // Find every local (quoted) include and derive a candidate library name.
+    for text in &texts {
+        for line in text.lines() {
+            let line = line.trim_start();
+            if let Some(rest) = line.strip_prefix("#include") {
+                // Only quoted includes are local includes (system <...> ignored).
+                if let Some(start) = rest.find('"') {
+                    let after = &rest[start + 1..];
+                    if let Some(end) = after.find('"') {
+                        let inc = &after[..end];
+                        let file = Path::new(inc)
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let stem = strip_header_ext(&file);
+                        if !stem.is_empty() && stem != lib_name {
+                            candidates.insert(stem);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve each candidate against the prepared store.
+    for cand in candidates {
+        if let Some(dep_entry) = find_artifact_entry(&cand) {
+            if let Some(m) = load_manifest(&dep_entry) {
+                if !deps.contains(&cand) {
+                    deps.push(cand.clone());
+                }
+                // Add the dependency's source directory as an include path so
+                // the dependent's `#include "dep.h"` resolves at compile time.
+                let origin = Path::new(&m.source_origin);
+                let dir = if origin.is_file() {
+                    origin.parent()
+                } else {
+                    Some(origin)
+                };
+                if let Some(d) = dir {
+                    if include_seen.insert(d.to_path_buf()) {
+                        include_dirs.push(d.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+
+    (deps, include_dirs)
 }
 
 fn detect_abi(llvm_bindir: &str, lang: ApiKind) -> AbiMeta {
@@ -1381,6 +1517,19 @@ pub fn lookup_artifacts_for_symbols(symbols: &[String]) -> Vec<std::path::PathBu
                                     let art = entry.join(&m.artifact);
                                     if art.exists() && !out.contains(&art) {
                                         out.push(art);
+                                    }
+                                    // #7: also pull in the artifacts of this
+                                    // library's recorded dependencies, so that a
+                                    // program referencing only the top-level
+                                    // symbol (e.g. `app_compute`) still links
+                                    // the transitive native objects it needs
+                                    // (e.g. `libc_common`'s `common_add`).
+                                    for dep in &m.dependencies {
+                                        if let Some(da) = lookup_artifact(dep) {
+                                            if !out.contains(&da) {
+                                                out.push(da);
+                                            }
+                                        }
                                     }
                                 }
                             }

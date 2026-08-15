@@ -1,17 +1,11 @@
-library = "libmathx"
+library = "libapp"
 version = "0.1.0"
-source_origin = "bench_clang/charger/testlibs/libmathx"
-source_hash = "65394a4a8884b8ad"
-dependencies = []
-artifact = "libmathx.lib"
-artifact_hash = "16bb08d4eef28884"
-symbols = [
-    "add",
-    "make_point",
-    "point_sum",
-    "apply",
-    "square",
-]
+source_origin = "bench_clang/charger/testlibs/libapp"
+source_hash = "3f480956b5c8803e"
+dependencies = ["libc_common"]
+artifact = "libapp.lib"
+artifact_hash = "3e7e5f68ca75883a"
+symbols = ["app_compute"]
 cpp_vtable_classes = []
 cpp_virtual_symbols = []
 cpp_destructor_symbols = []

@@ -1,17 +1,11 @@
-library = "libmathx"
+library = "libc_common"
 version = "0.1.0"
-source_origin = "bench_clang/charger/testlibs/libmathx"
-source_hash = "65394a4a8884b8ad"
+source_origin = "bench_clang/charger/testlibs/libc_common"
+source_hash = "0195cd137d747ece"
 dependencies = []
-artifact = "libmathx.lib"
-artifact_hash = "16bb08d4eef28884"
-symbols = [
-    "add",
-    "make_point",
-    "point_sum",
-    "apply",
-    "square",
-]
+artifact = "libc_common.lib"
+artifact_hash = "f83dd37c59d7a323"
+symbols = ["common_add"]
 cpp_vtable_classes = []
 cpp_virtual_symbols = []
 cpp_destructor_symbols = []

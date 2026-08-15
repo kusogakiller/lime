@@ -1,0 +1,4 @@
+// Charger-generated Lime interface for 'libc_common'
+// DO NOT EDIT: regenerate with `charger install`.
+
+extern fn common_add(Int: a0, Int: a1) -> Int "common_add"
