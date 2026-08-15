@@ -1,0 +1,936 @@
+{
+  "id": "0x2196ea45a90",
+  "kind": "TranslationUnitDecl",
+  "loc": {},
+  "range": {
+    "begin": {},
+    "end": {}
+  },
+  "inner": [
+    {
+      "id": "0x2196ea462d0",
+      "kind": "RecordDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "_GUID",
+      "tagUsed": "struct",
+      "inner": [
+        {
+          "id": "0x2196ea46350",
+          "kind": "TypeVisibilityAttr",
+          "range": {
+            "begin": {},
+            "end": {}
+          },
+          "implicit": true
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea464e8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__int128_t",
+      "type": {
+        "qualType": "__int128"
+      },
+      "inner": [
+        {
+          "id": "0x2196ea46060",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea46558",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__uint128_t",
+      "type": {
+        "qualType": "unsigned __int128"
+      },
+      "inner": [
+        {
+          "id": "0x2196ea46080",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned __int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea468a8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__NSConstantString",
+      "type": {
+        "qualType": "struct __NSConstantString_tag"
+      },
+      "inner": [
+        {
+          "id": "0x2196ea46860",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "struct __NSConstantString_tag"
+          },
+          "decl": {
+            "id": "0x2196ea465b0",
+            "kind": "RecordDecl",
+            "name": "__NSConstantString_tag"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea46930",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "size_t",
+      "type": {
+        "desugaredQualType": "unsigned long long",
+        "qualType": "__size_t"
+      },
+      "inner": [
+        {
+          "id": "0x2196ea46900",
+          "kind": "PredefinedSugarType",
+          "type": {
+            "qualType": "__size_t"
+          },
+          "inner": [
+            {
+              "id": "0x2196ea45c80",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "unsigned long long"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea46408",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_ms_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x2196ea463c0",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x2196ea45b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea46478",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x2196ea463c0",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x2196ea45b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2196ea46988",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 511,
+        "file": "bench_clang/charger/testlibs/libvariant/libvariant.h",
+        "line": 12,
+        "col": 9,
+        "tokLen": 5
+      },
+      "range": {
+        "begin": {
+          "offset": 511,
+          "col": 9,
+          "tokLen": 5
+        },
+        "end": {
+          "offset": 561,
+          "line": 16,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "tagUsed": "union",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x2196ea46a20",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 527,
+            "line": 13,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 523,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 527,
+              "col": 9,
+              "tokLen": 1
+            }
+          },
+          "name": "i",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x2196eacd8a0",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 540,
+            "line": 14,
+            "col": 11,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 534,
+              "col": 5,
+              "tokLen": 5
+            },
+            "end": {
+              "offset": 540,
+              "col": 11,
+              "tokLen": 1
+            }
+          },
+          "name": "f",
+          "type": {
+            "qualType": "float"
+          }
+        },
+        {
+          "id": "0x2196eacd910",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 557,
+            "line": 15,
+            "col": 15,
+            "tokLen": 2
+          },
+          "range": {
+            "begin": {
+              "offset": 547,
+              "col": 5,
+              "tokLen": 4
+            },
+            "end": {
+              "offset": 557,
+              "col": 15,
+              "tokLen": 2
+            }
+          },
+          "name": "ll",
+          "type": {
+            "qualType": "long long"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196eacd9f8",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 563,
+        "line": 16,
+        "col": 3,
+        "tokLen": 7
+      },
+      "range": {
+        "begin": {
+          "offset": 503,
+          "line": 12,
+          "col": 1,
+          "tokLen": 7
+        },
+        "end": {
+          "offset": 563,
+          "line": 16,
+          "col": 3,
+          "tokLen": 7
+        }
+      },
+      "name": "Variant",
+      "type": {
+        "qualType": "union Variant"
+      },
+      "inner": [
+        {
+          "id": "0x2196eacd9b0",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "union Variant"
+          },
+          "decl": {
+            "id": "0x2196ea46988",
+            "kind": "RecordDecl",
+            "name": ""
+          },
+          "isTagOwned": true
+        }
+      ]
+    },
+    {
+      "id": "0x2196eacda68",
+      "kind": "EnumDecl",
+      "loc": {
+        "offset": 719,
+        "line": 21,
+        "col": 9,
+        "tokLen": 4
+      },
+      "range": {
+        "begin": {
+          "offset": 719,
+          "col": 9,
+          "tokLen": 4
+        },
+        "end": {
+          "offset": 785,
+          "line": 25,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "inner": [
+        {
+          "id": "0x2196eacdb58",
+          "kind": "EnumConstantDecl",
+          "loc": {
+            "offset": 730,
+            "line": 22,
+            "col": 5,
+            "tokLen": 9
+          },
+          "range": {
+            "begin": {
+              "offset": 730,
+              "col": 5,
+              "tokLen": 9
+            },
+            "end": {
+              "offset": 742,
+              "col": 17,
+              "tokLen": 1
+            }
+          },
+          "name": "COLOR_RED",
+          "type": {
+            "qualType": "int"
+          },
+          "inner": [
+            {
+              "id": "0x2196eacdb38",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 742,
+                  "col": 17,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 742,
+                  "col": 17,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "1",
+              "inner": [
+                {
+                  "id": "0x2196eacdb10",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 742,
+                      "col": 17,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 742,
+                      "col": 17,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "0x2196eacdbf8",
+          "kind": "EnumConstantDecl",
+          "loc": {
+            "offset": 749,
+            "line": 23,
+            "col": 5,
+            "tokLen": 11
+          },
+          "range": {
+            "begin": {
+              "offset": 749,
+              "col": 5,
+              "tokLen": 11
+            },
+            "end": {
+              "offset": 763,
+              "col": 19,
+              "tokLen": 1
+            }
+          },
+          "name": "COLOR_GREEN",
+          "type": {
+            "qualType": "int"
+          },
+          "inner": [
+            {
+              "id": "0x2196eacdbd8",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 763,
+                  "col": 19,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 763,
+                  "col": 19,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "2",
+              "inner": [
+                {
+                  "id": "0x2196eacdbb0",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 763,
+                      "col": 19,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 763,
+                      "col": 19,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "0x2196eacdc98",
+          "kind": "EnumConstantDecl",
+          "loc": {
+            "offset": 770,
+            "line": 24,
+            "col": 5,
+            "tokLen": 10
+          },
+          "range": {
+            "begin": {
+              "offset": 770,
+              "col": 5,
+              "tokLen": 10
+            },
+            "end": {
+              "offset": 783,
+              "col": 18,
+              "tokLen": 1
+            }
+          },
+          "name": "COLOR_BLUE",
+          "type": {
+            "qualType": "int"
+          },
+          "inner": [
+            {
+              "id": "0x2196eacdc78",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 783,
+                  "col": 18,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 783,
+                  "col": 18,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "4",
+              "inner": [
+                {
+                  "id": "0x2196eacdc50",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 783,
+                      "col": 18,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 783,
+                      "col": 18,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "4"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x2196eacdd78",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 787,
+        "line": 25,
+        "col": 3,
+        "tokLen": 5
+      },
+      "range": {
+        "begin": {
+          "offset": 711,
+          "line": 21,
+          "col": 1,
+          "tokLen": 7
+        },
+        "end": {
+          "offset": 787,
+          "line": 25,
+          "col": 3,
+          "tokLen": 5
+        }
+      },
+      "isReferenced": true,
+      "name": "Color",
+      "type": {
+        "qualType": "enum Color"
+      },
+      "inner": [
+        {
+          "id": "0x2196eacdd30",
+          "kind": "EnumType",
+          "type": {
+            "qualType": "enum Color"
+          },
+          "decl": {
+            "id": "0x2196eacda68",
+            "kind": "EnumDecl",
+            "name": ""
+          },
+          "isTagOwned": true
+        }
+      ]
+    },
+    {
+      "id": "0x2196eacde00",
+      "kind": "VarDecl",
+      "loc": {
+        "offset": 872,
+        "line": 29,
+        "col": 18,
+        "tokLen": 18
+      },
+      "range": {
+        "begin": {
+          "offset": 855,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 893,
+          "col": 39,
+          "tokLen": 1
+        }
+      },
+      "name": "LIBVARIANT_VERSION",
+      "mangledName": "LIBVARIANT_VERSION",
+      "type": {
+        "qualType": "const int"
+      },
+      "storageClass": "static",
+      "init": "c",
+      "inner": [
+        {
+          "id": "0x2196eacdeb0",
+          "kind": "IntegerLiteral",
+          "range": {
+            "begin": {
+              "offset": 893,
+              "col": 39,
+              "tokLen": 1
+            },
+            "end": {
+              "offset": 893,
+              "col": 39,
+              "tokLen": 1
+            }
+          },
+          "type": {
+            "qualType": "int"
+          },
+          "valueCategory": "prvalue",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "id": "0x2196eace018",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 1019,
+        "line": 33,
+        "col": 11,
+        "tokLen": 15
+      },
+      "range": {
+        "begin": {
+          "offset": 1009,
+          "col": 1,
+          "tokLen": 4
+        },
+        "end": {
+          "offset": 1040,
+          "col": 32,
+          "tokLen": 1
+        }
+      },
+      "name": "variant_set_int",
+      "mangledName": "variant_set_int",
+      "type": {
+        "qualType": "long long (int)"
+      },
+      "inner": [
+        {
+          "id": "0x2196eacdf38",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 1039,
+            "col": 31,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 1035,
+              "col": 27,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 1039,
+              "col": 31,
+              "tokLen": 1
+            }
+          },
+          "name": "v",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196eace1b8",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 1177,
+        "line": 36,
+        "col": 7,
+        "tokLen": 16
+      },
+      "range": {
+        "begin": {
+          "offset": 1171,
+          "col": 1,
+          "tokLen": 5
+        },
+        "end": {
+          "offset": 1208,
+          "col": 38,
+          "tokLen": 1
+        }
+      },
+      "name": "variant_as_float",
+      "mangledName": "variant_as_float",
+      "type": {
+        "qualType": "float (long long)"
+      },
+      "inner": [
+        {
+          "id": "0x2196eace0e0",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 1204,
+            "col": 34,
+            "tokLen": 4
+          },
+          "range": {
+            "begin": {
+              "offset": 1194,
+              "col": 24,
+              "tokLen": 4
+            },
+            "end": {
+              "offset": 1204,
+              "col": 34,
+              "tokLen": 4
+            }
+          },
+          "name": "bits",
+          "type": {
+            "qualType": "long long"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196eace488",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 1282,
+        "line": 38,
+        "col": 5,
+        "tokLen": 8
+      },
+      "range": {
+        "begin": {
+          "offset": 1278,
+          "col": 1,
+          "tokLen": 3
+        },
+        "end": {
+          "offset": 1307,
+          "col": 30,
+          "tokLen": 1
+        }
+      },
+      "name": "color_or",
+      "mangledName": "color_or",
+      "type": {
+        "qualType": "int (Color, Color)"
+      },
+      "inner": [
+        {
+          "id": "0x2196eace2d0",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 1297,
+            "col": 20,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 1291,
+              "col": 14,
+              "tokLen": 5
+            },
+            "end": {
+              "offset": 1297,
+              "col": 20,
+              "tokLen": 1
+            }
+          },
+          "name": "a",
+          "type": {
+            "desugaredQualType": "enum Color",
+            "qualType": "Color",
+            "typeAliasDeclId": "0x2196eacdd78"
+          }
+        },
+        {
+          "id": "0x2196eace358",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 1306,
+            "col": 29,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 1300,
+              "col": 23,
+              "tokLen": 5
+            },
+            "end": {
+              "offset": 1306,
+              "col": 29,
+              "tokLen": 1
+            }
+          },
+          "name": "b",
+          "type": {
+            "desugaredQualType": "enum Color",
+            "qualType": "Color",
+            "typeAliasDeclId": "0x2196eacdd78"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2196eace598",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 1375,
+        "line": 40,
+        "col": 5,
+        "tokLen": 7
+      },
+      "range": {
+        "begin": {
+          "offset": 1371,
+          "col": 1,
+          "tokLen": 3
+        },
+        "end": {
+          "offset": 1383,
+          "col": 13,
+          "tokLen": 1
+        }
+      },
+      "name": "get_max",
+      "mangledName": "get_max",
+      "type": {
+        "qualType": "int ()"
+      }
+    },
+    {
+      "id": "0x2196eace668",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 1453,
+        "line": 42,
+        "col": 5,
+        "tokLen": 11
+      },
+      "range": {
+        "begin": {
+          "offset": 1449,
+          "col": 1,
+          "tokLen": 3
+        },
+        "end": {
+          "offset": 1465,
+          "col": 17,
+          "tokLen": 1
+        }
+      },
+      "name": "get_version",
+      "mangledName": "get_version",
+      "type": {
+        "qualType": "int ()"
+      }
+    }
+  ]
+}

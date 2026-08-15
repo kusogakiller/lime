@@ -1,0 +1,33 @@
+// Phase 1 C ABI completeness: union (struct-sized), enum (Int + named consts),
+// and constants/macros (surfaced as zero-arg extern fn shims returning the
+// literal value). All extracted by Charger from the C header and surfaced using
+// existing Lime features (struct / Int / extern fn). No new Lime type categories
+// were added (Architecture Gate respected).
+
+extern fn COLOR_RED() -> Int "lime_const_COLOR_RED"
+extern fn COLOR_GREEN() -> Int "lime_const_COLOR_GREEN"
+extern fn COLOR_BLUE() -> Int "lime_const_COLOR_BLUE"
+extern fn LIBVARIANT_MAX() -> Int "lime_const_LIBVARIANT_MAX"
+extern fn LIBVARIANT_VERSION() -> Int "lime_const_LIBVARIANT_VERSION"
+
+extern fn variant_set_int(Int: a0) -> Int "variant_set_int"
+extern fn variant_as_float(Int: a0) -> Float "variant_as_float"
+extern fn color_or(Int: a0, Int: a1) -> Int "color_or"
+extern fn get_max() -> Int "get_max"
+extern fn get_version() -> Int "get_version"
+
+fn main():
+    let v = variant_set_int(42)
+    print(v)            // expect 42
+    print("\n")
+    let m = get_max()
+    print(m)            // expect 1024
+    print("\n")
+    let ver = get_version()
+    print(ver)          // expect 3
+    print("\n")
+    let r = COLOR_RED()
+    let b = COLOR_BLUE()
+    let c = color_or(r, b)   // 1 | 4 = 5
+    print(c)            // expect 5
+    print("\n")

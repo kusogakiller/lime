@@ -87,6 +87,11 @@ pub struct CStruct {
 pub struct NormalizedApi {
     pub functions: Vec<CFunction>,
     pub structs: Vec<CStruct>,
+    // Phase 1 C ABI completeness: compile-time constants surfaced to Lime as
+    // `const NAME = VALUE`. Sources: C `enum` enumerators, file-scope
+    // `static const` variables, and `#define` integer macros. These reuse the
+    // existing Lime `const` statement (no new Lime type category is introduced).
+    pub constants: Vec<(String, i64)>,
     pub kind: ApiKind, // C or Cpp
     // Real-world Phase A: the set of type names that are *record/handle* types
     // (`sqlite3`, `sqlite3_stmt`, `sqlite3_blob`, … — i.e. `typedef struct X X;`
@@ -152,6 +157,7 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
         structs: Vec::new(),
         kind: lang,
         handle_types: BTreeSet::new(),
+        constants: Vec::new(),
     };
     let mut ctx = NormalizeCtx {
         anon_struct: None,
@@ -185,7 +191,91 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
             }
         }
     }
+    // Resolve typedef aliases: a typedef whose underlying type is an enum
+    // (e.g. `typedef enum { ... } Color;`) should be surfaced as `Int` so the
+    // Lime iface uses `Int` where the C API expects the enum. Build the set of
+    // enum-typedef names, then rewrite `CType::Other(name)` occurrences.
+    let enum_aliases: std::collections::HashSet<String> = ctx
+        .typedefs
+        .iter()
+        .filter(|(_, u)| u.contains("enum "))
+        .map(|(n, _)| n.clone())
+        .collect();
+    if !enum_aliases.is_empty() {
+        for f in &mut api.functions {
+            for p in &mut f.params {
+                if let CType::Other(n) = &p.ty {
+                    if enum_aliases.contains(n) {
+                        p.ty = CType::Int;
+                    }
+                }
+            }
+            if let CType::Other(n) = &f.ret {
+                if enum_aliases.contains(n) {
+                    f.ret = CType::Int;
+                }
+            }
+        }
+    }
     api
+}
+
+/// Given the fields of a union, keep only the widest member so the Lime struct
+/// spelling has the same value-type ABI width as the C union (union size ==
+/// largest member size). Width is estimated from the C type spelling.
+fn widest_member(fields: Vec<CParam>) -> Vec<CParam> {
+    if fields.is_empty() {
+        return fields;
+    }
+    let width_of = |t: &CType| -> usize {
+        match t {
+            CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_) => 8,
+            CType::Int | CType::Float | CType::Bool => 4,
+            CType::Struct(_) | CType::Other(_) => 8, // be conservative
+            CType::Void | CType::String => 8,
+        }
+    };
+    let mut best = &fields[0];
+    let mut best_w = width_of(&fields[0].ty);
+    for f in fields.iter().skip(1) {
+        let w = width_of(&f.ty);
+        if w >= best_w {
+            best = f;
+            best_w = w;
+        }
+    }
+    vec![CParam { name: best.name.clone(), ty: best.ty.clone() }]
+}
+
+/// Scan a C header source for simple integer object-like macros of the form
+/// `#define NAME <integer>` and append them to `out`. Macros are preprocessor
+/// text and are absent from the clang AST JSON, so this textual scan is the
+/// only recovery path. Non-integer macros (e.g. function-like macros, string
+/// literals) are intentionally skipped — they cannot be surfaced as Lime consts.
+fn extract_macro_constants(header: &Path, out: &mut Vec<(String, i64)>) {
+    let Ok(src) = std::fs::read_to_string(header) else { return; };
+    // Avoid re-adding a constant already discovered via EnumConstantDecl / VarDecl.
+    let mut known: std::collections::HashSet<String> = out.iter().map(|(n, _)| n.clone()).collect();
+    for line in src.lines() {
+        let line = line.trim_start();
+        if !line.starts_with("#define") {
+            continue;
+        }
+        // `#define NAME VALUE` — split off the directive, then on whitespace.
+        let rest = &line["#define".len()..];
+        let mut parts = rest.split_whitespace();
+        let Some(name) = parts.next() else { continue };
+        let Some(val_str) = parts.next() else { continue };
+        // Only object-like macros with a single integer value.
+        if name.contains('(') || parts.next().is_some() {
+            continue;
+        }
+        if let Ok(v) = val_str.parse::<i64>() {
+            if known.insert(name.to_string()) {
+                out.push((name.to_string(), v));
+            }
+        }
+    }
 }
 
 fn type_from_json(t: &serde_json::Value) -> CType {
@@ -261,7 +351,7 @@ fn parse_c_type(qual: &str) -> CType {
         "char" | "const char" | "char *" | "const char *" => CType::String, // treat C strings as Lime String
         s if s.starts_with("struct ") => CType::Struct(s["struct ".len()..].to_string()),
         s if s.starts_with("class ") => CType::Struct(s["class ".len()..].to_string()),
-        s if s.starts_with("enum ") => CType::Opaque(s["enum ".len()..].to_string()),
+        s if s.starts_with("enum ") => CType::Int, // enums are ABI-compatible with int
         s if s.starts_with("typedef ") => CType::Opaque(s["typedef ".len()..].to_string()),
         s => CType::Other(s.to_string()),
     }
@@ -326,6 +416,8 @@ fn classify_node(
         "RecordDecl" => {
             let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let is_implicit = node.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+            let tag_used = node.get("tagUsed").and_then(|v| v.as_str()).unwrap_or("");
+            let is_union = tag_used == "union";
             let mut fields = Vec::new();
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for f in inner {
@@ -338,6 +430,15 @@ fn classify_node(
                     }
                 }
             }
+            // For a union, only the largest member needs to survive in the Lime
+            // struct spelling so the value-type ABI width matches (a union's size
+            // is its largest member). Keep the widest scalar/ptr member; fall back
+            // to the last field if nothing obvious stands out.
+            let fields = if is_union {
+                widest_member(fields)
+            } else {
+                fields
+            };
             if !name.is_empty() && !is_implicit {
                 api.structs.push(CStruct {
                     name: name.clone(),
@@ -346,13 +447,67 @@ fn classify_node(
                     align_bytes: None,
                 });
             } else if !is_implicit {
-                // Anonymous record body (e.g. `typedef struct { ... } Point;`)
-                // — remember for a following TypedefDecl.
+                // Anonymous record body (e.g. `typedef struct { ... } Point;` or
+                // `typedef union { ... } Variant;`) — remember for a TypedefDecl.
                 ctx.anon_struct = Some(fields);
             }
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
                     classify_node(c, api, ctx, Some(name.clone()), lang);
+                }
+            }
+        }
+        "EnumDecl" => {
+            // Enum enumerators are `EnumConstantDecl` children. clang stores the
+            // integer value inside a `ConstantExpr` wrapper (its `value` field is
+            // a string like "1"), not directly on the EnumConstantDecl. Collect
+            // them as Lime constants so the enum's named values are usable from
+            // Lime. The enum type itself is surfaced as `Int` (ABI-compatible),
+            // not as a separate Lime type.
+            if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+                for e in inner {
+                    if e.get("kind").and_then(|v| v.as_str()) == Some("EnumConstantDecl") {
+                        let ename = e.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        if ename.is_empty() {
+                            continue;
+                        }
+                        let val = e
+                            .get("inner")
+                            .and_then(|v| v.as_array())
+                            .and_then(|a| a.first())
+                            .and_then(|c| c.get("value").and_then(|v| v.as_str()))
+                            .and_then(|s| s.parse::<i64>().ok());
+                        if let Some(v) = val {
+                            api.constants.push((ename, v));
+                        }
+                    }
+                }
+            }
+        }
+        "MacroDefinition" => {
+            // Macros are NOT in the AST JSON (preprocessor text); this arm is
+            // only reached if a future extraction path injects them. The real
+            // macro parse happens in `extract_macro_constants` over the header
+            // source. Kept as a no-op guard so the match is exhaustive.
+        }
+        "VarDecl" => {
+            // `static const int NAME = <int literal>;` — extract as a constant.
+            let vname = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let storage = node.get("storageClass").and_then(|v| v.as_str()).unwrap_or("");
+            let is_const = node
+                .get("type")
+                .and_then(|t| t.get("qualType"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.contains("const"))
+                .unwrap_or(false);
+            if !vname.is_empty() && storage == "static" && is_const {
+                if let Some(init) = node.get("inner").and_then(|v| v.as_array()) {
+                    for i in init {
+                        if let Some(v) = i.get("value").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()) {
+                            api.constants.push((vname, v));
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -365,7 +520,21 @@ fn classify_node(
                 .unwrap_or("")
                 .to_string();
             if !name.is_empty() {
-                ctx.typedefs.push((name, underlying));
+                ctx.typedefs.push((name.clone(), underlying.clone()));
+                // A typedef of an anonymous record body (`typedef struct { ... } X;`
+                // or `typedef union { ... } X;`) — the body was remembered in
+                // `ctx.anon_struct` by the preceding RecordDecl. Surface it as a
+                // named struct so Lime has a concrete type to use.
+                if let Some(fields) = ctx.anon_struct.take() {
+                    if !underlying.contains("enum") {
+                        api.structs.push(CStruct {
+                            name: name.clone(),
+                            fields,
+                            size_bytes: None,
+                            align_bytes: None,
+                        });
+                    }
+                }
             }
         }
         "FunctionDecl" => {
@@ -649,11 +818,21 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
 
 /// Generate the C source for every adapter shim. `header_name` is the library
 /// header to `#include` (e.g. "sqlite3.h") so the shim sees the real types.
-fn gen_adapter_c_source(adapters: &[AdapterSpec], header_name: &str) -> String {
+fn gen_adapter_c_source(adapters: &[AdapterSpec], constants: &[(String, i64)], header_name: &str) -> String {
     let mut s = String::new();
-    s.push_str("/* Charger-generated adapter shims (out-param + null-callback). DO NOT EDIT. */\n");
+    s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const). DO NOT EDIT. */\n");
     s.push_str("#include <stddef.h>\n#include <stdlib.h>\n");
     s.push_str(&format!("#include \"{}\"\n", header_name));
+    // Constant shims: `int lime_const_NAME() { return <value>; }` — surfaces a
+    // C integer constant/macro as a zero-arg extern fn callable from Lime
+    // (Lime has no top-level `const`, so this preserves the value without a
+    // language change).
+    for (name, val) in constants {
+        s.push_str(&format!(
+            "int lime_const_{}(void) {{ return (int)({}); }}\n\n",
+            name, val
+        ));
+    }
     for a in adapters {
         // Indices dropped from the Lime-facing signature.
         let mut drop: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -727,12 +906,13 @@ fn gen_adapter_c_source(adapters: &[AdapterSpec], header_name: &str) -> String {
 /// `#include`s the library header (found via `header`'s directory).
 fn build_adapters_into(
     adapters: &[AdapterSpec],
+    constants: &[(String, i64)],
     art_path: &Path,
     header: &Path,
     llvm_bindir: &str,
     lang: ApiKind,
 ) -> Result<(), String> {
-    if adapters.is_empty() {
+    if adapters.is_empty() && constants.is_empty() {
         return Ok(());
     }
     let header_name = header
@@ -740,7 +920,7 @@ fn build_adapters_into(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-    let src = gen_adapter_c_source(adapters, &header_name);
+    let src = gen_adapter_c_source(adapters, constants, &header_name);
     let build_dir = std::env::temp_dir().join("charger_build_adapters");
     let _ = std::fs::create_dir_all(&build_dir);
     let c_path = build_dir.join("lime_adapters.c");
@@ -801,6 +981,21 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
     let mut out = String::new();
     out.push_str(&format!("// Charger-generated Lime interface for '{}'\n", lib_name));
     out.push_str("// DO NOT EDIT: regenerate with `charger install`.\n\n");
+
+    // Constants (enum enumerators, static consts, integer object-macros) are
+    // surfaced as zero-arg `extern fn` shims that return the literal value.
+    // Lime has no top-level `const` form, so a generated C shim
+    // (`lime_const_NAME` -> `return <value>;`) gives the same effect without
+    // changing Lime's surface syntax (Architecture Gate respected).
+    for (name, val) in &api.constants {
+        out.push_str(&format!(
+            "extern fn {}(Int) -> Int \"lime_const_{}\"\n",
+            name, name
+        ));
+    }
+    if !api.constants.is_empty() {
+        out.push_str("\n");
+    }
 
     // Structs first (Lime requires types to be visible before use).
     for s in &api.structs {
@@ -1014,7 +1209,11 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // normalized API is needed both for the cache-hit path (to (re)generate the
     // iface + shims) and the full build path.
     let ast = extract_ast_json(&header, lang, llvm_bindir)?;
-    let api = normalize(&ast, lang);
+    let mut api = normalize(&ast, lang);
+    // Macros are preprocessor text and never appear in the AST JSON, so scan
+    // the header source directly for `#define NAME <int>` forms. This is the
+    // only place macros can be recovered; AST-based extraction cannot see them.
+    extract_macro_constants(&header, &mut api.constants);
     let adapters = collect_out_param_adapters(&api);
 
     // #8: artifact cache. If a store entry already exists whose manifest's
@@ -1033,7 +1232,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // the reused artifact (a stale artifact built by an older
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
-                build_adapters_into(&adapters, &art_dest, &header, llvm_bindir, lang)?;
+                build_adapters_into(&adapters, &api.constants, &art_dest, &header, llvm_bindir, lang)?;
                 let iface = generate_lime_iface(&api, &lib_name, &adapters);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
@@ -1116,7 +1315,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // 2b. Build out-param / null-callback adapter shims and insert them into
     // the prepared native artifact (so the Lime `extern fn` shim symbols
     // resolve at link time).
-    build_adapters_into(&adapters, &art_path, &header, llvm_bindir, lang)?;
+    build_adapters_into(&adapters, &api.constants, &art_path, &header, llvm_bindir, lang)?;
 
     // 2. AST extraction + normalization (already performed earlier; reuse it).
 

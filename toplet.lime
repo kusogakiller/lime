@@ -1,0 +1,8 @@
+let GREEN = 2
+let BLUE = 4
+
+fn main():
+    print(GREEN)
+    print("\n")
+    print(BLUE)
+    print("\n")

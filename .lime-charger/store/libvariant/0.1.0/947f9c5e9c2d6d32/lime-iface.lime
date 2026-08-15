@@ -1,0 +1,18 @@
+// Charger-generated Lime interface for 'libvariant'
+// DO NOT EDIT: regenerate with `charger install`.
+
+extern fn COLOR_RED(Int) -> Int "lime_const_COLOR_RED"
+extern fn COLOR_GREEN(Int) -> Int "lime_const_COLOR_GREEN"
+extern fn COLOR_BLUE(Int) -> Int "lime_const_COLOR_BLUE"
+extern fn LIBVARIANT_VERSION(Int) -> Int "lime_const_LIBVARIANT_VERSION"
+extern fn LIBVARIANT_MAX(Int) -> Int "lime_const_LIBVARIANT_MAX"
+
+struct Variant {
+    ll: Int
+}
+
+extern fn variant_set_int(Int: a0) -> Int "variant_set_int"
+extern fn variant_as_float(Int: a0) -> Float "variant_as_float"
+extern fn color_or(Int: a0, Int: a1) -> Int "color_or"
+extern fn get_max() -> Int "get_max"
+extern fn get_version() -> Int "get_version"
