@@ -1,0 +1,84 @@
+// Phase 1 Iteration 3: arrays + nested aggregates (general mechanism).
+// Any C struct with fixed-size array fields, nested struct fields, or flexible
+// array members is surfaced as Opaque(Name) with generated element-wise
+// accessor shims. No library-specific code.
+
+// Nested struct field
+extern fn lime_make_Aggregate() -> Opaque(Aggregate) "lime_make_Aggregate"
+extern fn lime_get_Aggregate_origin(Opaque(Aggregate): a0) -> Opaque(Point2) "lime_get_Aggregate_origin"
+extern fn lime_set_Aggregate_origin(Opaque(Aggregate): a0, Opaque(Point2): a1) "lime_set_Aggregate_origin"
+extern fn lime_get_Aggregate_count(Opaque(Aggregate): a0) -> Int "lime_get_Aggregate_count"
+extern fn lime_set_Aggregate_count(Opaque(Aggregate): a0, Int: a1) "lime_set_Aggregate_count"
+
+// Fixed-size array fields (element-wise)
+extern fn lime_get_Aggregate_vals_i(Opaque(Aggregate): a0, Int: a1) -> Int "lime_get_Aggregate_vals_i"
+extern fn lime_set_Aggregate_vals_i(Opaque(Aggregate): a0, Int: a1, Int: a2) "lime_set_Aggregate_vals_i"
+extern fn lime_get_Aggregate_name_i(Opaque(Aggregate): a0, Int: a1) -> Int "lime_get_Aggregate_name_i"
+extern fn lime_set_Aggregate_name_i(Opaque(Aggregate): a0, Int: a1, Int: a2) "lime_set_Aggregate_name_i"
+
+// Nested Point2 struct
+extern fn lime_make_Point2() -> Opaque(Point2) "lime_make_Point2"
+extern fn lime_get_Point2_x(Opaque(Point2): a0) -> Int "lime_get_Point2_x"
+extern fn lime_set_Point2_x(Opaque(Point2): a0, Int: a1) "lime_set_Point2_x"
+extern fn lime_get_Point2_y(Opaque(Point2): a0) -> Int "lime_get_Point2_y"
+extern fn lime_set_Point2_y(Opaque(Point2): a0, Int: a1) "lime_set_Point2_y"
+
+// C-side accessors (read/write through real C layout)
+extern fn agg_origin_x(Opaque(Aggregate): a0) -> Int "agg_origin_x"
+extern fn agg_set_val(Opaque(Aggregate): a0, Int: a1, Int: a2) "agg_set_val"
+extern fn agg_get_val(Opaque(Aggregate): a0, Int: a1) -> Int "agg_get_val"
+extern fn agg_name_len(Opaque(Aggregate): a0) -> Int "agg_name_len"
+
+// Flexible array member (sized constructor + element-wise)
+extern fn lime_make_FlexBuf_flex(Int: a0) -> Opaque(FlexBuf) "lime_make_FlexBuf_flex"
+extern fn lime_get_FlexBuf_id(Opaque(FlexBuf): a0) -> Int "lime_get_FlexBuf_id"
+extern fn lime_set_FlexBuf_id(Opaque(FlexBuf): a0, Int: a1) "lime_set_FlexBuf_id"
+extern fn lime_get_FlexBuf_len(Opaque(FlexBuf): a0) -> Int "lime_get_FlexBuf_len"
+extern fn lime_get_FlexBuf_data_i(Opaque(FlexBuf): a0, Int: a1) -> Float "lime_get_FlexBuf_data_i"
+extern fn lime_set_FlexBuf_data_i(Opaque(FlexBuf): a0, Int: a1, Float: a2) "lime_set_FlexBuf_data_i"
+extern fn flex_set(Opaque(FlexBuf): a0, Int: a1, Float: a2) "flex_set"
+extern fn flex_get(Opaque(FlexBuf): a0, Int: a1) -> Float "flex_get"
+
+fn main():
+    // Nested struct field: set origin, read via C accessor
+    let a = lime_make_Aggregate()
+    let p = lime_make_Point2()
+    lime_set_Point2_x(p, 3)
+    lime_set_Point2_y(p, 4)
+    lime_set_Aggregate_origin(a, p)
+    let ox = agg_origin_x(a)
+    // origin.x = 3
+    print(ox)
+    print("\n")
+
+    // Fixed-size array field: set vals[2]=99, read back via C accessor
+    lime_set_Aggregate_vals_i(a, 2, 99)
+    let v2 = agg_get_val(a, 2)
+    // vals[2] = 99
+    print(v2)
+    print("\n")
+
+    // Char array field: write name bytes, read length via C strlen
+    lime_set_Aggregate_name_i(a, 0, 72)   // 'H'
+    lime_set_Aggregate_name_i(a, 1, 105)  // 'i'
+    lime_set_Aggregate_name_i(a, 2, 0)    // NUL terminator
+    let nl = agg_name_len(a)
+    // strlen("Hi") = 2
+    print(nl)
+    print("\n")
+
+    // Flexible array member: sized constructor + element-wise set/get
+    let f = lime_make_FlexBuf_flex(4)
+    lime_set_FlexBuf_id(f, 7)
+    lime_set_FlexBuf_data_i(f, 0, 1.5)
+    lime_set_FlexBuf_data_i(f, 1, 2.5)
+    let fid = lime_get_FlexBuf_id(f)
+    let d0 = flex_get(f, 0)   // 1.5
+    let d1 = flex_get(f, 1)   // 2.5
+    // id=7, d0=1.5, d1=2.5
+    print(fid)
+    print("\n")
+    print(d0)
+    print("\n")
+    print(d1)
+    print("\n")

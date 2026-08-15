@@ -54,6 +54,13 @@ pub enum CType {
     Struct(String), // named struct/class
     Opaque(String), // typedef / named but fields unknown
     Other(String),  // fallback: raw C type text
+    // Fixed-size or flexible C array (`T[N]`, `T[]`). The element type and an
+    // optional size (None == flexible array member) are retained so Charger can
+    // generate element-wise accessor shims. This is a Charger-internal
+    // representation only — it never reaches Lime's `Type` enum (Architecture
+    // Gate respected: Lime has no array category; arrays surface as opaque
+    // handles with element-wise get/set adapters).
+    Array(Box<CType>, Option<usize>),
 }
 
 #[derive(Debug, Clone)]
@@ -251,14 +258,7 @@ fn widest_member(fields: Vec<CParam>) -> Vec<CParam> {
     if fields.is_empty() {
         return fields;
     }
-    let width_of = |t: &CType| -> usize {
-        match t {
-            CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_) => 8,
-            CType::Int | CType::Float | CType::Bool => 4,
-            CType::Struct(_) | CType::Other(_) => 8, // be conservative
-            CType::Void | CType::String => 8,
-        }
-    };
+    let width_of = |t: &CType| field_width(t);
     let mut best = &fields[0];
     let mut best_w = width_of(&fields[0].ty);
     for f in fields.iter().skip(1) {
@@ -366,6 +366,23 @@ fn parse_c_type(qual: &str) -> CType {
             _ => {}
         }
         return CType::Pointer(Box::new(pointee));
+    }
+    // Array types: `T[N]` (fixed) or `T[]` (flexible array member). Extract the
+    // element type and optional size. A pointer suffix (`T*`) is handled below,
+    // so strip a trailing `*` before testing for `[`.
+    let q_noptr = q.strip_suffix('*').unwrap_or(q).trim();
+    if let Some(bracket) = q_noptr.find('[') {
+        if q_noptr.ends_with(']') {
+            let elem = q_noptr[..bracket].trim();
+            let size_part = &q_noptr[bracket + 1..q_noptr.len() - 1];
+            let elem_ty = parse_c_type(elem);
+            let size = if size_part.trim().is_empty() {
+                None // flexible array member `T[]`
+            } else {
+                size_part.trim().parse::<usize>().ok()
+            };
+            return CType::Array(Box::new(elem_ty), size);
+        }
     }
     match q {
         "int" | "unsigned int" | "short" | "unsigned short" | "long" | "unsigned long"
@@ -738,7 +755,11 @@ fn lime_type_name(t: &CType) -> String {
         CType::String => "String".to_string(),
         CType::Pointer(inner) => lime_type_name(inner), // simplify: treat as pointee
         CType::Function(_, _) => "Callback".to_string(), // opaque C fn pointer, ABI = i8*
-        CType::Struct(s) => s.clone(),
+        // A bare struct name as a *field type* (nested struct, or a struct that
+        // surfaces as an opaque handle) is surfaced to Lime as `Opaque(Name)` —
+        // a bare `ptr` — never a Lime struct definition. (Real Lime structs are
+        // emitted by the `all_8byte` branch, which does not call this function.)
+        CType::Struct(s) => format!("Opaque({})", s),
         // Task #2/#6: opaque C pointer handle (`struct X*` / `void*` / a C++
         // template instantiation such as `Stack<long long>*`). Emitted as
         // Lime's `Opaque(X)` type spelling, which lowers to a bare `ptr`.
@@ -748,7 +769,70 @@ fn lime_type_name(t: &CType) -> String {
         // separator token). The original spelling + args live in the CIR lite /
         // manifest for auditability.
         CType::Opaque(s) => format!("Opaque({})", s),
-        CType::Other(s) => s.clone(),
+        // `CType::Other(s)` is an unmodeled type spelling — a named struct/record
+        // whose fields Charger did not normalize, or a typedef'd opaque name.
+        // Surface as `Opaque(s)` so Lime treats it as a bare `ptr` handle (the C
+        // side owns the real layout via the generated accessor shims).
+        CType::Other(s) => format!("Opaque({})", s),
+        // Array element type (used by element-wise accessor shims). The Lime
+        // getter returns a single element; its Lime type is the element type.
+        CType::Array(elem, _) => lime_type_name(elem),
+    }
+}
+
+/// ABI width (in bytes) of a `CType`, used to pick the largest-aligned field for
+/// struct layout decisions. Arrays contribute `elem_width * size` (a flexible
+/// array member contributes 0 — its real size comes from the clang layout).
+fn field_width(t: &CType) -> usize {
+    match t {
+        CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_) => 8,
+        CType::Int | CType::Float | CType::Bool => 4,
+        CType::Struct(_) | CType::Other(_) => 8, // be conservative
+        CType::Void | CType::String => 8,
+        CType::Array(elem, size) => {
+            let ew = field_width(elem);
+            size.map(|n| ew * n).unwrap_or(0)
+        }
+    }
+}
+
+/// Emit Lime `extern fn` accessor declarations for a single struct field.
+/// Handles: scalar/struct/opaque (get/set), arrays (element-wise get_i/set_i),
+/// and flexible array members (element-wise get_i/set_i + sized constructor).
+fn emit_field_accessors(out: &mut String, s: &CStruct, f: &CParam) {
+    match &f.ty {
+        CType::Array(elem, size) => {
+            // Element-wise accessor shims. The C side indexes into the real
+            // array; Lime never sees the raw array (Lime has no array type).
+            let elem_lime = lime_type_name(elem);
+            out.push_str(&format!(
+                "extern fn lime_get_{}_{}_i(Opaque({}): a0, Int: a1) -> {} \"lime_get_{}_{}_i\"\n",
+                s.name, f.name, s.name, elem_lime, s.name, f.name
+            ));
+            out.push_str(&format!(
+                "extern fn lime_set_{}_{}_i(Opaque({}): a0, Int: a1, {}: a2) \"lime_set_{}_{}_i\"\n",
+                s.name, f.name, s.name, elem_lime, s.name, f.name
+            ));
+            // Flexible array member: a sized constructor allocates
+            // sizeof(struct) + len * sizeof(elem).
+            if size.is_none() {
+                out.push_str(&format!(
+                    "extern fn lime_make_{}_flex(Int: a0) -> Opaque({}) \"lime_make_{}_flex\"\n",
+                    s.name, s.name, s.name
+                ));
+            }
+        }
+        _ => {
+            let lime_ty = lime_type_name(&f.ty);
+            out.push_str(&format!(
+                "extern fn lime_get_{}_{}(Opaque({}): a0) -> {} \"lime_get_{}_{}\"\n",
+                s.name, f.name, s.name, lime_ty, s.name, f.name
+            ));
+            out.push_str(&format!(
+                "extern fn lime_set_{}_{}(Opaque({}): a0, {}: a1) \"lime_set_{}_{}\"\n",
+                s.name, f.name, s.name, lime_ty, s.name, f.name
+            ));
+        }
     }
 }
 
@@ -826,6 +910,13 @@ fn c_type_text(t: &CType) -> String {
         // `CType::Pointer` wrapper when one was present. Appending `*` here would
         // wrongly turn `sqlite3_int64` into `sqlite3_int64*` and break adapter C.
         CType::Other(s) => s.clone(),
+        CType::Array(elem, size) => {
+            let elem_text = c_type_text(elem);
+            match size {
+                Some(n) => format!("{}[{}]", elem_text, n),
+                None => format!("{}[]", elem_text), // flexible array member
+            }
+        }
     }
 }
 
@@ -882,7 +973,7 @@ fn gen_adapter_c_source(
 ) -> String {
     let mut s = String::new();
     s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors). DO NOT EDIT. */\n");
-    s.push_str("#include <stddef.h>\n#include <stdlib.h>\n");
+    s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n");
     s.push_str(&format!("#include \"{}\"\n", header_name));
     // Union / bitfield accessor shims: since Lime cannot model overlapping
     // members or sub-byte bitfields (Lime `int` is i64), the record is surfaced
@@ -899,23 +990,55 @@ fn gen_adapter_c_source(
             st.name, st.name
         ));
         for f in &st.fields {
-            // Skip array members (e.g. `char bytes[4]`) — C cannot pass/return
-            // arrays by value through a shim; they are accessed via pointer in
-            // real C code. Surface only scalar/aggregate members.
-            if let CType::Other(txt) = &f.ty {
-                if txt.contains('[') {
-                    continue;
+            match &f.ty {
+                CType::Array(elem, size) => {
+                    // Element-wise accessor shims: index into the real C array.
+                    let c_ty = c_type_text(elem);
+                    if size.is_none() {
+                        // Flexible array member: emit a sized constructor that
+                        // allocates sizeof(struct) + len*sizeof(elem), and records
+                        // the element count in the struct's `len` field (if present)
+                        // so C-side bounds checks (e.g. `idx < f->len`) work.
+                        s.push_str(&format!(
+                            "void* lime_make_{0}_flex(int len) {{ {0}* f = ({0}*)calloc(1, sizeof({0}) + (size_t)len * sizeof({1})); if (f) f->len = len; return (void*)f; }}\n",
+                            st.name, c_ty
+                        ));
+                    }
+                    s.push_str(&format!(
+                        "{} lime_get_{}_{}_i({}* u, int i) {{ return ({})u->{}[i]; }}\n",
+                        c_ty, st.name, f.name, st.name, c_ty, f.name
+                    ));
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}_i({}* u, int i, {} v) {{ u->{}[i] = ({})v; }}\n",
+                        st.name, f.name, st.name, c_ty, f.name, c_ty
+                    ));
+                }
+                _ => {
+                    let c_ty = c_type_text(&f.ty);
+                    s.push_str(&format!(
+                        "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
+                        c_ty, st.name, f.name, st.name, c_ty, f.name
+                    ));
+                    // Setter: a Lime `Opaque(Name)` value is a bare pointer (i8*);
+                    // for a *nested struct field* we must copy the pointed-to
+                    // struct into the inline field (not store the pointer). Use
+                    // memcpy so the C layout (clang source of truth) is preserved.
+                    if matches!(&f.ty, CType::Struct(_) | CType::Other(_)) {
+                        // Lime passes `Opaque(Name)` as a bare pointer (i8*); the C
+                        // setter receives it as a pointer and memcpy's the pointed-to
+                        // struct into the inline field (preserving clang's layout).
+                        s.push_str(&format!(
+                            "void lime_set_{}_{}({}* u, {}* v) {{ memcpy(&u->{}, v, sizeof({})); }}\n",
+                            st.name, f.name, st.name, c_ty, f.name, c_ty
+                        ));
+                    } else {
+                        s.push_str(&format!(
+                            "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
+                            st.name, f.name, st.name, c_ty, f.name, c_ty
+                        ));
+                    }
                 }
             }
-            let c_ty = c_type_text(&f.ty);
-            s.push_str(&format!(
-                "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
-                c_ty, st.name, f.name, st.name, c_ty, f.name
-            ));
-            s.push_str(&format!(
-                "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
-                st.name, f.name, st.name, c_ty, f.name, c_ty
-            ));
         }
         s.push_str("\n");
         }
@@ -1168,22 +1291,7 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
             out.push_str(&format!("// Opaque handle for C {} '{}' (union/bitfield); use lime_*_get/set shims\n", if s.is_union { "union" } else { "bitfield struct" }, s.name));
             out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
             for f in &s.fields {
-                // Skip array members (C cannot pass/return arrays by value
-                // through a shim); matches the adapter C-source generator.
-                if let CType::Other(txt) = &f.ty {
-                    if txt.contains('[') {
-                        continue;
-                    }
-                }
-                let lime_ty = lime_type_name(&f.ty);
-                out.push_str(&format!(
-                    "extern fn lime_get_{}_{}(Opaque({}): a0) -> {} \"lime_get_{}_{}\"\n",
-                    s.name, f.name, s.name, lime_ty, s.name, f.name
-                ));
-                out.push_str(&format!(
-                    "extern fn lime_set_{}_{}(Opaque({}): a0, {}: a1) \"lime_set_{}_{}\"\n",
-                    s.name, f.name, s.name, lime_ty, s.name, f.name
-                ));
+                emit_field_accessors(&mut out, s, f);
             }
             out.push_str("\n");
             continue;
@@ -1207,20 +1315,7 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
             out.push_str(&format!("// Opaque handle for C struct '{}' (sub-8-byte layout); use lime_*_get/set shims\n", s.name));
             out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
             for f in &s.fields {
-                if let CType::Other(txt) = &f.ty {
-                    if txt.contains('[') {
-                        continue;
-                    }
-                }
-                let lime_ty = lime_type_name(&f.ty);
-                out.push_str(&format!(
-                    "extern fn lime_get_{}_{}(Opaque({}): a0) -> {} \"lime_get_{}_{}\"\n",
-                    s.name, f.name, s.name, lime_ty, s.name, f.name
-                ));
-                out.push_str(&format!(
-                    "extern fn lime_set_{}_{}(Opaque({}): a0, {}: a1) \"lime_set_{}_{}\"\n",
-                    s.name, f.name, s.name, lime_ty, s.name, f.name
-                ));
+                emit_field_accessors(&mut out, s, f);
             }
             out.push_str("\n");
             continue;
