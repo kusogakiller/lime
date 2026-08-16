@@ -63,10 +63,78 @@ pub enum CType {
     Array(Box<CType>, Option<usize>),
 }
 
+/// Compact, serializable tag for a `CType`, used to persist normalized
+/// signatures in the manifest for semantic-metadata validation. The full
+/// `CType` is intentionally NOT stored; only this 1-3 char tag plus symbol
+/// names are kept — enough for `verify_semantics` to validate pointer-likeness
+/// and arity. `ctype_from_tag` is its inverse.
+fn ctype_tag(ty: &CType) -> String {
+    match ty {
+        CType::Pointer(_) => "ptr".to_string(),
+        CType::String => "str".to_string(),
+        CType::Function(_, _) => "fn".to_string(),
+        CType::Array(_, _) => "arr".to_string(),
+        CType::Opaque(_) => "opaque".to_string(),
+        CType::Struct(_) => "struct".to_string(),
+        CType::Other(_) => "other".to_string(),
+        CType::Int => "int".to_string(),
+        CType::Long => "long".to_string(),
+        CType::Float => "float".to_string(),
+        CType::Double => "double".to_string(),
+        CType::Bool => "bool".to_string(),
+        CType::Void => "void".to_string(),
+    }
+}
+
+/// Inverse of `ctype_tag`: reconstruct a `CType` good enough for
+/// pointer-likeness checks. Opaque/struct/other become void-pointer-shaped
+/// handles (pointer-like); scalars become their scalar kind.
+fn ctype_from_tag(tag: &str) -> CType {
+    match tag {
+        "ptr" => CType::Pointer(Box::new(CType::Void)),
+        "str" => CType::String,
+        "fn" => CType::Function(vec![], Box::new(CType::Void)),
+        "arr" => CType::Array(Box::new(CType::Void), None),
+        "opaque" => CType::Opaque("_".to_string()),
+        "struct" => CType::Struct("_".to_string()),
+        "other" => CType::Other("_".to_string()),
+        "int" => CType::Int,
+        "long" => CType::Long,
+        "float" => CType::Float,
+        "double" => CType::Double,
+        "bool" => CType::Bool,
+        _ => CType::Void,
+    }
+}
+
+/// True if a `CType` is pointer-like (a pointer, a handle, a C string, a
+/// function pointer, or an array). Scalars (int/long/float/double/bool/void)
+/// are never pointer-like, so `nullable` / ownership semantics may only be
+/// attached to pointer-like types. Opaque/Struct/Other typedefs lower to bare
+/// pointers (i8*) in Lime, so they count as pointer-like handles.
+fn is_pointer_like(ty: &CType) -> bool {
+    matches!(
+        ty,
+        CType::Pointer(_)
+            | CType::String
+            | CType::Function(_, _)
+            | CType::Array(_, _)
+            | CType::Opaque(_)
+            | CType::Struct(_)
+            | CType::Other(_)
+    )
+}
+
+
 #[derive(Debug, Clone)]
 pub struct CParam {
     pub name: String,
     pub ty: CType,
+    // Phase 1 Iteration 7: AST-visible nullability (facts from `_Nonnull`,
+    // `_Nullable`, or `__attribute__((nonnull))` in the source — NOT inferred).
+    // Defaults to `Unknown`; semantic metadata can refine it. Kept separate
+    // from ABI/ownership (which are never auto-derived here).
+    pub nullable: Nullability,
 }
 
 #[derive(Debug, Clone)]
@@ -343,7 +411,7 @@ fn widest_member(fields: Vec<CParam>) -> Vec<CParam> {
             best_w = w;
         }
     }
-    vec![CParam { name: best.name.clone(), ty: best.ty.clone() }]
+    vec![CParam { name: best.name.clone(), ty: best.ty.clone(), nullable: Nullability::Unknown }]
 }
 
 /// Scan a C header source for simple integer object-like macros of the form
@@ -559,7 +627,7 @@ fn classify_node(
                             seen_bitfield = true;
                         }
                         if !fname.is_empty() {
-                            fields.push(CParam { name: fname, ty: fty });
+                            fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown });
                         }
                     }
                 }
@@ -739,7 +807,50 @@ fn classify_node(
                 return;
             }
             let ftype = node.get("type").cloned().unwrap_or(serde_json::Value::Null);
-            let (params, ret_ty) = params_and_ret(&ftype);
+            let (mut params, ret_ty) = params_and_ret(&ftype);
+            // Phase 1 Iteration 7: generic `__attribute__((nonnull(N)))` extraction.
+            // clang emits a `NonNullAttr` node carrying `args` (the 1-based param
+            // indices marked non-null). Without args it means "all pointer params".
+            // This is a source FACT, captured as `NonNull` (no name inference).
+            if let Some(attrs) = node.get("attributes").and_then(|v| v.as_array()) {
+                for a in attrs {
+                    if a.get("kind").and_then(|k| k.as_str()) == Some("NonNullAttr") {
+                        let targeted: Vec<usize> = a
+                            .get("args")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|e| e.get("expr").or(Some(e)))
+                                    .filter_map(|e| e.as_u64().map(|n| n as usize - 1))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if targeted.is_empty() {
+                            for p in params.iter_mut() {
+                                if matches!(p.ty, CType::Pointer(_) | CType::Opaque(_) | CType::String) {
+                                    p.nullable = Nullability::NonNull;
+                                }
+                            }
+                        } else {
+                            for &idx in &targeted {
+                                if let Some(p) = params.get_mut(idx) {
+                                    p.nullable = Nullability::NonNull;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+                for c in inner {
+                    if c.get("kind").and_then(|k| k.as_str()) == Some("NonNullAttr") {
+                        for p in params.iter_mut() {
+                            if matches!(p.ty, CType::Pointer(_) | CType::Opaque(_) | CType::String) {
+                                p.nullable = Nullability::NonNull;
+                            }
+                        }
+                    }
+                }
+            }
             let variadic = node
                 .get("variadic")
                 .and_then(|v| v.as_bool())
@@ -874,6 +985,11 @@ fn parse_signature(qual: &str) -> (Vec<CParam>, CType) {
             }
             let ty_str = strip_param_name(p);
             let ty = parse_c_type(ty_str.trim());
+            // Phase 1 Iteration 7: AST-visible nullability markers (`_Nonnull`,
+            // `_Nullable`) are spelled inline in the parameter type and are
+            // FACTS in the source — capture them (no inference). `Unknown`
+            // otherwise; semantic metadata may refine later.
+            let nullable = nullability_from_qual(p);
             // A sole `void` parameter ("f(void)") means "no parameters" in C;
             // drop it so the function is surfaced with zero Lime params.
             if matches!(ty, CType::Void) {
@@ -882,6 +998,7 @@ fn parse_signature(qual: &str) -> (Vec<CParam>, CType) {
             params.push(CParam {
                 name: format!("a{}", i),
                 ty,
+                nullable,
             });
         }
     }
@@ -1154,39 +1271,94 @@ struct AdapterSpec {
     params: Vec<CParam>, // original C params (for shim body)
     out_idx: Option<usize>, // index of the out-param, if any
     drop_from: Option<usize>, // drop this param and everything after (NULL callback)
+    // Phase 1 Iteration 7: indices of nonnull parameters. When non-empty, the
+    // generated shim inserts a null guard at its entry so a NULL passed to a
+    // _Nonnull / nonnull parameter is caught at the adapter boundary (the
+    // only place Charger emits C). This is a boundary check, NOT a Lime runtime
+    // change and NOT an auto-free — ownership semantics stay recorded-only.
+    nonnull: Vec<usize>,
 }
 
 /// Inspect the normalized API and emit an [`AdapterSpec`] for every function
 /// that needs a bridge: a function with an out-param (`Pointer(Opaque)`) and/or
 /// a trailing `Callback` parameter. Functions needing no bridge are skipped.
 fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
-    let mut out = Vec::new();
+    // Build adapters keyed by symbol so a single function can carry BOTH an
+    // out-param/callback bridge AND nonnull boundary guards without emitting
+    // two competing shims.
+    let mut by_sym: std::collections::HashMap<String, AdapterSpec> = std::collections::HashMap::new();
     for f in &api.functions {
         let out_idx = f.params.iter().position(|p| is_out_param(&p.ty).is_some());
         // A `Callback` (CType::Function) trailing parameter is the common
         // "optional callback + user data + errmsg" idiom; drop it and the
         // params after it, passing NULL.
         let drop_from = f.params.iter().position(|p| matches!(p.ty, CType::Function(_, _)));
-        if out_idx.is_none() && drop_from.is_none() {
+        // Phase 1 Iteration 7: nonnull parameters (AST auto-extracted facts
+        // from _Nonnull / nonnull, never name-inferred).
+        let nonnull: Vec<usize> = f
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.nullable == Nullability::NonNull)
+            .map(|(i, _)| i)
+            .collect();
+        let needs_bridge = out_idx.is_some() || drop_from.is_some();
+        if !needs_bridge && nonnull.is_empty() {
             continue;
         }
-        let ret_name = out_idx.map(|i| is_out_param(&f.params[i].ty).unwrap());
-        out.push(AdapterSpec {
+        let sym = f.symbol.clone();
+        let entry = by_sym.entry(sym.clone()).or_insert_with(|| AdapterSpec {
             lime_name: sanitize_name(&f.name),
-            symbol: format!("lime_out_{}", sanitize_name(&f.name)),
-            real_symbol: f.symbol.clone(),
-            ret_name,
+            symbol: if needs_bridge {
+                format!("lime_out_{}", sanitize_name(&f.name))
+            } else {
+                // Include the nonnull indices so two functions with the same name
+                // but different nonnull sets never collide on one shim symbol.
+                let nn = nonnull.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_");
+                format!("lime_nonnull_{}_{}", sanitize_name(&f.name), nn)
+            },
+            real_symbol: sym.clone(),
+            ret_name: None,
             ret: f.ret.clone(),
             params: f.params.clone(),
             out_idx,
             drop_from,
+            nonnull: Vec::new(),
         });
+        entry.nonnull.extend(nonnull);
+        entry.nonnull.sort_unstable();
+        entry.nonnull.dedup();
     }
-    out
+    by_sym.into_values().collect()
 }
 
-/// Generate the C source for every adapter shim. `header_name` is the library
-/// header to `#include` (e.g. "sqlite3.h") so the shim sees the real types.
+/// Emit nonnull boundary-guard C statements for an adapter shim. For each
+/// nonnull parameter index, `if (!aN) return <zero>;` is generated. Void-returning
+/// shims `return;` (no value). This is a pure adapter-boundary null check — it
+/// records nothing and never auto-frees.
+fn emit_nonnull_guards(nonnull: &[usize], ret: &CType) -> String {
+    if nonnull.is_empty() {
+        return String::new();
+    }
+    let ret_void = matches!(ret, CType::Void);
+    let mut g = String::new();
+    for &i in nonnull {
+        if ret_void {
+            g.push_str(&format!(
+                "    if (a{} == 0) {{ return; /* nonnull guard */ }}\n",
+                i
+            ));
+        } else {
+            g.push_str(&format!(
+                "    if (a{} == 0) {{ return ({})0; /* nonnull guard */ }}\n",
+                i,
+                c_type_text(ret)
+            ));
+        }
+    }
+    g
+}
+
 fn gen_adapter_c_source(
     adapters: &[AdapterSpec],
     constants: &[(String, i64)],
@@ -1345,6 +1517,11 @@ fn gen_adapter_c_source(
                 call_args.push(format!("a{}", i));
             }
         }
+        // Phase 1 Iteration 7: nonnull boundary guards (adapter entry). A NULL
+        // passed to a _Nonnull / nonnull parameter is rejected here rather
+        // than propagating into the real C call. This is the ONLY place Charger
+        // emits C for these semantics; it records nothing and frees nothing.
+        let guard = emit_nonnull_guards(&a.nonnull, &a.ret);
         if let Some(oi) = a.out_idx {
             // The local holding the handle is the pointee of the out-param.
             let local_ty = if let CType::Pointer(inner) = &a.params[oi].ty {
@@ -1353,10 +1530,11 @@ fn gen_adapter_c_source(
                 format!("{}*", a.ret_name.as_deref().unwrap_or("void"))
             };
             s.push_str(&format!(
-                "{} {} ({}) {{\n    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
+                "{} {} ({}) {{\n{}    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
                 ret_c,
                 a.symbol,
                 decls.join(", "),
+                guard,
                 local_ty,
                 oi,
                 a.real_symbol,
@@ -1365,10 +1543,11 @@ fn gen_adapter_c_source(
             ));
         } else {
             s.push_str(&format!(
-                "{} {} ({}) {{\n    return {}({});\n}}\n\n",
+                "{} {} ({}) {{\n{}    return {}({});\n}}\n\n",
                 ret_c,
                 a.symbol,
                 decls.join(", "),
+                guard,
                 a.real_symbol,
                 call_args.join(", ")
             ));
@@ -1736,6 +1915,7 @@ fn generate_lime_iface(
     lib_name: &str,
     adapters: &[AdapterSpec],
     shapes: &VariadicShapes,
+    sem: &SemanticMeta,
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("// Charger-generated Lime interface for '{}'\n", lib_name));
@@ -2005,6 +2185,13 @@ fn generate_lime_iface(
                     "// calling convention: {}\n",
                     f.calling_convention
                 ));
+            }
+            // Phase 1 Iteration 7: surface the Semantic Supplement Layer as
+            // Lime comments (ownership / nullability / lifetime / free_with /
+            // callback-lifetime). Recorded metadata only — never inferred.
+            let sc = func_semantic_comment(sem, &f.symbol);
+            if !sc.is_empty() {
+                out.push_str(&sc);
             }
         }
     }
@@ -2276,6 +2463,278 @@ impl VariadicShapes {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Phase 1 Iteration 7: Semantic Supplement Layer
+// ----------------------------------------------------------------------------
+//
+// ABI (size/alignment/calling-convention/layout/symbol) is derived automatically
+// from clang/LLVM — see `AbiMeta` / `CType` / `CFunction`. SEMANTICS — ownership,
+// nullability, lifetime, deallocator pairing — cannot, in general, be recovered
+// from the C AST or ABI alone, and must NOT be guessed from naming. They are
+// supplied by an OPTIONAL, library-agnostic auxiliary metadata file
+// (`charger_semantic.toml` beside the header), keyed by the function's linkable
+// symbol (or a global's name). AST-visible nullability attributes (`_Nonnull`,
+// `_Nullable`, `__attribute__((nonnull))`) ARE auto-extracted because they are
+// facts in the source, not guesses.
+//
+// Design constraints (Iter7):
+//   * AST-derived info and semantic metadata are kept strictly separate; ABI
+//     metadata never carries ownership.
+//   * No name-based inference ("create" => owned, "free" => destructor,
+//     "const char*" => borrowed). Absent info stays `Unknown`.
+//   * Lime's type system / ABI is unchanged: no ownership types, no GC, no new
+//     Lime `Type`. Semantics are Charger-internal metadata + optional adapter
+//     boundary checks; they are *recorded*, never silently turned into runtime
+//     behavior (e.g. no automatic `free`).
+
+/// Ownership semantics of a value/pointer. `Unknown` is the explicit default
+/// and MUST be preserved when no metadata is given (no inference allowed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OwnershipSem {
+    #[default]
+    Unknown,
+    Borrowed,
+    Owned,
+    Consumed,
+    Shared,
+}
+
+/// Nullability of a pointer-like value. `Unknown` is the default; AST attributes
+/// upgrade it to `NonNull`/`Nullable` where present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Nullability {
+    #[default]
+    Unknown,
+    Nullable,
+    NonNull,
+}
+
+/// Lifetime of a callback held by the C API. `Unknown` default; explicit
+/// `retained`/`call` only when metadata says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CallbackLifetime {
+    #[default]
+    Unknown,
+    /// The C API stores the callback pointer and may invoke it later (beyond
+    /// the registering call). The Lime callback must outlive the call.
+    Retained,
+    /// The C API invokes the callback only during the call; it does not retain
+    /// it. (Metadata only — Charger records it; no runtime constraint added.)
+    Call,
+}
+
+impl OwnershipSem {
+    fn parse(s: &str) -> Option<OwnershipSem> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "unknown" | "" => Some(OwnershipSem::Unknown),
+            "borrowed" => Some(OwnershipSem::Borrowed),
+            "owned" => Some(OwnershipSem::Owned),
+            "consumed" => Some(OwnershipSem::Consumed),
+            "shared" => Some(OwnershipSem::Shared),
+            _ => None,
+        }
+    }
+}
+
+impl Nullability {
+    fn parse(s: &str) -> Option<Nullability> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "unknown" | "" => Some(Nullability::Unknown),
+            "nullable" | "null" => Some(Nullability::Nullable),
+            "nonnull" | "non-null" | "non_null" => Some(Nullability::NonNull),
+            _ => None,
+        }
+    }
+}
+
+impl CallbackLifetime {
+    fn parse(s: &str) -> Option<CallbackLifetime> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "unknown" | "" => Some(CallbackLifetime::Unknown),
+            "retained" => Some(CallbackLifetime::Retained),
+            "call" | "callonly" | "call-only" => Some(CallbackLifetime::Call),
+            _ => None,
+        }
+    }
+}
+
+/// Per-parameter semantic metadata (index-aligned with a function's params).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ParamSemantics {
+    pub ownership: OwnershipSem,
+    pub nullable: Nullability,
+}
+
+/// Return-value semantic metadata.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ReturnSemantics {
+    pub ownership: OwnershipSem,
+    /// For `owned` returns: the destructor symbol that releases the value.
+    /// Generic pairing (no name dictionary) — only what metadata states.
+    #[serde(default)]
+    pub free_with: Option<String>,
+    /// `borrowed` returns may depend on a parameter's lifetime, e.g.
+    /// `param:0` means "borrowed from parameter index 0". `None` => independent.
+    #[serde(default)]
+    pub lifetime: Option<String>,
+    pub nullable: Nullability,
+}
+
+/// Per-function semantic metadata (keyed by the function's linkable symbol).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct FuncSemantics {
+    #[serde(default)]
+    pub params: Vec<ParamSemantics>,
+    #[serde(default)]
+    pub ret: ReturnSemantics,
+    /// Lifetime of a callback registered through this function (retained/call).
+    #[serde(default)]
+    pub callback_lifetime: CallbackLifetime,
+}
+
+/// Per-global semantic metadata (keyed by the global's name).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct GlobalSemantics {
+    #[serde(default)]
+    pub ownership: OwnershipSem,
+    #[serde(default)]
+    pub nullable: Nullability,
+    /// Explicit mutability override. When `None`, the AST-derived const-ness
+    /// (already known) governs; this only *adds* info that AST cannot express.
+    #[serde(default)]
+    pub mutable: Option<bool>,
+}
+
+/// The complete Semantic Supplement Layer for one library.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SemanticMeta {
+    #[serde(default)]
+    pub functions: std::collections::HashMap<String, FuncSemantics>,
+    #[serde(default)]
+    pub globals: std::collections::HashMap<String, GlobalSemantics>,
+}
+
+impl SemanticMeta {
+    /// Load an optional `charger_semantic.toml` from the header's directory.
+    /// Absent file or parse failure => empty metadata (every function/global
+    /// stays `Unknown`). Failures are never fatal here; validation
+    /// (`verify_semantics`) reports structural problems separately.
+    // Returns `Err` on a malformed `charger_semantic.toml` so the caller
+    // (charger install) can fail loudly BEFORE any native build — per the
+    // Iteration 7 gate (N): invalid supplementary metadata must become a clear
+    // error, never silently vanish. An *absent* file is fine (empty metadata).
+    fn load(header: &Path) -> Result<SemanticMeta, String> {
+        let mut meta = SemanticMeta::default();
+        if let Some(dir) = header.parent() {
+            let path = dir.join("charger_semantic.toml");
+            if path.exists() {
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("charger_semantic.toml read error: {}", e))?;
+                let value = text.parse::<toml::Value>()
+                    .map_err(|e| format!("charger_semantic.toml parse error: {}", e))?;
+                if let Some(fns) = value.get("functions").and_then(|v| v.as_table()) {
+                    for (sym, v) in fns {
+                        meta.functions.insert(sym.clone(), parse_func_semantics(v));
+                    }
+                }
+                if let Some(g) = value.get("globals").and_then(|v| v.as_table()) {
+                    for (name, v) in g {
+                        meta.globals.insert(name.clone(), parse_global_semantics(v));
+                    }
+                }
+            }
+        }
+        Ok(meta)
+    }
+}
+
+/// Parse one `[functions.<sym>]` table into `FuncSemantics`, accepting BOTH
+/// the array forms (`params_ownership` / `params_nullable`) and the nested
+/// `[functions.<sym>.params.N]` tables, merged by index.
+fn parse_func_semantics(v: &toml::Value) -> FuncSemantics {
+    let mut fs = FuncSemantics::default();
+    if let Some(r) = v.get("return_ownership").and_then(|x| x.as_str()) {
+        if let Some(o) = OwnershipSem::parse(r) {
+            fs.ret.ownership = o;
+        }
+    }
+    if let Some(r) = v.get("return_nullable").and_then(|x| x.as_bool()) {
+        fs.ret.nullable = if r { Nullability::Nullable } else { Nullability::NonNull };
+    }
+    if let Some(r) = v.get("return_lifetime").and_then(|x| x.as_str()) {
+        fs.ret.lifetime = Some(r.to_string());
+    }
+    if let Some(r) = v.get("return_free_with").and_then(|x| x.as_str()) {
+        fs.ret.free_with = Some(r.to_string());
+    }
+    if let Some(c) = v.get("callback_lifetime").and_then(|x| x.as_str()) {
+        if let Some(cl) = CallbackLifetime::parse(c) {
+            fs.callback_lifetime = cl;
+        }
+    }
+    // Array forms (by index).
+    if let Some(arr) = v.get("params_ownership").and_then(|x| x.as_array()) {
+        for (i, e) in arr.iter().enumerate() {
+            if let Some(s) = e.as_str().and_then(OwnershipSem::parse) {
+                ensure_param(&mut fs, i).ownership = s;
+            }
+        }
+    }
+    if let Some(arr) = v.get("params_nullable").and_then(|x| x.as_array()) {
+        for (i, e) in arr.iter().enumerate() {
+            if let Some(b) = e.as_bool() {
+                ensure_param(&mut fs, i).nullable =
+                    if b { Nullability::Nullable } else { Nullability::NonNull };
+            } else if let Some(s) = e.as_str().and_then(Nullability::parse) {
+                ensure_param(&mut fs, i).nullable = s;
+            }
+        }
+    }
+    // Nested tables `[functions.<sym>.params.N]`.
+    if let Some(tbl) = v.get("params").and_then(|x| x.as_table()) {
+        for (key, pv) in tbl {
+            if let Ok(i) = key.parse::<usize>() {
+                let p = ensure_param(&mut fs, i);
+                if let Some(o) = pv.get("ownership").and_then(|x| x.as_str()).and_then(OwnershipSem::parse) {
+                    p.ownership = o;
+                }
+                if let Some(b) = pv.get("nullable").and_then(|x| x.as_bool()) {
+                    p.nullable = if b { Nullability::Nullable } else { Nullability::NonNull };
+                } else if let Some(s) = pv.get("nullable").and_then(|x| x.as_str()).and_then(Nullability::parse) {
+                    p.nullable = s;
+                }
+            }
+        }
+    }
+    fs
+}
+
+fn ensure_param(fs: &mut FuncSemantics, i: usize) -> &mut ParamSemantics {
+    while fs.params.len() <= i {
+        fs.params.push(ParamSemantics::default());
+    }
+    &mut fs.params[i]
+}
+
+fn parse_global_semantics(v: &toml::Value) -> GlobalSemantics {
+    let mut g = GlobalSemantics::default();
+    if let Some(o) = v.get("ownership").and_then(|x| x.as_str()).and_then(OwnershipSem::parse) {
+        g.ownership = o;
+    }
+    if let Some(b) = v.get("nullable").and_then(|x| x.as_bool()) {
+        g.nullable = if b { Nullability::Nullable } else { Nullability::NonNull };
+    } else if let Some(s) = v.get("nullable").and_then(|x| x.as_str()).and_then(Nullability::parse) {
+        g.nullable = s;
+    }
+    if let Some(m) = v.get("mutable").and_then(|x| x.as_bool()) {
+        g.mutable = Some(m);
+    }
+    g
+}
+
 pub fn store_root() -> PathBuf {
     PathBuf::from(".lime-charger").join("store")
 }
@@ -2289,6 +2748,23 @@ fn toolchain_hash(abi: &AbiMeta, build_flags: &[String]) -> String {
     format!("{:016x}", h.finish())
 }
 
+/// Compact persisted function signature used for semantic-metadata
+/// validation. Only what `verify_semantics` needs: the linkable symbol, each
+/// param's type tag, and the return type tag (see `ctype_tag`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ManifestFn {
+    pub symbol: String,
+    pub params: Vec<String>, // ctype_tag of each param
+    pub ret: String,         // ctype_tag of return
+}
+
+/// Compact persisted global variable shape for semantic validation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ManifestGlobal {
+    pub name: String,
+    pub ty: String, // ctype_tag
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 pub struct Manifest {
     pub library: String,
@@ -2300,6 +2776,18 @@ pub struct Manifest {
     pub artifact_hash: String,
     pub abi: AbiMeta,
     pub artifact_meta: ArtifactMeta, // kind / runtime / link / soname / deps
+    // Phase 1 Iteration 7: Semantic Supplement Layer. Strictly separate from
+    // `abi` (ABI) and `artifact_meta` (linkage). Carries ownership / nullability
+    // / lifetime / free_with / callback-lifetime — none of which are ABI facts.
+    pub semantic: SemanticMeta,
+    // Compact normalized signatures (symbols + type tags) persisted so
+    // `verify_semantics` can validate metadata against real API shapes
+    // without re-parsing the header. ABI/semantic separation is preserved:
+    // these are validation-only descriptors, not ownership facts.
+    #[serde(default)]
+    pub functions: Vec<ManifestFn>,
+    #[serde(default)]
+    pub globals: Vec<ManifestGlobal>,
     pub symbols: Vec<String>, // linkable symbols this artifact provides
 }
 
@@ -2377,6 +2865,9 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // agnostic, keyed by function symbol) so variadic adapters know the
     // promoted type of each variadic slot.
     let shapes = VariadicShapes::load(&header);
+    // Phase 1 Iteration 7: load the Semantic Supplement Layer (optional
+    // `charger_semantic.toml` keyed by function symbol / global name).
+    let sem = SemanticMeta::load(&header).map_err(|e| format!("charger install failed: {}", e))?;
 
     // #8: artifact cache. If a store entry already exists whose manifest's
     // source_hash matches the current source_hash, the native artifact is
@@ -2395,7 +2886,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
                 build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang, &api, &shapes)?;
-                let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes);
+                let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes, &sem);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
                 // Persist the shim symbols so `lime build` can resolve the
@@ -2405,6 +2896,30 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                         m.symbols.push(a.symbol.clone());
                     }
                 }
+                // Refresh semantic metadata so the stored manifest reflects the
+                // current `charger_semantic.toml` (ABI/semantic stay separated).
+                m.semantic = sem.clone();
+                // Gate: a stale-but-now-invalid metadata edit must still fail on a
+                // cache hit, not silently reuse a bad descriptor.
+                let sem_checks = validate_semantic_meta(&m.semantic, &m.functions, &m.globals)
+                    .map_err(|e| format!("charger install failed: {}", e))?;
+                if sem_checks.iter().any(|c| !c.pass) {
+                    return Err(format!(
+                        "{} invalid semantic metadata check(s) for '{}'",
+                        sem_checks.iter().filter(|c| !c.pass).count(), lib_name
+                    ));
+                }
+                // Also refresh the compact normalized signatures (older manifests
+                // lacked them) so verify-semantics has real API shapes to check.
+                m.functions = api.functions.iter().map(|f| ManifestFn {
+                    symbol: f.symbol.clone(),
+                    params: f.params.iter().map(|pp| ctype_tag(&pp.ty)).collect(),
+                    ret: ctype_tag(&f.ret),
+                }).collect();
+                m.globals = api.globals.iter().map(|g| ManifestGlobal {
+                    name: g.name.clone(),
+                    ty: ctype_tag(&g.ty),
+                }).collect();
                 let manifest_toml = toml::to_string_pretty(&m)
                     .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;
                 std::fs::write(entry.join("manifest.toml"), manifest_toml)
@@ -2553,7 +3068,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // (No extra work needed for the slice; struct fields already captured.)
 
     // 3. Lime interface generation (with out-param / null-callback adapters).
-    let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes);
+    let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes, &sem);
 
     // 5. Store. (abi / build_flags / tool_hash / version / entry were computed
     // earlier, before the cache-hit check, and are reused here.)
@@ -2582,6 +3097,37 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         }
     }
 
+    // Phase 1 Iteration 7: persist compact normalized signatures so
+    // `verify_semantics` can validate the Semantic Supplement Layer against
+    // real API shapes without re-parsing the header.
+    let manifest_fns: Vec<ManifestFn> = api.functions.iter().map(|f| ManifestFn {
+        symbol: f.symbol.clone(),
+        params: f.params.iter().map(|p| ctype_tag(&p.ty)).collect(),
+        ret: ctype_tag(&f.ret),
+    }).collect();
+    let manifest_globals: Vec<ManifestGlobal> = api.globals.iter().map(|g| ManifestGlobal {
+        name: g.name.clone(),
+        ty: ctype_tag(&g.ty),
+    }).collect();
+
+    // Phase 1 Iteration 7: gate the auxiliary semantic metadata BEFORE the
+    // manifest is written / native build is declared good. Invalid metadata
+    // (dangling free_with, out-of-range param index, nullable on a scalar, ...)
+    // is a hard error here so `lime build` cannot link against a mis-described
+    // library. (validate_semantic_meta reads the compact API descriptors we just
+    // built, so it works on the fresh in-memory `sem` even before the manifest
+    // is persisted.)
+    {
+        let sem_checks = validate_semantic_meta(&sem, &manifest_fns, &manifest_globals)
+            .map_err(|e| format!("charger install failed: {}", e))?;
+        if sem_checks.iter().any(|c| !c.pass) {
+            return Err(format!(
+                "{} invalid semantic metadata check(s) for '{}'",
+                sem_checks.iter().filter(|c| !c.pass).count(), lib_name
+            ));
+        }
+    }
+
     let manifest = Manifest {
         library: lib_name.clone(),
         version: version.clone(),
@@ -2592,6 +3138,9 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         artifact_hash: art_hash,
         abi,
         artifact_meta,
+        semantic: sem,
+        functions: manifest_fns,
+        globals: manifest_globals,
         symbols: symbols.clone(),
     };
     let manifest_toml = toml::to_string_pretty(&manifest)
@@ -3119,6 +3668,77 @@ pub fn lookup_artifacts_for_symbols(symbols: &[String]) -> Vec<std::path::PathBu
     out
 }
 
+/// Extract AST-visible nullability from a C type spelling. clang prints the
+/// `_Nonnull` / `_Nullable` markers inline. `__attribute__((nonnull))` is
+/// handled separately by the `NonNullAttr` scan. These are source FACTS, never
+/// name-based guesses.
+fn nullability_from_qual(qual: &str) -> Nullability {
+    if qual.contains("_Nonnull") {
+        Nullability::NonNull
+    } else if qual.contains("_Nullable") {
+        Nullability::Nullable
+    } else {
+        Nullability::Unknown
+    }
+}
+
+/// Render a function's Semantic Supplement Layer as Lime comments, so the
+/// metadata is visible/verifiable without changing Lime's ABI. Only emits lines
+/// for facts that are present (nothing inferred). Returns "" when no semantic
+/// info exists for the function.
+fn func_semantic_comment(sem: &SemanticMeta, symbol: &str) -> String {
+    let fs = match sem.functions.get(symbol) {
+        Some(fs) => fs,
+        None => return String::new(),
+    };
+    let mut lines = Vec::new();
+    let r = &fs.ret;
+    if r.ownership != OwnershipSem::Unknown {
+        let mut s = format!("// return ownership: {}", serde_json::to_string(&r.ownership).unwrap_or_default().trim_matches('"').to_string());
+        if let Some(fw) = &r.free_with {
+            s.push_str(&format!(" (free_with: {})", fw));
+        }
+        if let Some(lt) = &r.lifetime {
+            s.push_str(&format!(" (lifetime: {})", lt));
+        }
+        lines.push(s);
+    } else if r.nullable != Nullability::Unknown {
+        lines.push(format!(
+            "// return nullable: {}",
+            serde_json::to_string(&r.nullable).unwrap_or_default().trim_matches('"').to_string()
+        ));
+    }
+    for (i, p) in fs.params.iter().enumerate() {
+        if p.ownership != OwnershipSem::Unknown || p.nullable != Nullability::Unknown {
+            let mut s = format!("// param[{}]:", i);
+            if p.ownership != OwnershipSem::Unknown {
+                s.push_str(&format!(
+                    " ownership={}",
+                    serde_json::to_string(&p.ownership).unwrap_or_default().trim_matches('"').to_string()
+                ));
+            }
+            if p.nullable != Nullability::Unknown {
+                s.push_str(&format!(
+                    " nullable={}",
+                    serde_json::to_string(&p.nullable).unwrap_or_default().trim_matches('"').to_string()
+                ));
+            }
+            lines.push(s);
+        }
+    }
+    if fs.callback_lifetime != CallbackLifetime::Unknown {
+        lines.push(format!(
+            "// callback lifetime: {}",
+            serde_json::to_string(&fs.callback_lifetime).unwrap_or_default().trim_matches('"').to_string()
+        ));
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        lines.join("\n") + "\n"
+    }
+}
+
 /// List installed libraries (for `charger list`).
 pub fn list_installed() -> Vec<String> {
     let base = store_root();
@@ -3241,6 +3861,178 @@ int main(){\n\
 }
 
 /// Load the abi.json from a store entry, if present.
+/// A single semantic-metadata validation result. Unlike `AbiCheck`
+/// (which compares a measured value against an expected one), this checks the
+/// *structural integrity* of the auxiliary `charger_semantic.toml`: does every
+/// referenced symbol exist, is every parameter index in range, does
+/// `free_with` name a real function, and is `nullable` only applied to
+/// pointer-like types? A failed check is a genuine error (bad metadata), never
+/// a "mismatch to investigate".
+#[derive(Debug, Clone)]
+pub struct SemanticCheck {
+    pub item: String,
+    pub detail: String,
+    pub pass: bool,
+}
+
+/// Validate the Semantic Supplement Layer recorded in `lib`'s manifest against
+/// the API surface Charger normalized from the header. This is the native-build
+/// gate (N): malformed metadata is rejected BEFORE any Lime program links
+/// against the library, with a clear error.
+///
+/// Checks (none of these guess semantics — they only verify the auxiliary
+/// metadata is internally consistent and references real symbols):
+///   * function exists                  (keyed by linkable symbol)
+///   * parameter index valid           (within the function's arity)
+///   * return metadata structurally valid (nullable only on pointers; return
+///     cannot be `consumed`)
+///   * `free_with` references a real function symbol (allocator/deallocator pairing)
+///   * consumed parameter is pointer-like
+///   * callback lifetime value valid    (retained / call / unknown)
+///   * `nullable` only on pointer-like types (params AND globals)
+///   * global key exists
+///
+/// Returns `Err` only when metadata is structurally invalid (so `lime build`
+/// fails loudly before linking). A library with NO semantic metadata yields an
+/// empty, all-pass list (unknown semantics legitimately remain unknown).
+/// Shared semantic-metadata validator. Operates on the persisted compact API
+/// descriptor (`api_fns` / `api_globals`) so it can be called both from
+/// `verify_semantics` (which reads the manifest) and from `install` (which has
+/// the freshly-normalized `api` in memory, before the manifest is written).
+/// This is the native-build gate (N): malformed metadata is rejected BEFORE any
+/// Lime program links against the library. None of the checks guess semantics —
+/// they only verify the auxiliary metadata is internally consistent and
+/// references real symbols.
+pub fn validate_semantic_meta(
+    sem: &SemanticMeta,
+    api_fns: &[ManifestFn],
+    api_globals: &[ManifestGlobal],
+) -> Result<Vec<SemanticCheck>, String> {
+    let mut checks: Vec<SemanticCheck> = Vec::new();
+    let mut ok = true;
+    let push = |checks: &mut Vec<SemanticCheck>, item: &str, detail: &str, pass: bool, ok: &mut bool| {
+        if !pass { *ok = false; }
+        checks.push(SemanticCheck { item: item.to_string(), detail: detail.to_string(), pass });
+    };
+
+    for (sym, fs) in &sem.functions {
+        let api_fn = match api_fns.iter().find(|f| &f.symbol == sym) {
+            Some(f) => f,
+            None => {
+                push(&mut checks, &format!("functions.{}", sym),
+                     "referenced function symbol does not exist in the API", false, &mut ok);
+                continue;
+            }
+        };
+        let arity = api_fn.params.len();
+
+        if fs.ret.ownership != OwnershipSem::Unknown {
+            if fs.ret.ownership == OwnershipSem::Consumed {
+                push(&mut checks, &format!("functions.{}.return_ownership", sym),
+                     "return cannot be 'consumed' (consumed applies to parameters)", false, &mut ok);
+            } else {
+                let mut d = format!("ownership = {:?}", fs.ret.ownership);
+                if let Some(fw) = &fs.ret.free_with {
+                    if api_fns.iter().any(|f| &f.symbol == fw) {
+                        d.push_str(&format!(" (free_with: {})", fw));
+                    } else {
+                        push(&mut checks, &format!("functions.{}.return_free_with", sym),
+                             &format!("free_with symbol '{}' is not a known function", fw), false, &mut ok);
+                    }
+                }
+                push(&mut checks, &format!("functions.{}.return_ownership", sym), &d, true, &mut ok);
+            }
+        }
+        if fs.ret.nullable != Nullability::Unknown {
+            if !is_pointer_like(&ctype_from_tag(&api_fn.ret)) {
+                push(&mut checks, &format!("functions.{}.return_nullable", sym),
+                     "nullable applied to a non-pointer return type", false, &mut ok);
+            } else {
+                push(&mut checks, &format!("functions.{}.return_nullable", sym),
+                     &format!("nullable = {:?}", fs.ret.nullable), true, &mut ok);
+            }
+        }
+        if let Some(lt) = &fs.ret.lifetime {
+            push(&mut checks, &format!("functions.{}.return_lifetime", sym),
+                 &format!("lifetime = {}", lt), true, &mut ok);
+        }
+        for (i, pp) in fs.params.iter().enumerate() {
+            if i >= arity {
+                push(&mut checks, &format!("functions.{}.params[{}]", sym, i),
+                     "parameter index out of range", false, &mut ok);
+                continue;
+            }
+            let param_ty = &ctype_from_tag(&api_fn.params[i]);
+            if pp.ownership != OwnershipSem::Unknown {
+                if pp.ownership == OwnershipSem::Consumed && !is_pointer_like(&param_ty) {
+                    push(&mut checks, &format!("functions.{}.params[{}].ownership", sym, i),
+                         "consumed applied to a non-pointer parameter", false, &mut ok);
+                } else {
+                    push(&mut checks, &format!("functions.{}.params[{}].ownership", sym, i),
+                         &format!("ownership = {:?}", pp.ownership), true, &mut ok);
+                }
+            }
+            if pp.nullable != Nullability::Unknown {
+                if !is_pointer_like(&param_ty) {
+                    push(&mut checks, &format!("functions.{}.params[{}].nullable", sym, i),
+                         "nullable applied to a non-pointer parameter", false, &mut ok);
+                } else {
+                    push(&mut checks, &format!("functions.{}.params[{}].nullable", sym, i),
+                         &format!("nullable = {:?}", pp.nullable), true, &mut ok);
+                }
+            }
+        }
+        if fs.callback_lifetime != CallbackLifetime::Unknown {
+            push(&mut checks, &format!("functions.{}.callback_lifetime", sym),
+                 &format!("callback lifetime = {:?}", fs.callback_lifetime), true, &mut ok);
+        }
+    }
+
+    for (name, g) in &sem.globals {
+        let api_g = match api_globals.iter().find(|x| &x.name == name) {
+            Some(g) => g,
+            None => {
+                push(&mut checks, &format!("globals.{}", name),
+                     "referenced global does not exist in the API", false, &mut ok);
+                continue;
+            }
+        };
+        if g.ownership != OwnershipSem::Unknown {
+            push(&mut checks, &format!("globals.{}.ownership", name),
+                 &format!("ownership = {:?}", g.ownership), true, &mut ok);
+        }
+        if g.nullable != Nullability::Unknown {
+            if !is_pointer_like(&ctype_from_tag(&api_g.ty)) {
+                push(&mut checks, &format!("globals.{}.nullable", name),
+                     "nullable applied to a non-pointer global", false, &mut ok);
+            } else {
+                push(&mut checks, &format!("globals.{}.nullable", name),
+                     &format!("nullable = {:?}", g.nullable), true, &mut ok);
+            }
+        }
+        if let Some(mut_) = g.mutable {
+            push(&mut checks, &format!("globals.{}.mutable", name),
+                 &format!("mutable = {}", mut_), true, &mut ok);
+        }
+    }
+
+    if !ok {
+        return Err(format!(
+            "verify-semantics: {} invalid metadata check(s)",
+            checks.iter().filter(|c| !c.pass).count()));
+    }
+    Ok(checks)
+}
+
+pub fn verify_semantics(lib: &str) -> Result<Vec<SemanticCheck>, String> {
+    let entry = find_artifact_entry(lib)
+        .ok_or_else(|| format!("verify-semantics: library '{}' is not installed", lib))?;
+    let m = load_manifest(&entry)
+        .ok_or_else(|| format!("verify-semantics: manifest missing for '{}'", lib))?;
+    validate_semantic_meta(&m.semantic, &m.functions, &m.globals)
+        .map_err(|e| format!("verify-semantics: {} for '{}'", e, lib))
+}
+
 fn load_abi(entry: &Path) -> Option<AbiMeta> {
     let p = entry.join("abi.json");
     std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str(&s).ok())

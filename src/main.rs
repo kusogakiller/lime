@@ -199,6 +199,42 @@ fn cli_charger(sub: &str, rest: &[String]) {
                 }
             }
         }
+        "verify-semantics" => {
+            let lib = match rest.iter().find(|a| !a.starts_with("--")) {
+                Some(s) => s.clone(),
+                None => {
+                    eprintln!("charger verify-semantics <library>");
+                    std::process::exit(1);
+                }
+            };
+            match charger::verify_semantics(&lib) {
+                Ok(checks) => {
+                    let mut all_pass = true;
+                    for c in &checks {
+                        if !c.pass {
+                            all_pass = false;
+                        }
+                        println!(
+                            "  [{}] {} : {}",
+                            if c.pass { "PASS" } else { "FAIL" },
+                            c.item, c.detail
+                        );
+                    }
+                    if checks.is_empty() {
+                        println!("verify-semantics: no semantic metadata for '{}' (all unknown — correct)", lib);
+                    } else if all_pass {
+                        println!("verify-semantics: ALL {} CHECKS PASS", checks.len());
+                    } else {
+                        eprintln!("verify-semantics: INVALID METADATA DETECTED");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("charger verify-semantics failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
         other => {
             eprintln!("charger: unknown subcommand '{}'", other);
             eprintln!("usage: lime charger install <source> | list");

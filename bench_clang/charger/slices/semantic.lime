@@ -1,0 +1,85 @@
+// Phase 1 Iteration 7: Semantic Supplement Layer vertical slice.
+// Exercises the generic libsemantic fixture through Charger extern fns,
+// proving the semantics (ownership / nullability / lifetime / callback /
+// global) are correctly recorded and surfaced. The semantics are metadata only
+// (no behaviour change); this slice verifies the C API still runs correctly
+// when driven from Lime.
+
+// A: owned return + destroy
+extern fn sem_create(Int: a0) -> Opaque(SemObj) "sem_create"
+extern fn sem_destroy(Opaque(SemObj): a0) -> Unit "sem_destroy"
+// B: borrowed return (lifetime param:0)
+extern fn sem_get_name(Opaque(SemObj): a0) -> String "sem_get_name"
+// C: nullable parameter
+extern fn sem_take_nullable(Opaque(SemObj): a0) -> Int "sem_take_nullable"
+// D: nonnull parameter (adapter boundary guard; passing null returns 0)
+extern fn sem_take_nonnull(Opaque(SemObj): a0) -> Int "lime_nonnull_sem_take_nonnull_0"
+// E: consumed parameter
+extern fn sem_consume(Opaque(SemObj): a0) -> Unit "sem_consume"
+// F: callback with retained lifetime
+extern fn sem_cb_register(Opaque(SemCb): a0) -> Unit "sem_cb_register"
+extern fn sem_cb_fire(Int: a0) -> Unit "sem_cb_fire"
+extern fn sem_cb_unregister() -> Unit "sem_cb_unregister"
+// G: callback with call-only lifetime
+extern fn sem_cb_once(Opaque(SemCb): a0, Int: a1) -> Unit "sem_cb_once"
+// H: opaque handle create/destroy
+extern fn sem_handle_create(Int: a0) -> Opaque(SemHandle) "sem_handle_create"
+extern fn sem_handle_close(Opaque(SemHandle): a0) -> Unit "sem_handle_close"
+// I: shared global (nullable / mutable)
+extern fn lime_get_sem_shared() -> Opaque(SemObj) "lime_get_sem_shared"
+extern fn lime_set_sem_shared(Opaque(SemObj): a0) "lime_set_sem_shared"
+// J: unknown semantics (no metadata) — must still work
+extern fn sem_make(Int: a0) -> Opaque(SemObj) "sem_make"
+extern fn sem_use(Opaque(SemObj): a0) -> Int "sem_use"
+extern fn sem_pick(Int: a0) -> Int "sem_pick"
+
+// Callback-table struct shims
+extern fn lime_make_SemCb() -> Opaque(SemCb) "lime_make_SemCb"
+extern fn lime_set_SemCb_on_event(Opaque(SemCb): a0, Callback: a1) "lime_set_SemCb_on_event"
+
+// A: owned return + destroy
+fn main():
+    let o = sem_create(42)
+    // B: borrowed return — name is valid only while o is alive; read and print.
+    let name = sem_get_name(o)
+    print(name)
+    print("\n")
+    // C: nullable parameter — pass the live object (non-null).
+    let r1 = sem_take_nullable(o)
+    print(r1)
+    print("\n")
+    // D: nonnull parameter — adapter returns 0 on a null pointer (boundary guard).
+    let r2 = sem_take_nonnull(o)
+    print(r2)
+    print("\n")
+    // E: consumed parameter — sem_consume frees o; afterwards o is invalid.
+    sem_consume(o)
+    // F: callback with retained lifetime.
+    let cb = lime_make_SemCb()
+    sem_cb_register(cb)
+    sem_cb_fire(7)
+    sem_cb_unregister()
+    // G: call-only callback.
+    sem_cb_once(cb, 11)
+    // H: opaque handle create/destroy.
+    let h = sem_handle_create(99)
+    sem_handle_close(h)
+    // I: shared global read/write.
+    let shared = sem_make(5)
+    lime_set_sem_shared(shared)
+    let got = lime_get_sem_shared()
+    let r3 = sem_use(got)
+    print(r3)
+    print("\n")
+    // J: unknown semantics remain unknown but callable.
+    let u = sem_make(3)
+    let r4 = sem_use(u)
+    print(r4)
+    print("\n")
+    // D: nonnull boundary guard verified separately (the generated
+    // lime_nonnull_sem_take_nonnull_0 adapters return 0 if a C caller ever
+    // passes NULL). From Lime every handle is a valid pointer, so the call
+    // below simply exercises the wiring through the nonnull shim.
+    let r5 = sem_take_nonnull(got)
+    print(r5)
+    print("\n")

@@ -1,0 +1,48 @@
+# Phase 1 Iteration 7: Semantic Supplement Layer metadata for the generic
+# libsemantic fixture. Keyed by the function's LINKABLE SYMBOL. ABIs/ownership
+# are kept strictly separate: this file carries ONLY semantics. No name-based
+# inference is performed by Charger; everything here is explicit.
+
+[functions.sem_create]
+return_ownership = "owned"
+return_free_with = "sem_destroy"
+
+[functions.sem_destroy]
+params_ownership = ["consumed"]
+
+[functions.sem_get_name]
+return_ownership = "borrowed"
+return_lifetime = "param:0"
+
+[functions.sem_take_nullable]
+# AST attribute is NOT present; nullability supplied explicitly via metadata.
+params_nullable = ["nullable"]
+
+[functions.sem_take_nonnull]
+# __attribute__((nonnull)) is ALSO present; semantic metadata agrees (explicit).
+params_nullable = ["nonnull"]
+
+[functions.sem_consume]
+params_ownership = ["consumed"]
+
+[functions.sem_cb_register]
+callback_lifetime = "retained"
+
+[functions.sem_cb_once]
+callback_lifetime = "call"
+
+[functions.sem_handle_create]
+return_ownership = "owned"
+return_free_with = "sem_handle_close"
+
+[functions.sem_handle_close]
+params_ownership = ["consumed"]
+
+# Test I: global pointer with semantic metadata.
+[globals.sem_shared]
+ownership = "shared"
+nullable = "nullable"
+mutable = true
+
+# Test J: sem_make / sem_use / sem_pick have NO metadata. Charger must leave
+# their semantics Unknown and must NOT infer from the name "make"/"use".
