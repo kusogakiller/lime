@@ -1,4 +1,0 @@
-// Charger-generated Lime interface for 'libapp'
-// DO NOT EDIT: regenerate with `charger install`.
-
-extern fn app_compute(Int: a0) -> Int "app_compute"

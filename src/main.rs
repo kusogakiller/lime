@@ -165,6 +165,40 @@ fn cli_charger(sub: &str, rest: &[String]) {
                 }
             }
         }
+        "verify-abi" => {
+            let lib = match rest.iter().find(|a| !a.starts_with("--")) {
+                Some(s) => s.clone(),
+                None => {
+                    eprintln!("charger verify-abi <library>");
+                    std::process::exit(1);
+                }
+            };
+            match charger::verify_abi(&lib, &llvm_bindir()) {
+                Ok(checks) => {
+                    let mut all_pass = true;
+                    for c in &checks {
+                        if !c.pass {
+                            all_pass = false;
+                        }
+                        println!(
+                            "  [{}] {} : expected={} measured={}",
+                            if c.pass { "PASS" } else { "FAIL" },
+                            c.item, c.expected, c.measured
+                        );
+                    }
+                    if all_pass {
+                        println!("verify-abi: ALL {} CHECKS PASS", checks.len());
+                    } else {
+                        eprintln!("verify-abi: MISMATCH DETECTED");
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("charger verify-abi failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
         other => {
             eprintln!("charger: unknown subcommand '{}'", other);
             eprintln!("usage: lime charger install <source> | list");
