@@ -80,6 +80,16 @@ pub struct CFunction {
     pub is_constructor: bool,
     pub is_const: bool,
     pub self_ty: Option<String>, // for methods: the class name
+    // Phase 1 Iteration 5: C variadic functions (`int foo(int, ...)`).
+    // `variadic` is set when the clang AST `FunctionDecl` carries
+    // `"variadic": true`. Such functions have an unknown-length, type-erased
+    // tail of arguments; Charger cannot infer variadic arg TYPES from the
+    // header alone, so it generates a *family* of fixed-arity adapter wrappers
+    // (one per call arity) plus matching Lime `extern fn` declarations. The
+    // variadic argument TYPES are supplied by an optional auxiliary metadata
+    // file (see `VariadicShapes`), defaulting to uniform `int`. This mirrors
+    // how every C FFI layer (libffi/ctypes) needs per-slot type info.
+    pub variadic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -689,6 +699,10 @@ fn classify_node(
             }
             let ftype = node.get("type").cloned().unwrap_or(serde_json::Value::Null);
             let (params, ret_ty) = params_and_ret(&ftype);
+            let variadic = node
+                .get("variadic")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let symbol = node
                 .get("mangledName")
                 .and_then(|v| v.as_str())
@@ -703,6 +717,7 @@ fn classify_node(
                 is_constructor: false,
                 is_const: false,
                 self_ty: None,
+                variadic,
             });
         }
         _ => {
@@ -729,6 +744,9 @@ fn params_and_ret(ftype: &serde_json::Value) -> (Vec<CParam>, CType) {
 }
 
 /// Parse a C/C++ function type string like "int (int, int)" into (params, ret).
+/// A trailing "..." (variadic) is recognized and the ellipsis chunk is dropped
+/// — the variadic flag itself is recorded separately by the caller from the
+/// clang AST `FunctionDecl` node's `"variadic"` key.
 fn parse_signature(qual: &str) -> (Vec<CParam>, CType) {
     let qual = qual.trim();
     // Split return type from the parenthesized parameter list.
@@ -747,10 +765,20 @@ fn parse_signature(qual: &str) -> (Vec<CParam>, CType) {
         // nested parentheses, e.g. "int (*)(int, int)").
         for (i, p) in split_top_level(params_str).into_iter().enumerate() {
             let p = p.trim();
+            // Stop at / skip the variadic ellipsis; fixed params precede it.
+            if p == "..." || p.ends_with("...") {
+                break;
+            }
             let ty_str = strip_param_name(p);
+            let ty = parse_c_type(ty_str.trim());
+            // A sole `void` parameter ("f(void)") means "no parameters" in C;
+            // drop it so the function is surfaced with zero Lime params.
+            if matches!(ty, CType::Void) {
+                continue;
+            }
             params.push(CParam {
                 name: format!("a{}", i),
-                ty: parse_c_type(ty_str.trim()),
+                ty,
             });
         }
     }
@@ -1048,10 +1076,12 @@ fn gen_adapter_c_source(
     structs: &[CStruct],
     globals: &[CGlobal],
     header_name: &str,
+    api: &NormalizedApi,
+    shapes: &VariadicShapes,
 ) -> String {
     let mut s = String::new();
-    s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors). DO NOT EDIT. */\n");
-    s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n");
+    s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors + variadic). DO NOT EDIT. */\n");
+    s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n");
     s.push_str(&format!("#include \"{}\"\n", header_name));
     // Union / bitfield accessor shims: since Lime cannot model overlapping
     // members or sub-byte bitfields (Lime `int` is i64), the record is surfaced
@@ -1309,12 +1339,78 @@ fn gen_adapter_c_source(
             }
         }
     }
+    // Phase 1 Iteration 5: variadic function adapters. For each variadic C
+    // function, emit a *family* of fixed-arity wrapper shims
+    // `lime_<sym>_v<N>` that forward the fixed params plus N typed variadic
+    // slots to the real variadic call. The C compiler performs ALL variadic
+    // ABI work (register classes, shadow space, va_list, default promotions)
+    // on that forward — Charger only needs to (a) declare each slot with its
+    // *promoted* C type and (b) forward it positionally. This keeps Lime's ABI
+    // and the Lime type system untouched.
+    emit_variadic_c_adapters(&mut s, api, shapes);
     s
 }
 
-/// Generate C accessors for *static* (internal-linkage) globals. These must be
-/// compiled in the *same translation unit* as the static variable they read
-/// (a separate adapter `.c` cannot reach an internal-linkage symbol), so
+/// Emit, for every variadic `CFunction`, a family of fixed-arity C adapter
+/// shims. Each shim `lime_<sym>_v<N>` has the function's fixed params followed
+/// by N explicitly-typed variadic slots, and forwards all of them to the real
+/// variadic call. The variadic slot TYPES come from `shapes` (auxiliary
+/// metadata); absent => uniform promoted `int` (arity 0..MAX). An explicit
+/// per-slot shape list => exactly one shim of that arity.
+///
+/// Example (homogeneous `int`, arity 2):
+///   int lime_var_sum_v2(int a0, int a1, int a2) { return var_sum(a0, a1, a2); }
+/// Example (explicit [Int, Double, Opaque], arity 3):
+///   int lime_var_mixed_v3(int a0, int a1, double a2, void* a3) {
+///       return var_mixed(a0, a1, a2, a3);
+///   }
+fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &VariadicShapes) {
+    for f in &api.functions {
+        if !f.variadic {
+            continue;
+        }
+        // Fixed-parameter C spellings (e.g. "int a0", "const char* a0").
+        let fixed: Vec<String> = f
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{} a{}", c_type_text(&p.ty), i))
+            .collect();
+        let ret_c = c_type_text(&f.ret);
+        let real = &f.symbol;
+
+        // Determine the variadic slot list for each call arity (0..=MAX).
+        let entry = resolve_plan(shapes, &f.symbol);
+        for arity in 0..=MAX_VARIADIC_ARITY {
+            let slots = slots_for_arity(&entry, arity);
+            // Build the parameter list: fixed params, then N typed slots.
+            let mut params: Vec<String> = fixed.clone();
+            let mut call_args: Vec<String> = (0..f.params.len()).map(|i| format!("a{}", i)).collect();
+            for (j, slot) in slots.iter().enumerate() {
+                let idx = f.params.len() + j;
+                params.push(format!("{} a{}", slot.c_type(), idx));
+                call_args.push(format!("a{}", idx));
+            }
+            let param_str = if params.is_empty() {
+                "void".to_string()
+            } else {
+                params.join(", ")
+            };
+            let call_str = call_args.join(", ");
+            s.push_str(&format!(
+                "{} lime_{}_v{}({}) {{ return ({}){}({}); }}\n",
+                ret_c,
+                sanitize_name(&f.symbol),
+                arity,
+                param_str,
+                ret_c,
+                real,
+                call_str
+            ));
+        }
+    }
+}
+
 /// Generate C accessors for *static* (internal-linkage) globals. These must be
 /// compiled in the *same translation unit* as the static variable they read
 /// (a separate adapter `.c` cannot reach an internal-linkage symbol), so
@@ -1445,9 +1541,12 @@ fn build_adapters_into(
     header: &Path,
     llvm_bindir: &str,
     lang: ApiKind,
+    api: &NormalizedApi,
+    shapes: &VariadicShapes,
 ) -> Result<(), String> {
     if adapters.is_empty() && constants.is_empty() && structs.is_empty()
         && !globals.iter().any(|g| matches!(g.storage, StorageClass::Static))
+        && !api.functions.iter().any(|f| f.variadic)
     {
         return Ok(());
     }
@@ -1470,7 +1569,7 @@ fn build_adapters_into(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-    let src = gen_adapter_c_source(adapters, constants, structs, globals, &header_name);
+    let src = gen_adapter_c_source(adapters, constants, structs, globals, &header_name, api, shapes);
     let c_path = build_dir.join("lime_adapters.c");
     std::fs::write(&c_path, src).map_err(|e| format!("adapter gen failed: {}", e))?;
     let mut cmd = Command::new(&clang);
@@ -1514,7 +1613,12 @@ fn build_adapters_into(
 /// `extern` Lime declaration. Structs become Lime `struct` definitions whose
 /// field layout matches the C/C++ layout (field order/names/types only; the
 /// ABI metadata records size/align for verification).
-fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterSpec]) -> String {
+fn generate_lime_iface(
+    api: &NormalizedApi,
+    lib_name: &str,
+    adapters: &[AdapterSpec],
+    shapes: &VariadicShapes,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!("// Charger-generated Lime interface for '{}'\n", lib_name));
     out.push_str("// DO NOT EDIT: regenerate with `charger install`.\n\n");
@@ -1698,6 +1802,13 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
     let adapter_map: std::collections::HashMap<String, &AdapterSpec> =
         adapters.iter().map(|a| (a.lime_name.clone(), a)).collect();
     for f in &api.functions {
+        // Variadic functions are NOT emitted as a single plain `extern fn`
+        // here — they are surfaced by the variadic family block below (one
+        // `extern fn` per call arity, each pointing at a fixed-arity adapter).
+        // Emitting the raw variadic symbol would collide at the same arity.
+        if f.variadic {
+            continue;
+        }
         let ret_lime = lime_type_name(&f.ret);
         let params_lime: Vec<String> = f
             .params
@@ -1769,6 +1880,44 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
             ));
         }
     }
+    // Phase 1 Iteration 5: variadic functions. For each variadic C function,
+    // emit a *family* of Lime `extern fn` declarations sharing the function's
+    // name but with distinct arities (fixed params + N variadic slots). The
+    // Lime call `foo(1, 2, 3)` (arity 3) resolves through the existing
+    // `(name, arity)` extern lookup to adapter `lime_foo_v2` — no Lime ABI or
+    // parser change required. Variadic slot Lime types come from `shapes`.
+    for f in &api.functions {
+        if !f.variadic {
+            continue;
+        }
+        let ret_lime = lime_type_name(&f.ret);
+        // Fixed-parameter Lime spellings (e.g. "Int: a0").
+        let fixed_lime: Vec<String> = f
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{}: a{}", lime_type_name(&p.ty), i))
+            .collect();
+        // Determine the variadic slot list for each call arity (0..=MAX).
+        let entry = resolve_plan(shapes, &f.symbol);
+        for arity in 0..=MAX_VARIADIC_ARITY {
+            let slots = slots_for_arity(&entry, arity);
+            let mut params: Vec<String> = fixed_lime.clone();
+            for (j, slot) in slots.iter().enumerate() {
+                let idx = f.params.len() + j;
+                params.push(format!("{}: a{}", slot.lime_type(), idx));
+            }
+            let lime_name = sanitize_name(&f.name);
+            let adapter_sym = format!("lime_{}_v{}", sanitize_name(&f.symbol), arity);
+            out.push_str(&format!(
+                "extern fn {}({}) -> {} \"{}\"\n",
+                lime_name,
+                params.join(", "),
+                ret_lime,
+                adapter_sym
+            ));
+        }
+    }
     out
 }
 
@@ -1798,8 +1947,156 @@ pub struct AbiMeta {
 }
 
 // ----------------------------------------------------------------------------
-// Store
+// Phase 1 Iteration 5: variadic argument shape metadata
 // ----------------------------------------------------------------------------
+
+/// Maximum number of variadic arguments Charger generates adapters for, when no
+/// explicit per-slot shape is supplied (homogeneous default). Covers the
+/// register→stack transition (Test H) on every supported target.
+const MAX_VARIADIC_ARITY: usize = 16;
+
+/// A variadic argument slot's ABI class. C variadic ABI distinguishes only two
+/// register classes at the call boundary — INTEGER/pointer (GP registers) and
+/// FLOATING-POINT (FP/SSE registers) — plus default argument promotions
+/// (float→double, char/short→int). So a slot is fully described by one of these
+/// five tokens, which map to the *promoted* C type the adapter declares:
+///
+/// * `Int`    -> `int`     (covers char/short/int/enum/bool: promoted to int)
+/// * `Long`   -> `long long`
+/// * `Double` -> `double`  (covers float: promoted to double)
+/// * `Opaque` -> `void*`   (any C pointer / handle)
+/// * `String` -> `const char*` (a C string; ABI-identical to `void*`)
+#[derive(Debug, Clone, PartialEq)]
+enum VarSlot {
+    Int,
+    Long,
+    Double,
+    Opaque,
+    String,
+}
+
+impl VarSlot {
+    /// The promoted C type spelling the adapter declares for this slot.
+    fn c_type(&self) -> &'static str {
+        match self {
+            VarSlot::Int => "int",
+            VarSlot::Long => "long long",
+            VarSlot::Double => "double",
+            VarSlot::Opaque => "void*",
+            VarSlot::String => "const char*",
+        }
+    }
+    /// The Lime type spelling used in the generated `extern fn` declaration.
+    fn lime_type(&self) -> &'static str {
+        match self {
+            VarSlot::Int | VarSlot::Long => "Int",
+            VarSlot::Double => "Float",
+            // Generic opaque pointer handle (no specific struct name).
+            VarSlot::Opaque => "Opaque(VariadicPtr)",
+            VarSlot::String => "String",
+        }
+    }
+}
+
+/// Per-function variadic shape, supplied by an OPTIONAL, library-agnostic
+/// auxiliary metadata file (`charger_variadic.json` beside the header), keyed
+/// by the function's linkable symbol. The header alone cannot convey variadic
+/// argument types — this is inherent to C variadics and is exactly the
+/// auxiliary type info every C FFI layer (libffi, ctypes) requires.
+///
+/// Two forms in the JSON:
+/// * Value `"Int"` (string) or omitted -> HOMOGENEOUS variadic args: a FAMILY
+///   of adapters, arity 0..MAX, all slots of the given promoted type (default
+///   `int`, or the token named, e.g. `"Long"` => `long long`).
+/// * Value `["Int","Double","Opaque"]` -> EXPLICIT per-slot shape: exactly one
+///   adapter of that fixed arity is generated.
+#[derive(Debug, Clone)]
+enum ShapeEntry {
+    Homogeneous(VarSlot),       // family, arity 0..MAX, all slots this token
+    Explicit(Vec<VarSlot>),     // one fixed arity equal to vec.len()
+}
+
+#[derive(Debug, Clone, Default)]
+struct VariadicShapes {
+    map: HashMap<String, ShapeEntry>,
+}
+
+fn parse_slot(tok: &str) -> Option<VarSlot> {
+    match tok.trim().to_ascii_lowercase().as_str() {
+        "int" => Some(VarSlot::Int),
+        "long" | "longlong" | "i64" => Some(VarSlot::Long),
+        "double" | "float" => Some(VarSlot::Double), // float promotes to double
+        "opaque" | "ptr" | "pointer" | "void*" => Some(VarSlot::Opaque),
+        "string" | "str" | "char*" => Some(VarSlot::String),
+        _ => None,
+    }
+}
+
+/// Resolve a function's variadic plan. `None` => homogeneous `int` family.
+fn resolve_plan(shapes: &VariadicShapes, symbol: &str) -> ShapeEntry {
+    match shapes.map.get(symbol) {
+        None => ShapeEntry::Homogeneous(VarSlot::Int),
+        Some(ShapeEntry::Homogeneous(s)) => ShapeEntry::Homogeneous(s.clone()),
+        Some(ShapeEntry::Explicit(v)) => ShapeEntry::Explicit(v.clone()),
+    }
+}
+
+/// The variadic slot list for a given call arity under a shape entry.
+/// * Homogeneous(token): `arity` slots, all `token`.
+/// * Explicit(pattern): the pattern tiled to fill `arity` slots (so a 2-slot
+///   pattern `[Int, Double]` yields `[Int, Double, Int, Double]` at arity 4).
+///   This lets a per-slot pattern describe families of any arity, not just one.
+fn slots_for_arity(entry: &ShapeEntry, arity: usize) -> Vec<VarSlot> {
+    match entry {
+        ShapeEntry::Homogeneous(token) => vec![token.clone(); arity],
+        ShapeEntry::Explicit(pattern) => {
+            if pattern.is_empty() {
+                return Vec::new();
+            }
+            (0..arity).map(|i| pattern[i % pattern.len()].clone()).collect()
+        }
+    }
+}
+
+impl VariadicShapes {
+    /// Load an optional `charger_variadic.json` from the header's directory.
+    /// Missing/absent file => empty map (every variadic fn uses the default).
+    fn load(header: &Path) -> VariadicShapes {
+        let mut shapes = VariadicShapes::default();
+        if let Some(dir) = header.parent() {
+            let path = dir.join("charger_variadic.json");
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(obj) = json.as_object() {
+                        for (sym, v) in obj {
+                            let entry = match v {
+                                // Single string => homogeneous family of that token.
+                                serde_json::Value::String(s) => match parse_slot(s) {
+                                    Some(slot) => ShapeEntry::Homogeneous(slot),
+                                    None => continue,
+                                },
+                                // Array => explicit fixed-arity shape.
+                                serde_json::Value::Array(arr) => {
+                                    let slots: Vec<VarSlot> = arr
+                                        .iter()
+                                        .filter_map(|e| e.as_str().and_then(parse_slot))
+                                        .collect();
+                                    if slots.is_empty() {
+                                        continue;
+                                    }
+                                    ShapeEntry::Explicit(slots)
+                                }
+                                _ => continue,
+                            };
+                            shapes.map.insert(sym.clone(), entry);
+                        }
+                    }
+                }
+            }
+        }
+        shapes
+    }
+}
 
 pub fn store_root() -> PathBuf {
     PathBuf::from(".lime-charger").join("store")
@@ -1897,6 +2194,10 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // only place macros can be recovered; AST-based extraction cannot see them.
     extract_macro_constants(&header, &mut api.constants);
     let adapters = collect_out_param_adapters(&api);
+    // Phase 1 Iteration 5: load optional variadic shape metadata (library
+    // agnostic, keyed by function symbol) so variadic adapters know the
+    // promoted type of each variadic slot.
+    let shapes = VariadicShapes::load(&header);
 
     // #8: artifact cache. If a store entry already exists whose manifest's
     // source_hash matches the current source_hash, the native artifact is
@@ -1914,8 +2215,8 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // the reused artifact (a stale artifact built by an older
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
-                build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang)?;
-                let iface = generate_lime_iface(&api, &lib_name, &adapters);
+                build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang, &api, &shapes)?;
+                let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
                 // Persist the shim symbols so `lime build` can resolve the
@@ -2035,7 +2336,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // 2b. Build out-param / null-callback adapter shims and insert them into
     // the prepared native artifact (so the Lime `extern fn` shim symbols
     // resolve at link time).
-    build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_path, &header, llvm_bindir, lang)?;
+    build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_path, &header, llvm_bindir, lang, &api, &shapes)?;
 
     // 2. AST extraction + normalization (already performed earlier; reuse it).
 
@@ -2044,7 +2345,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // (No extra work needed for the slice; struct fields already captured.)
 
     // 3. Lime interface generation (with out-param / null-callback adapters).
-    let iface = generate_lime_iface(&api, &lib_name, &adapters);
+    let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes);
 
     // 5. Store. (abi / build_flags / tool_hash / version / entry were computed
     // earlier, before the cache-hit check, and are reused here.)

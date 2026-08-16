@@ -1,0 +1,8 @@
+{
+  "var_sum_i64": "Long",
+  "var_sum_double": "Double",
+  "var_strlen_sum": ["String"],
+  "var_echo_ptr": ["Opaque"],
+  "var_mixed": ["Int", "Double", "Opaque"],
+  "var_promote": ["Int", "Double"]
+}

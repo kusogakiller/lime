@@ -1,0 +1,46 @@
+// Phase 1 Iteration 5: Variadic Functions — native execution test matrix.
+// Every call below routes through a Charger-generated fixed-arity adapter
+// (lime_<name>_v<N>) selected by (name, arity); the C compiler performs all
+// variadic ABI work. No Lime ABI / parser change; no printf special case.
+//
+// The `extern fn` declarations below are the exact entries Charger emits into
+// the generated interface for this library (verified against lime-iface.lime).
+
+extern fn var_handle() -> Opaque(Handle) "var_handle"
+extern fn var_sum(Int: a0) -> Int "lime_var_sum_v0"
+extern fn var_sum(Int: a0, Int: a1, Int: a2, Int: a3) -> Int "lime_var_sum_v3"
+extern fn var_sum(Int: a0, Int: a1, Int: a2, Int: a3, Int: a4) -> Int "lime_var_sum_v4"
+extern fn var_sum(Int: a0, Int: a1, Int: a2, Int: a3, Int: a4, Int: a5, Int: a6, Int: a7, Int: a8, Int: a9, Int: a10, Int: a11, Int: a12) -> Int "lime_var_sum_v12"
+extern fn var_sum_i64(Int: a0, Int: a1, Int: a2, Int: a3) -> Int "lime_var_sum_i64_v3"
+extern fn var_sum_double(Int: a0, Float: a1, Float: a2, Float: a3) -> Float "lime_var_sum_double_v3"
+extern fn var_strlen_sum(Int: a0, String: a1, String: a2, String: a3) -> Int "lime_var_strlen_sum_v3"
+extern fn var_echo_ptr(Opaque(void): a0, Opaque(VariadicPtr): a1) -> Int "lime_var_echo_ptr_v1"
+extern fn var_mixed(Int: a0, Int: a1, Float: a2, Opaque(VariadicPtr): a3) -> Int "lime_var_mixed_v3"
+extern fn var_sum_enum(Int: a0, Int: a1, Int: a2) -> Int "lime_var_sum_enum_v2"
+extern fn var_promote(Int: a0, Int: a1, Float: a2, Int: a3, Float: a4) -> Int "lime_var_promote_v4"
+
+fn main():
+    // A. integer variadic
+    print(var_sum(4, 1, 2, 3, 4))            // 10
+    // B. 64-bit integer variadic
+    print(var_sum_i64(3, 10000000000, 20000000000, 30000000000)) // 60000000000
+    // C. double variadic
+    print(var_sum_double(3, 1.0, 2.5, 3.5))  // 7.0
+    // D. opaque pointer variadic (echo: fixed ptr == variadic ptr?)
+    let h = var_handle()
+    print(var_echo_ptr(h, h))                 // 1
+    // E. string variadic (sum of lengths)
+    print(var_strlen_sum(3, "ab", "cde", "fg")) // 7
+    // F. mixed int + double + opaque (3-bit signature)
+    print(var_mixed(1, 5, 2.5, h))           // 7  (int>0 | double>0 | ptr!=0)
+    // G. zero variadic arguments
+    print(var_sum(0))                         // 0
+    // H. many variadic arguments (register -> stack transition)
+    print(var_sum(12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)) // 78
+    // I. fixed + variadic
+    print(var_sum(3, 10, 20, 30))             // 60
+    // J. enum passed as variadic argument (underlying int value)
+    print(var_sum_enum(2, 10, 20))            // 30
+    // K. default argument promotions: int slots (char/short promote to int) and
+    //    double slots (float promotes to double). sig bits 1|2|4|8 = 15.
+    print(var_promote(4, 5, 2.5, 7, 1.5))    // 15
