@@ -1,0 +1,40 @@
+// Charger-generated Lime interface for 'libgvar'
+// DO NOT EDIT: regenerate with `charger install`.
+
+// Global variables (C file-scope); use lime_get_/lime_set_ shims
+extern fn lime_get_g_counter() -> Int "lime_get_g_counter"
+extern fn lime_set_g_counter(Int: a0) "lime_set_g_counter"
+extern fn lime_get_g_max() -> Int "lime_get_g_max"
+extern fn lime_set_g_max(Int: a0) "lime_set_g_max"
+extern fn lime_get_g_const_pi() -> Int "lime_get_g_const_pi"
+extern fn lime_get_g_msg() -> String "lime_get_g_msg"
+extern fn lime_set_g_msg(String: a0) "lime_set_g_msg"
+extern fn lime_get_g_ints() -> Opaque(g_ints) "lime_get_g_ints"
+extern fn lime_set_g_ints(Opaque(g_ints): a0) "lime_set_g_ints"
+extern fn lime_get_g_ints_i(Opaque(g_ints): a0, Int: a1) -> Int "lime_get_g_ints_i"
+extern fn lime_set_g_ints_i(Opaque(g_ints): a0, Int: a1, Int: a2) "lime_set_g_ints_i"
+extern fn lime_get_g_origin() -> Opaque(g_origin) "lime_get_g_origin"
+extern fn lime_set_g_origin(Opaque(g_origin): a0) "lime_set_g_origin"
+extern fn lime_get_g_origin_x(Opaque(g_origin): a0) -> Int "lime_get_g_origin_x"
+extern fn lime_set_g_origin_x(Opaque(g_origin): a0, Int: a1) "lime_set_g_origin_x"
+extern fn lime_get_g_origin_y(Opaque(g_origin): a0) -> Int "lime_get_g_origin_y"
+extern fn lime_set_g_origin_y(Opaque(g_origin): a0, Int: a1) "lime_set_g_origin_y"
+extern fn lime_get_g_static_secret() -> Int "lime_get_g_static_secret"
+extern fn lime_set_g_static_secret(Int: a0) "lime_set_g_static_secret"
+
+// Opaque handle for C struct 'GPoint' (sub-8-byte layout); use lime_*_get/set shims
+extern fn lime_make_GPoint() -> Opaque(GPoint) "lime_make_GPoint"
+extern fn lime_get_GPoint_x(Opaque(GPoint): a0) -> Int "lime_get_GPoint_x"
+extern fn lime_set_GPoint_x(Opaque(GPoint): a0, Int: a1) "lime_set_GPoint_x"
+extern fn lime_get_GPoint_y(Opaque(GPoint): a0) -> Int "lime_get_GPoint_y"
+extern fn lime_set_GPoint_y(Opaque(GPoint): a0, Int: a1) "lime_set_GPoint_y"
+
+extern fn gvar_bump(Unit: a0) -> Int "gvar_bump"
+extern fn gvar_get_counter(Unit: a0) -> Int "gvar_get_counter"
+extern fn gvar_set_counter(Int: a0) -> Unit "gvar_set_counter"
+extern fn gvar_get_static(Unit: a0) -> Int "gvar_get_static"
+extern fn gvar_set_msg(String: a0) -> Unit "gvar_set_msg"
+extern fn gvar_get_msg(Unit: a0) -> String "gvar_get_msg"
+extern fn gvar_get_origin_x(Unit: a0) -> Int "gvar_get_origin_x"
+extern fn gvar_set_origin(Int: a0, Int: a1) -> Unit "gvar_set_origin"
+extern fn gvar_sum_ints(Unit: a0) -> Int "gvar_sum_ints"

@@ -1,0 +1,91 @@
+// Phase 1 Iteration 4: Global Variables — native execution test matrix.
+// All accessors are Charger-generated shims (no hand-written bindings).
+
+// A. scalar extern global
+extern fn lime_get_g_counter() -> Int "lime_get_g_counter"
+extern fn lime_set_g_counter(Int: a0) "lime_set_g_counter"
+// C-side observability for round-trip proof
+extern fn gvar_bump() -> Int "gvar_bump"
+extern fn gvar_get_counter() -> Int "gvar_get_counter"
+extern fn gvar_set_counter(Int: a0) "gvar_set_counter"
+// C. const global (getter only)
+extern fn lime_get_g_const_pi() -> Int "lime_get_g_const_pi"
+// D. pointer global (char*)
+extern fn lime_get_g_msg() -> String "lime_get_g_msg"
+extern fn lime_set_g_msg(String: a0) "lime_set_g_msg"
+extern fn gvar_get_msg() -> String "gvar_get_msg"
+// L. static global (via Charger accessor)
+extern fn lime_get_g_static_secret() -> Int "lime_get_g_static_secret"
+extern fn lime_set_g_static_secret(Int: a0) "lime_set_g_static_secret"
+extern fn gvar_get_static() -> Int "gvar_get_static"
+// multiple independent globals
+extern fn lime_get_g_max() -> Int "lime_get_g_max"
+extern fn lime_set_g_max(Int: a0) "lime_set_g_max"
+
+// E. struct global: address accessor + per-field accessors
+extern fn lime_get_g_origin() -> Opaque(g_origin) "lime_get_g_origin"
+extern fn lime_get_g_origin_x(Opaque(g_origin): a0) -> Int "lime_get_g_origin_x"
+extern fn lime_set_g_origin_x(Opaque(g_origin): a0, Int: a1) "lime_set_g_origin_x"
+extern fn lime_get_g_origin_y(Opaque(g_origin): a0) -> Int "lime_get_g_origin_y"
+extern fn lime_set_g_origin_y(Opaque(g_origin): a0, Int: a1) "lime_set_g_origin_y"
+// C-side observability for struct global
+extern fn gvar_get_origin_x() -> Int "gvar_get_origin_x"
+extern fn gvar_set_origin(Int: a0, Int: a1) "gvar_set_origin"
+
+// F. array global: address accessor + element accessors
+extern fn lime_get_g_ints() -> Opaque(g_ints) "lime_get_g_ints"
+extern fn lime_get_g_ints_i(Opaque(g_ints): a0, Int: a1) -> Int "lime_get_g_ints_i"
+extern fn lime_set_g_ints_i(Opaque(g_ints): a0, Int: a1, Int: a2) "lime_set_g_ints_i"
+// C-side observability for array global
+extern fn gvar_sum_ints() -> Int "gvar_sum_ints"
+
+fn main():
+    // A. scalar global: read initial (C → Lime)
+    print(lime_get_g_counter())                 // 0
+    // Lime → C write, observed from C
+    lime_set_g_counter(10)
+    print(gvar_get_counter())                   // 10
+    // C → Lime mutation observed
+    gvar_set_counter(25)
+    print(lime_get_g_counter())                 // 25
+    // C function mutates global → Lime reads
+    let b = gvar_bump()
+    print(b)                                    // 26
+
+    // C. const global: getter only (no setter generated)
+    print(lime_get_g_const_pi())                 // 3
+
+    // D. pointer/string global
+    lime_set_g_msg("hi")
+    print(gvar_get_msg())                        // hi
+
+    // L. static global via accessor
+    print(lime_get_g_static_secret())            // 42
+    lime_set_g_static_secret(77)
+    print(gvar_get_static())                     // 77
+
+    // multiple independent globals
+    lime_set_g_max(999)
+    print(lime_get_g_max())                      // 999
+
+    // E. struct global: field read (init x=7,y=9)
+    let o = lime_get_g_origin()
+    print(lime_get_g_origin_x(o))                // 7
+    print(lime_get_g_origin_y(o))                // 9
+    // Lime → C field write, observed from C
+    lime_set_g_origin_x(o, 13)
+    print(gvar_get_origin_x())                   // 13
+    // C function mutates struct global → Lime reads
+    gvar_set_origin(100, 200)
+    print(lime_get_g_origin_x(o))                // 100
+    print(lime_get_g_origin_y(o))                // 200
+
+    // F. array global: address accessor + element accessors
+    let a = lime_get_g_ints()
+    print(lime_get_g_ints_i(a, 0))               // 1 (init)
+    print(lime_get_g_ints_i(a, 3))               // 4
+    // Lime → C element write
+    lime_set_g_ints_i(a, 2, 42)
+    print(gvar_sum_ints())                       // 1+2+42+4 = 49
+    // C function also sees it
+    print(lime_get_g_ints_i(a, 2))               // 42

@@ -105,6 +105,28 @@ pub struct CStruct {
     pub has_fn_ptr: bool,
 }
 
+/// A C file-scope global variable, surfaced to Lime via generated getter/setter
+/// shims. `storage` records linkage: `Extern` (external linkage, directly
+/// linkable), `Static` (internal linkage — Charger emits an accessor inside the
+/// prepared artifact so Lime can still reach it), `Local` (never surfaced).
+/// `is_const` globals get a getter only. `tls` records thread-local storage.
+#[derive(Debug, Clone)]
+pub struct CGlobal {
+    pub name: String,
+    pub ty: CType,
+    pub storage: StorageClass,
+    pub is_const: bool,
+    pub tls: bool,
+    pub symbol: String, // linker symbol (usually the name)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageClass {
+    Extern,
+    Static,
+    Local,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NormalizedApi {
     pub functions: Vec<CFunction>,
@@ -114,6 +136,9 @@ pub struct NormalizedApi {
     // `static const` variables, and `#define` integer macros. These reuse the
     // existing Lime `const` statement (no new Lime type category is introduced).
     pub constants: Vec<(String, i64)>,
+    // Phase 1 Iteration 4: file-scope global variables (extern / exported /
+    // static-with-accessor), surfaced to Lime via generated getter/setter shims.
+    pub globals: Vec<CGlobal>,
     pub kind: ApiKind, // C or Cpp
     // Real-world Phase A: the set of type names that are *record/handle* types
     // (`sqlite3`, `sqlite3_stmt`, `sqlite3_blob`, … — i.e. `typedef struct X X;`
@@ -180,6 +205,7 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
         kind: lang,
         handle_types: BTreeSet::new(),
         constants: Vec::new(),
+        globals: Vec::new(),
     };
     let mut ctx = NormalizeCtx {
         anon_struct: None,
@@ -322,6 +348,12 @@ fn parse_c_type(qual: &str) -> CType {
         if let Some(ft) = parse_c_function_ptr(q) {
             return ft;
         }
+    }
+    // C string types (`char *`, `const char *`) are Lime `String`. This must be
+    // checked BEFORE the generic pointer strip below (which would otherwise turn
+    // `char *` into `Pointer(Int)` and lose the string semantics).
+    if q == "char *" || q == "const char *" || q == "char*" || q == "const char*" {
+        return CType::String;
     }
     // normalize pointers
     if let Some(inner) = q.strip_suffix('*') {
@@ -553,25 +585,66 @@ fn classify_node(
             // source. Kept as a no-op guard so the match is exhaustive.
         }
         "VarDecl" => {
-            // `static const int NAME = <int literal>;` — extract as a constant.
+            // File-scope global variables. Charger surfaces them to Lime via
+            // generated getter/setter shims (see gen_adapter_c_source /
+            // generate_lime_iface). Three cases:
+            //   * `static const <int> NAME = <lit>;` — extract as a Lime constant
+            //     (reuses the existing `const` statement; no new Lime type).
+            //   * `extern` / exported globals — external linkage, directly
+            //     linkable; getter/setter reference the symbol directly.
+            //   * `static` (non-const) globals — internal linkage, NOT directly
+            //     linkable; Charger emits an accessor inside the prepared artifact
+            //     so Lime can still reach them (we never pretend a static symbol
+            //     is externally linkable — that would be an ABI lie).
+            // Thread-local storage (`_Thread_local` / `thread_local`) is recorded
+            // in `tls` so the accessor can be generated correctly if needed.
             let vname = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let storage = node.get("storageClass").and_then(|v| v.as_str()).unwrap_or("");
-            let is_const = node
+            if vname.is_empty() {
+                return;
+            }
+            let storage = node.get("storageClass").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let ty = type_from_json(node.get("type").unwrap_or(&serde_json::Value::Null));
+            let qual = node
                 .get("type")
                 .and_then(|t| t.get("qualType"))
                 .and_then(|v| v.as_str())
-                .map(|s| s.contains("const"))
-                .unwrap_or(false);
-            if !vname.is_empty() && storage == "static" && is_const {
+                .unwrap_or("")
+                .to_string();
+            let is_const = qual.contains("const");
+            let tls = node.get("isTLS").and_then(|v| v.as_bool()).unwrap_or(false)
+                || qual.contains("__thread")
+                || qual.contains("_Thread_local");
+            // `static const` integer literal -> Lime constant (existing behavior).
+            if storage == "static" && is_const {
                 if let Some(init) = node.get("inner").and_then(|v| v.as_array()) {
                     for i in init {
                         if let Some(v) = i.get("value").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()) {
-                            api.constants.push((vname, v));
+                            api.constants.push((vname.clone(), v));
                             break;
                         }
                     }
                 }
+                return;
             }
+            // Otherwise it is a mutable/external global worth surfacing.
+            let storage_class = if storage == "static" {
+                StorageClass::Static
+            } else if storage == "extern" {
+                StorageClass::Extern
+            } else {
+                // No explicit storage class on a file-scope var => external
+                // linkage by default in C (a `int x;` at file scope is a
+                // tentative definition with external linkage).
+                StorageClass::Extern
+            };
+            api.globals.push(CGlobal {
+                name: vname.clone(),
+                ty,
+                storage: storage_class,
+                is_const,
+                tls,
+                symbol: vname,
+            });
         }
         "TypedefDecl" => {
             let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -902,7 +975,11 @@ fn c_type_text(t: &CType) -> String {
             let ps: Vec<String> = params.iter().map(|p| c_type_text(p)).collect();
             format!("{} (*)({})", c_type_text(ret), ps.join(", "))
         }
-        CType::Struct(s) | CType::Opaque(s) => format!("{}*", s),
+        // A named struct appears as a pointer in the C ABI (Lime holds it as an
+        // opaque handle). Reference it as `struct Name*` so forward-declared /
+        // anonymous-typedef structs resolve correctly.
+        CType::Struct(s) => format!("struct {}*", s),
+        CType::Opaque(s) => format!("{}*", s),
         // `CType::Other(s)` is an unmodeled type spelling (e.g. a typedef'd
         // scalar like `sqlite3_int64`, or a forward-declared record). Emit it
         // verbatim — do NOT append `*` — because we cannot tell from the spelling
@@ -969,6 +1046,7 @@ fn gen_adapter_c_source(
     adapters: &[AdapterSpec],
     constants: &[(String, i64)],
     structs: &[CStruct],
+    globals: &[CGlobal],
     header_name: &str,
 ) -> String {
     let mut s = String::new();
@@ -985,10 +1063,10 @@ fn gen_adapter_c_source(
         // and sub-8-byte structs (char/short/int members — Lime's int is i64).
         if st.is_union || st.is_bitfield || !st.all_8byte {
             // Constructor allocating the record on the heap (Lime owns the pointer).
-        s.push_str(&format!(
-            "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
-            st.name, st.name
-        ));
+            s.push_str(&format!(
+                "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof(struct {})); }}\n",
+                st.name, st.name
+            ));
         for f in &st.fields {
             match &f.ty {
                 CType::Array(elem, size) => {
@@ -1016,7 +1094,7 @@ fn gen_adapter_c_source(
                 _ => {
                     let c_ty = c_type_text(&f.ty);
                     s.push_str(&format!(
-                        "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
+                        "{} lime_get_{}_{}(struct {}* u) {{ return ({})u->{}; }}\n",
                         c_ty, st.name, f.name, st.name, c_ty, f.name
                     ));
                     // Setter: a Lime `Opaque(Name)` value is a bare pointer (i8*);
@@ -1033,7 +1111,7 @@ fn gen_adapter_c_source(
                         ));
                     } else {
                         s.push_str(&format!(
-                            "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
+                            "void lime_set_{}_{}(struct {}* u, {} v) {{ u->{} = ({})v; }}\n",
                             st.name, f.name, st.name, c_ty, f.name, c_ty
                         ));
                     }
@@ -1148,7 +1226,211 @@ fn gen_adapter_c_source(
             ));
         }
     }
+    // Global-variable shims: a getter/setter that reads/writes the C global
+    // through the prepared artifact. `extern` globals reference the symbol
+    // directly; `static` globals are reachable only via this accessor (which
+    // lives in the same translation unit as the static var). `const` globals
+    // get a getter only. Aggregate (struct/array) globals are accessed by
+    // address (returning `void*` to the global's storage).
+    for g in globals {
+        // Static (internal-linkage) globals cannot be reached from a separate
+        // adapter translation unit, so their accessors are injected into the
+        // library source itself (see `build_adapters_into`). Skip them here.
+        if matches!(g.storage, StorageClass::Static) {
+            continue;
+        }
+        // For C type text we need the real C spelling. A named struct global
+        // must be referenced as `struct Name` (not `Name*`, which is the opaque-
+        // handle rendering used elsewhere). Scalars/pointers use c_type_text.
+        let c_ty = match &g.ty {
+            CType::Struct(s) => format!("struct {}", s),
+            CType::Other(s) => s.clone(),
+            // `char*` (C string) is a `void*` at the ABI boundary — safe to
+            // treat as a bare pointer for get/set.
+            CType::String => "void*".to_string(),
+            _ => c_type_text(&g.ty),
+        };
+        let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _));
+        if is_agg {
+            s.push_str(&format!(
+                "void* lime_get_{}(void) {{ return (void*)&{}; }}\n",
+                g.name, g.name
+            ));
+            if !g.is_const {
+                s.push_str(&format!(
+                    "void lime_set_{}(void* v) {{ memcpy(&{}, v, sizeof({})); }}\n",
+                    g.name, g.name, c_ty
+                ));
+            }
+            // Struct / array globals additionally get field-level and element-level
+            // accessors so Lime can reach individual members without reinterpreting
+            // the raw address itself. The accessor naming reuses the same
+            // `lime_get_<name>_<field>` / `lime_get_<name>_<field>_i` convention
+            // used for struct-record fields — no library-specific code.
+            match &g.ty {
+                CType::Struct(sname) | CType::Other(sname) => {
+                    if let Some(def) = structs.iter().find(|st| &st.name == sname) {
+                        // Reuse the record-field shim generator with the *global*
+                        // name as the prefix so accessors read lime_get_<global>_<field>.
+                        emit_struct_field_shims_c(&mut s, g.name.as_str(), def);
+                    }
+                }
+                CType::Array(elem, size) => {
+                    let c_ty = c_type_text(elem);
+                    // Fixed-length array global: element-wise accessors. The Lime
+                    // ABI passes the global's address as the first argument (same
+                    // convention as struct/record element accessors) — we ignore it
+                    // and index the global directly, keeping the C and Lime
+                    // signatures in lockstep.
+                    s.push_str(&format!(
+                        "{} lime_get_{}_i(void* u, int i) {{ (void)u; return ({}){}[i]; }}\n",
+                        c_ty, g.name, c_ty, g.name
+                    ));
+                    if !g.is_const {
+                        s.push_str(&format!(
+                            "void lime_set_{}_i(void* u, int i, {} v) {{ (void)u; {}[i] = ({})v; }}\n",
+                            g.name, c_ty, g.name, c_ty
+                        ));
+                    }
+                    let _ = size; // fixed-size only; flexible array globals are rare
+                }
+                _ => {}
+            }
+        } else {
+            s.push_str(&format!(
+                "{} lime_get_{}(void) {{ return ({})({}); }}\n",
+                c_ty, g.name, c_ty, g.name
+            ));
+            if !g.is_const {
+                s.push_str(&format!(
+                    "void lime_set_{}({} v) {{ {} = ({})(v); }}\n",
+                    g.name, c_ty, g.name, c_ty
+                ));
+            }
+        }
+    }
     s
+}
+
+/// Generate C accessors for *static* (internal-linkage) globals. These must be
+/// compiled in the *same translation unit* as the static variable they read
+/// (a separate adapter `.c` cannot reach an internal-linkage symbol), so
+/// Generate C accessors for *static* (internal-linkage) globals. These must be
+/// compiled in the *same translation unit* as the static variable they read
+/// (a separate adapter `.c` cannot reach an internal-linkage symbol), so
+/// `install` appends this source to the library's first source file. The
+/// accessor names/signatures match the extern-global shims exactly, so the Lime
+/// interface is identical regardless of linkage. Struct/array field accessors
+/// are emitted with the same ABI rules as the extern path.
+fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct]) -> String {
+    let mut s = String::new();
+    for g in globals {
+        if !matches!(g.storage, StorageClass::Static) {
+            continue;
+        }
+        let c_ty = match &g.ty {
+            CType::Struct(name) => format!("struct {}", name),
+            CType::Other(name) => name.clone(),
+            CType::String => "void*".to_string(),
+            _ => c_type_text(&g.ty),
+        };
+        let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _));
+        if is_agg {
+            s.push_str(&format!(
+                "void* lime_get_{}(void) {{ return (void*)&{}; }}\n",
+                g.name, g.name
+            ));
+            if !g.is_const {
+                s.push_str(&format!(
+                    "void lime_set_{}(void* v) {{ memcpy(&{}, v, sizeof({})); }}\n",
+                    g.name, g.name, c_ty
+                ));
+            }
+            match &g.ty {
+                CType::Struct(sname) | CType::Other(sname) => {
+                    if let Some(def) = structs.iter().find(|st| &st.name == sname) {
+                        emit_struct_field_shims_c(&mut s, &g.name, def);
+                    }
+                }
+                CType::Array(elem, _size) => {
+                    let e_ty = c_type_text(elem);
+                    s.push_str(&format!(
+                        "{} lime_get_{}_i(void* u, int i) {{ (void)u; return ({}){}[i]; }}\n",
+                        e_ty, g.name, e_ty, g.name
+                    ));
+                    if !g.is_const {
+                        s.push_str(&format!(
+                            "void lime_set_{}_i(void* u, int i, {} v) {{ (void)u; {}[i] = ({})v; }}\n",
+                            g.name, e_ty, g.name, e_ty
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            s.push_str(&format!(
+                "{} lime_get_{}(void) {{ return ({})({}); }}\n",
+                c_ty, g.name, c_ty, g.name
+            ));
+            if !g.is_const {
+                s.push_str(&format!(
+                    "void lime_set_{}({} v) {{ {} = ({})(v); }}\n",
+                    g.name, c_ty, g.name, c_ty
+                ));
+            }
+        }
+    }
+    s
+}
+
+/// Generate C-side field accessor shims for a *struct-typed* value whose handle
+/// is addressed by `prefix` (a global variable name, or a struct record name).
+/// Emits `lime_get_<prefix>_<field>` / `lime_set_<prefix>_<field>` (and `_i`
+/// variants for array fields) reusing the exact ABI rules of struct-record
+/// accessors. Kept as a shared helper so globals and records stay in lockstep.
+/// The C pointer type is the *struct definition* name (`st.name`), while the
+/// accessor function name uses `prefix` (which may be a global variable name).
+fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct) {
+    for f in &st.fields {
+        match &f.ty {
+            CType::Array(elem, size) => {
+                let c_ty = c_type_text(elem);
+                if size.is_none() {
+                    s.push_str(&format!(
+                        "void* lime_make_{0}_{1}_flex(int len) {{ {2}* f = ({2}*)calloc(1, sizeof({2}) + (size_t)len * sizeof({3})); if (f) f->len = len; return (void*)f; }}\n",
+                        prefix, f.name, st.name, c_ty
+                    ));
+                }
+                s.push_str(&format!(
+                    "{} lime_get_{}_{}_i(struct {}* u, int i) {{ return ({})u->{}[i]; }}\n",
+                    c_ty, prefix, f.name, st.name, c_ty, f.name
+                ));
+                s.push_str(&format!(
+                    "void lime_set_{}_{}_i(struct {}* u, int i, {} v) {{ u->{}[i] = ({})v; }}\n",
+                    prefix, f.name, st.name, c_ty, f.name, c_ty
+                ));
+            }
+            _ => {
+                let c_ty = c_type_text(&f.ty);
+                s.push_str(&format!(
+                    "{} lime_get_{}_{}(struct {}* u) {{ return ({})u->{}; }}\n",
+                    c_ty, prefix, f.name, st.name, c_ty, f.name
+                ));
+                if matches!(&f.ty, CType::Struct(_) | CType::Other(_)) {
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}(struct {}* u, {}* v) {{ memcpy(&u->{}, v, sizeof({})); }}\n",
+                        prefix, f.name, st.name, c_ty, f.name, c_ty
+                    ));
+                } else {
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}(struct {}* u, {} v) {{ u->{} = ({})v; }}\n",
+                        prefix, f.name, st.name, c_ty, f.name, c_ty
+                    ));
+                }
+            }
+        }
+    }
+    s.push_str("\n");
 }
 
 /// Compile the adapter shims and insert them into the prepared native artifact
@@ -1158,24 +1440,20 @@ fn build_adapters_into(
     adapters: &[AdapterSpec],
     constants: &[(String, i64)],
     structs: &[CStruct],
+    globals: &[CGlobal],
     art_path: &Path,
     header: &Path,
     llvm_bindir: &str,
     lang: ApiKind,
 ) -> Result<(), String> {
-    if adapters.is_empty() && constants.is_empty() && structs.is_empty() {
+    if adapters.is_empty() && constants.is_empty() && structs.is_empty()
+        && !globals.iter().any(|g| matches!(g.storage, StorageClass::Static))
+    {
         return Ok(());
     }
-    let header_name = header
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_string();
-    let src = gen_adapter_c_source(adapters, constants, structs, &header_name);
+    // Resolve the toolchain + build scratch dir up-front.
     let build_dir = std::env::temp_dir().join("charger_build_adapters");
     let _ = std::fs::create_dir_all(&build_dir);
-    let c_path = build_dir.join("lime_adapters.c");
-    std::fs::write(&c_path, src).map_err(|e| format!("adapter gen failed: {}", e))?;
     let obj_path = build_dir.join("lime_adapters.obj");
     let clang = if lang == ApiKind::Cpp {
         PathBuf::from(llvm_bindir).join("clang++.exe")
@@ -1187,6 +1465,14 @@ fn build_adapters_into(
     } else {
         PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp { "clang++" } else { "clang" })
     };
+    let header_name = header
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let src = gen_adapter_c_source(adapters, constants, structs, globals, &header_name);
+    let c_path = build_dir.join("lime_adapters.c");
+    std::fs::write(&c_path, src).map_err(|e| format!("adapter gen failed: {}", e))?;
     let mut cmd = Command::new(&clang);
     cmd.arg("-O2").arg("-c");
     if lang == ApiKind::Cpp {
@@ -1245,6 +1531,87 @@ fn generate_lime_iface(api: &NormalizedApi, lib_name: &str, adapters: &[AdapterS
         ));
     }
     if !api.constants.is_empty() {
+        out.push_str("\n");
+    }
+
+    // Global variables: surfaced as generated getter/setter shims. The getter
+    // returns the value (or an opaque handle / pointer for aggregate globals);
+    // the setter stores it. `const` globals get a getter only.
+    if !api.globals.is_empty() {
+        out.push_str("// Global variables (C file-scope); use lime_get_/lime_set_ shims\n");
+        for g in &api.globals {
+            let lime_ty = lime_type_name(&g.ty);
+            // Aggregate (struct/array) globals and pointer globals cannot be
+            // returned by value ABI-safely through Lime; expose them as a pointer
+            // accessor (opaque handle) instead.
+            let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _) | CType::Pointer(_));
+            if is_agg {
+                // Aggregate (struct/array/pointer) globals are surfaced as a bare
+                // pointer. Lime has no raw-pointer type, so we expose the address
+                // as an `Int` (i64) — the C shim casts it back to the real pointer
+                // type. This avoids inventing a new Lime type and keeps the ABI
+                // round-trip correct (the value is just an address).
+                out.push_str(&format!(
+                    "extern fn lime_get_{}() -> Opaque({}) \"lime_get_{}\"\n",
+                    g.name, g.name, g.name
+                ));
+                if !g.is_const {
+                    out.push_str(&format!(
+                        "extern fn lime_set_{}(Opaque({}): a0) \"lime_set_{}\"\n",
+                        g.name, g.name, g.name
+                    ));
+                }
+                // Struct globals additionally expose per-field getters/setters so
+                // Lime can read/write individual members. We reuse emit_field_accessors
+                // with a synthetic CStruct whose name is the *global* name, yielding
+                // `lime_get_<global>_<field>` declarations that match the C shims.
+                // Array globals get element-wise accessors.
+                match &g.ty {
+                    CType::Struct(sname) | CType::Other(sname) => {
+                        if let Some(def) = api.structs.iter().find(|st| &st.name == sname) {
+                            let synth = CStruct {
+                                name: g.name.clone(),
+                                fields: def.fields.clone(),
+                                size_bytes: def.size_bytes,
+                                align_bytes: def.align_bytes,
+                                is_union: def.is_union,
+                                is_bitfield: def.is_bitfield,
+                                all_8byte: def.all_8byte,
+                                has_fn_ptr: def.has_fn_ptr,
+                            };
+                            for f in &synth.fields {
+                                emit_field_accessors(&mut out, &synth, f);
+                            }
+                        }
+                    }
+                    CType::Array(elem, _size) => {
+                        let elem_lime = lime_type_name(elem);
+                        out.push_str(&format!(
+                            "extern fn lime_get_{}_i(Opaque({}): a0, Int: a1) -> {} \"lime_get_{}_i\"\n",
+                            g.name, g.name, elem_lime, g.name
+                        ));
+                        if !g.is_const {
+                            out.push_str(&format!(
+                                "extern fn lime_set_{}_i(Opaque({}): a0, Int: a1, {}: a2) \"lime_set_{}_i\"\n",
+                                g.name, g.name, elem_lime, g.name
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                out.push_str(&format!(
+                    "extern fn lime_get_{}() -> {} \"lime_get_{}\"\n",
+                    g.name, lime_ty, g.name
+                ));
+                if !g.is_const {
+                    out.push_str(&format!(
+                        "extern fn lime_set_{}({}: a0) \"lime_set_{}\"\n",
+                        g.name, lime_ty, g.name
+                    ));
+                }
+            }
+        }
         out.push_str("\n");
     }
 
@@ -1547,7 +1914,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // the reused artifact (a stale artifact built by an older
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
-                build_adapters_into(&adapters, &api.constants, &api.structs, &art_dest, &header, llvm_bindir, lang)?;
+                build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang)?;
                 let iface = generate_lime_iface(&api, &lib_name, &adapters);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
@@ -1597,7 +1964,45 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     for inc in &include_dirs {
         cmd.arg("-I").arg(inc);
     }
-    for s in &sources {
+    // The combined TU is written to a temp dir, so ensure the library header's
+    // directory is on the include path (the original sources sit beside it).
+    if let Some(hdir) = header.parent() {
+        cmd.arg("-I").arg(hdir);
+    }
+    // Static (internal-linkage) globals cannot be reached from a separate
+    // adapter translation unit, so their accessors must live in the SAME TU as
+    // the static variable. We append the generated accessor source to the first
+    // library source (combined TU) and compile that instead of the raw source.
+    // Single-TU libraries (the common Charger case) get a correct, self-contained
+    // member; the accessor and the static share one TU so the symbol resolves.
+    let static_src = gen_static_accessor_c_source(&api.globals, &api.structs);
+    let compiled_sources: Vec<PathBuf> = if static_src.is_empty() {
+        sources.clone()
+    } else {
+        let first = sources.first().ok_or_else(|| {
+            "native build failed: no source to host static-global accessors".to_string()
+        })?;
+        let base = first
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("src.c")
+            .to_string();
+        let combined = build_dir.join(format!("combined_{}", base));
+        let orig = std::fs::read_to_string(first)
+            .map_err(|e| format!("static inject failed: read {}: {}", first.display(), e))?;
+        std::fs::write(
+            &combined,
+            format!("{}\n\n/* Charger static-global accessors */\n{}\n", orig, static_src),
+        )
+        .map_err(|e| format!("static inject failed: write {}: {}", combined.display(), e))?;
+        let mut v = Vec::new();
+        v.push(combined);
+        for s in sources.iter().skip(1) {
+            v.push(s.clone());
+        }
+        v
+    };
+    for s in &compiled_sources {
         cmd.arg(s);
     }
     cmd.arg("-o").arg(&obj_path);
@@ -1630,7 +2035,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // 2b. Build out-param / null-callback adapter shims and insert them into
     // the prepared native artifact (so the Lime `extern fn` shim symbols
     // resolve at link time).
-    build_adapters_into(&adapters, &api.constants, &api.structs, &art_path, &header, llvm_bindir, lang)?;
+    build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_path, &header, llvm_bindir, lang)?;
 
     // 2. AST extraction + normalization (already performed earlier; reuse it).
 
