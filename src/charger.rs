@@ -31,6 +31,24 @@ use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::cell::RefCell;
+
+/// Module-level set of struct type names known to the current adapter
+/// generation pass. Populated by `gen_adapter_c_source` (which has the full
+/// normalized API in scope) so that `c_type_text` can render an `Opaque(name)`
+/// that names a real (possibly-incomplete) struct as `struct name*` — the
+/// correct C spelling for a pointer to a forward-declared record. Cleared at
+/// the end of each pass so one library's records never leak into another's
+/// adapter source. Generic: driven purely by AST-extracted struct names.
+thread_local! {
+    static KNOWN_RECORDS: RefCell<Option<BTreeSet<String>>> = RefCell::new(None);
+    // Scalar typedef table: maps a typedef name (e.g. `uLong`, `Bytef`) to its
+    // canonical underlying scalar spelling (e.g. `unsigned long`, `unsigned
+    // char`) extracted from the AST. Consulted by `parse_c_type` so pointer
+    // typedefs like `const Bytef*` resolve to `char*`/`String` and scalar
+    // typedefs to the right-width scalar. Generic — driven by the AST.
+    static SCALAR_TYPEDEFS: RefCell<Option<HashMap<String, String>>> = RefCell::new(None);
+}
 
 // ----------------------------------------------------------------------------
 // Normalized representation (Charger Internal Representation, "CIR lite")
@@ -54,6 +72,17 @@ pub enum CType {
     Struct(String), // named struct/class
     Opaque(String), // typedef / named but fields unknown
     Other(String),  // fallback: raw C type text
+    // A width-critical typedef (`size_t`, `ssize_t`, `ptrdiff_t`, `uintptr_t`,
+    // `intptr_t`, `uintmax_t`, ...). These resolve to `unsigned long long` /
+    // `long long` / etc. on the target platform, but the C ABI spelling in the
+    // original header uses the typedef name verbatim — emitting `int` (4 bytes)
+    // for a `size_t*` parameter would both mismatch the C signature
+    // (`-Wincompatible-pointer-types`) AND corrupt an 8-byte write into a 4-byte
+    // slot at runtime. We preserve the exact typedef spelling so the generated
+    // adapter C signature matches the header ABI. The Lime side still sees a
+    // scalar (i64), which is ABI-compatible for argument passing. Generic —
+    // applies to any library that uses width-bearing typedefs.
+    WidthTypedef(String),
     // Fixed-size or flexible C array (`T[N]`, `T[]`). The element type and an
     // optional size (None == flexible array member) are retained so Charger can
     // generate element-wise accessor shims. This is a Charger-internal
@@ -77,6 +106,7 @@ fn ctype_tag(ty: &CType) -> String {
         CType::Opaque(_) => "opaque".to_string(),
         CType::Struct(_) => "struct".to_string(),
         CType::Other(_) => "other".to_string(),
+        CType::WidthTypedef(_) => "wt".to_string(),
         CType::Int => "int".to_string(),
         CType::Long => "long".to_string(),
         CType::Float => "float".to_string(),
@@ -98,6 +128,7 @@ fn ctype_from_tag(tag: &str) -> CType {
         "opaque" => CType::Opaque("_".to_string()),
         "struct" => CType::Struct("_".to_string()),
         "other" => CType::Other("_".to_string()),
+        "wt" => CType::WidthTypedef("_".to_string()),
         "int" => CType::Int,
         "long" => CType::Long,
         "float" => CType::Float,
@@ -253,7 +284,13 @@ pub enum ApiKind {
 
 /// Run `clang -Xclang -ast-dump=json -fsyntax-only <header>` and return the
 /// parsed JSON value. Uses clang from the detected LLVM toolchain.
-fn extract_ast_json(header: &Path, lang: ApiKind, llvm_bindir: &str) -> Result<serde_json::Value, String> {
+fn extract_ast_json(
+    header: &Path,
+    lang: ApiKind,
+    llvm_bindir: &str,
+    include_dirs: &[PathBuf],
+    build_flags: &[String],
+) -> Result<serde_json::Value, String> {
     let clang = if lang == ApiKind::Cpp {
         PathBuf::from(llvm_bindir).join("clang++.exe")
     } else {
@@ -269,6 +306,19 @@ fn extract_ast_json(header: &Path, lang: ApiKind, llvm_bindir: &str) -> Result<s
     cmd.arg("-Xclang").arg("-ast-dump=json").arg("-fsyntax-only");
     if lang == ApiKind::Cpp {
         cmd.arg("-std=c++17");
+    }
+    // Phase 1 Iteration 8: the AST parse must use the SAME include dirs and
+    // build flags as the native compile. A header that pulls sibling headers
+    // (`#include "zutil.h"`) or depends on a library build macro
+    // (`-DBUILDING_LIBCURL`, `-DZLIB_INTERNAL`) would otherwise fail
+    // `-fsyntax-only` here while the native compile (which DOES get the flags)
+    // would have succeeded — making the AST stage the inconsistent gate. Generic;
+    // no library-specific names.
+    for inc in include_dirs {
+        cmd.arg("-I").arg(inc);
+    }
+    for f in build_flags {
+        cmd.arg(f);
     }
     cmd.arg(header);
     let out = cmd.output().map_err(|e| format!("AST extraction failed: clang launch error: {}", e))?;
@@ -314,7 +364,7 @@ fn extract_calling_convention(qual_type: &str) -> String {
 // ----------------------------------------------------------------------------
 
 /// Walk the clang AST JSON and collect functions/structs relevant to the slice.
-fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
+fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path) -> NormalizedApi {
     let mut api = NormalizedApi {
         functions: Vec::new(),
         structs: Vec::new(),
@@ -331,8 +381,35 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
     };
     if let Some(root) = ast.get("inner") {
         if let Some(arr) = root.as_array() {
+            // Pre-pass: collect every TypedefDecl so scalar-typedef resolution
+            // is available DURING the main walk (parse_c_type consults
+            // SCALAR_TYPEDEFS when resolving a typedef'd pointee such as
+            // `sqlite3_rtree_dbl *`). Without this, the pointer wrapper is lost
+            // because SCALAR_TYPEDEFS is empty while parsing, collapsing e.g.
+            // `double *` to a bare scalar. Generic — no library-specific names.
+            let mut prepass_typedefs: Vec<(String, String)> = Vec::new();
+            let mut typedef_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
             for node in arr {
-                classify_node(node, &mut api, &mut ctx, None, lang);
+                if node.get("kind").and_then(|k| k.as_str()) == Some("TypedefDecl") {
+                    if let (Some(name), Some(ut)) = (
+                        node.get("name").and_then(|v| v.as_str()),
+                        node.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()),
+                    ) {
+                        prepass_typedefs.push((name.to_string(), ut.to_string()));
+                        typedef_map.insert(name.to_string(), ut.to_string());
+                    }
+                }
+            }
+            let mut scalar_spellings = std::collections::HashMap::new();
+            for (name, _) in &prepass_typedefs {
+                if let Some(sp) = resolve_scalar_spelling(name, &typedef_map) {
+                    scalar_spellings.insert(name.clone(), sp);
+                }
+            }
+            SCALAR_TYPEDEFS.with(|s| *s.borrow_mut() = Some(scalar_spellings));
+            // Main walk: classify functions/structs now that typedefs are known.
+            for node in arr {
+                classify_node(node, &mut api, &mut ctx, None, lang, src_root);
             }
         }
     }
@@ -365,33 +442,182 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind) -> NormalizedApi {
             }
         }
     }
-    // Resolve typedef aliases: a typedef whose underlying type is an enum
-    // (e.g. `typedef enum { ... } Color;`) should be surfaced as `Int` so the
-    // Lime iface uses `Int` where the C API expects the enum. Build the set of
-    // enum-typedef names, then rewrite `CType::Other(name)` occurrences.
-    let enum_aliases: std::collections::HashSet<String> = ctx
+    // Resolve scalar typedef aliases: a typedef whose underlying type is a
+    // scalar C type (`unsigned long`, `int`, … — e.g. zlib's `uLong`,
+    // `uInt`, `Bytef`, libpng's `png_uint_32`) must be surfaced as the matching
+    // scalar `CType`, NOT as an `Opaque` handle (which is 8 bytes and breaks the
+    // call ABI on LLP64 platforms where `unsigned long` is only 4 bytes). Build
+    // the set of scalar-typedef names and rewrite every `CType::Other(name)`
+    // occurrence. Generic — drives entirely off the typedef table from the AST;
+    // no library name appears here.
+    // Transitive scalar-typedef resolution. Real headers chain typedefs
+    // (`typedef unsigned char Byte;` then `typedef Byte Bytef;`), so a single
+    // level of lookup is insufficient. Follow the chain (with a cycle guard)
+    // until a *canonical scalar spelling* is reached (e.g. `Bytef` -> `Byte` ->
+    // `unsigned char`). We return the terminal **spelling** (not a `CType`),
+    // because several spellings all collapse to `CType::Int` (`int`,
+    // `unsigned char`, `long`, …) and char-family detection must distinguish
+    // `unsigned char` from `int`. Generic — driven entirely by the AST typedef
+    // table; no library names appear.
+    let typedef_map: std::collections::HashMap<String, String> = ctx
         .typedefs
         .iter()
-        .filter(|(_, u)| u.contains("enum "))
-        .map(|(n, _)| n.clone())
+        .map(|(n, u)| (n.clone(), u.trim().to_string()))
         .collect();
-    if !enum_aliases.is_empty() {
+    let resolve_scalar_spelling = |name: &str| -> Option<String> {
+        resolve_scalar_spelling(name, &typedef_map)
+    };
+    let scalar_spellings: std::collections::HashMap<String, String> = ctx
+        .typedefs
+        .iter()
+        .filter_map(|(n, _)| resolve_scalar_spelling(n).map(|sp| (n.clone(), sp)))
+        .collect();
+    // Canonical scalar `CType` per typedef name (for direct scalar collapse).
+    let scalar_aliases: std::collections::HashMap<String, CType> = scalar_spellings
+        .iter()
+        .filter_map(|(n, sp)| Some((n.clone(), parse_c_type(sp))))
+        .collect();
+    let scalar_spellings_for_rewrite = scalar_spellings.clone();
+    SCALAR_TYPEDEFS.with(|s| *s.borrow_mut() = Some(scalar_spellings));
+    if !scalar_aliases.is_empty() {
+        // `char`-family scalar typedefs (e.g. `Bytef` = `unsigned char`) used as
+        // a pointer pointee (`const Bytef*`) are C strings -> `String`. Any other
+        // scalar typedef collapses to its canonical scalar. Applied to
+        // `Other`/`Opaque`/`Pointer(Opaque)` spellings so both the direct
+        // (scalar param/ret/field) and the pointer (char* string) forms resolve
+        // correctly. Generic — driven by the AST typedef table; no library names.
+        let is_char_family = |spelling: &str| -> bool {
+            let c = spelling.trim();
+            c == "char" || c == "unsigned char" || c == "signed char"
+                || c.ends_with("unsigned char") || c.ends_with("signed char")
+                || c == "char*"
+        };
         for f in &mut api.functions {
             for p in &mut f.params {
-                if let CType::Other(n) = &p.ty {
-                    if enum_aliases.contains(n) {
-                        p.ty = CType::Int;
+                match &p.ty {
+                    CType::Other(n) => {
+                        if let Some(t) = scalar_aliases.get(n) { p.ty = t.clone(); }
                     }
+                    CType::Opaque(n) => {
+                        if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                            if is_char_family(sp) { p.ty = CType::String; }
+                            else if let Some(t) = scalar_aliases.get(n) { p.ty = t.clone(); }
+                        } else if let Some(t) = scalar_aliases.get(n) { p.ty = t.clone(); }
+                    }
+                    CType::Pointer(inner) => {
+                        if let CType::Opaque(n) = inner.as_ref() {
+                            if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                                if is_char_family(sp) {
+                                    p.ty = CType::String;
+                                } else if let Some(t) = scalar_aliases.get(n) {
+                                    p.ty = CType::Pointer(Box::new(t.clone()));
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
-            if let CType::Other(n) = &f.ret {
-                if enum_aliases.contains(n) {
-                    f.ret = CType::Int;
+            match &f.ret {
+                CType::Other(n) => { if let Some(t) = scalar_aliases.get(n) { f.ret = t.clone(); } }
+                CType::Opaque(n) => {
+                        if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                            if is_char_family(sp) { f.ret = CType::String; }
+                            else if let Some(t) = scalar_aliases.get(n) { f.ret = t.clone(); }
+                        } else if let Some(t) = scalar_aliases.get(n) { f.ret = t.clone(); }
+                    }
+                CType::Pointer(inner) => {
+                    if let CType::Opaque(n) = inner.as_ref() {
+                        if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                            if is_char_family(sp) { f.ret = CType::String; }
+                            else if let Some(t) = scalar_aliases.get(n) { f.ret = CType::Pointer(Box::new(t.clone())); }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for s in &mut api.structs {
+            for f in &mut s.fields {
+                match &f.ty {
+                    CType::Other(n) => { if let Some(t) = scalar_aliases.get(n) { f.ty = t.clone(); } }
+                    CType::Opaque(n) => {
+                        if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                            if is_char_family(sp) { f.ty = CType::String; }
+                            else if let Some(t) = scalar_aliases.get(n) { f.ty = t.clone(); }
+                        } else if let Some(t) = scalar_aliases.get(n) { f.ty = t.clone(); }
+                    }
+                    CType::Pointer(inner) => {
+                        if let CType::Opaque(n) = inner.as_ref() {
+                            if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                                if is_char_family(sp) { f.ty = CType::String; }
+                                else if let Some(t) = scalar_aliases.get(n) { f.ty = CType::Pointer(Box::new(t.clone())); }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
     api
+}
+
+/// Map a typedef's underlying `qualType` spelling to its canonical scalar
+/// `CType`, or `None` if the typedef is not a scalar alias (record/enum/opaque/
+/// function-pointer typedefs are left untouched). This is the single place that
+/// decides whether a typedef name collapses to a scalar — keeping the rule
+/// generic and library-agnostic.
+/// Resolve a typedef `name` to its ultimate scalar spelling (e.g. `Bytef` ->
+/// `unsigned char`, `sqlite3_rtree_dbl` -> `double`), following the typedef
+/// chain up to 64 hops with a cycle guard. `typedef_map` maps each typedef name
+/// to its underlying `qualType` spelling. Returns `None` if the chain does not
+/// terminate in a scalar. Shared by the `normalize` pre-pass and `normalize_api`
+/// so scalar-typedef resolution is available both during and after the walk.
+fn resolve_scalar_spelling(
+    name: &str,
+    typedef_map: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let mut cur = name.to_string();
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..64 {
+        if !seen.insert(cur.clone()) {
+            break; // cycle guard
+        }
+        if scalar_typedef_target(&cur).is_some() {
+            return Some(cur);
+        }
+        match typedef_map.get(&cur) {
+            Some(next) => cur = next.clone(),
+            None => break,
+        }
+    }
+    None
+}
+
+fn scalar_typedef_target(u: &str) -> Option<CType> {
+    // Strip C qualifiers so `const unsigned long` / `volatile int` still match
+    // the canonical scalar spellings `parse_c_type` knows about.
+    let base = u
+        .trim()
+        .trim_start_matches("const ")
+        .trim_start_matches("volatile ")
+        .trim_start_matches("restrict ")
+        .trim();
+    // Pointer typedefs (e.g. `Bytef*` -> `unsigned char *`) are handled by the
+    // normal pointer path — leave them as opaque/string handles.
+    if base.contains('*') {
+        return None;
+    }
+    let t = parse_c_type(base);
+    match t {
+        CType::Int | CType::Long | CType::Bool | CType::Float | CType::Double => Some(t),
+        // Width-critical typedefs keep their exact spelling (LLP64-sensitive).
+        CType::WidthTypedef(_) => Some(t),
+        // `char`-family scalar typedefs also collapse to Int (1-byte, safe).
+        CType::Other(ref s) if s == "char" || s == "signed char" || s == "unsigned char" => Some(CType::Int),
+        _ => None,
+    }
 }
 
 /// Given the fields of a union, keep only the widest member so the Lime struct
@@ -510,6 +736,21 @@ fn parse_c_type(qual: &str) -> CType {
             // `Pointer(Opaque(name))`.
             CType::Opaque(name) => return CType::Pointer(Box::new(CType::Opaque(name.clone()))),
             CType::Struct(name) | CType::Other(name) => {
+                // A pointer-to-scalar-typedef (`const Bytef*` where
+                // `Bytef = unsigned char`) is a C string, not an opaque handle.
+                // Resolve via the AST scalar-typedef table (generic). A char-family
+                // pointee becomes `String`; any other scalar typedef pointee stays
+                // a pointer to the (now-width-correct) scalar.
+                if let Some(spelling) = SCALAR_TYPEDEFS.with(|s| s.borrow().as_ref().and_then(|m| m.get(name).cloned())) {
+                    let canon = spelling.trim();
+                    if canon == "char" || canon == "unsigned char" || canon == "signed char"
+                        || canon.ends_with("unsigned char") || canon.ends_with("signed char")
+                        || canon == "char*"
+                    {
+                        return CType::String;
+                    }
+                    return CType::Pointer(Box::new(CType::Opaque(name.clone())));
+                }
                 return CType::Opaque(name.clone());
             }
             _ => {}
@@ -533,9 +774,24 @@ fn parse_c_type(qual: &str) -> CType {
             return CType::Array(Box::new(elem_ty), size);
         }
     }
+    // An anonymous inline record (e.g. `union (unnamed at foo.h:12:3)`) has no
+    // usable C type name and cannot be laid out by Lime. Mark it so the adapter
+    // / iface generators skip emitting it as a real type (see ANON_RECORD_MARKER).
+    if is_anon_record_spelling(q) {
+        return CType::Other(ANON_RECORD_MARKER.to_string());
+    }
     match q {
+        // Width-critical typedefs: `size_t`, `ssize_t`, `ptrdiff_t`, `uintptr_t`,
+        // `intptr_t`, `uintmax_t`, `intmax_t`, `wchar_t`, `sig_atomic_t`.
+        // Preserve the exact spelling (rendered verbatim in adapter C) so the
+        // generated signature matches the header ABI. The Lime side sees them as
+        // `Int` scalars. Generic — applies to any library using these typedefs.
+        "size_t" | "ssize_t" | "ptrdiff_t" | "uintptr_t" | "intptr_t"
+        | "uintmax_t" | "intmax_t" | "wchar_t" | "sig_atomic_t" => {
+            CType::WidthTypedef(q.to_string())
+        }
         "int" | "unsigned int" | "short" | "unsigned short" | "long" | "unsigned long"
-        | "long long" | "unsigned long long" | "size_t" | "int32_t" | "uint32_t"
+        | "long long" | "unsigned long long" | "int32_t" | "uint32_t"
         | "int64_t" | "uint64_t" => CType::Int,
         "long" => CType::Long,
         "float" => CType::Float,
@@ -550,7 +806,86 @@ fn parse_c_type(qual: &str) -> CType {
         s if s.starts_with("class ") => CType::Struct(s["class ".len()..].to_string()),
         s if s.starts_with("enum ") => CType::Int, // enums are ABI-compatible with int
         s if s.starts_with("typedef ") => CType::Opaque(s["typedef ".len()..].to_string()),
-        s => CType::Other(s.to_string()),
+        s => {
+            // Resolve a typedef name against the AST-extracted scalar typedef
+            // table (generic; driven by the header, no library names). A scalar
+            // typedef (`uLong`, `Bytef`, `png_uint_32`, ...) collapses to its
+            // canonical scalar so width-critical types get the right ABI slot
+            // (e.g. `unsigned long` is 4 bytes on LLP64, not an 8-byte opaque).
+            if let Some(spelling) = SCALAR_TYPEDEFS.with(|st| st.borrow().as_ref().and_then(|m| m.get(s).cloned())) {
+                return parse_c_type(&spelling);
+            }
+            CType::Other(s.to_string())
+        }
+    }
+}
+
+/// Sentinel `CType::Other` payload used to mark a field whose C type is an
+/// *anonymous* record (`union (unnamed at ...)` / `struct (unnamed ...)`).
+/// Lime cannot name or lay out an anonymous record, and the raw clang spelling
+/// is not valid C text, so we must NOT emit it as a type name in the adapter C
+/// or the Lime iface. The field is retained in the AST metadata (it is still a
+/// real member) but is skipped at the adapter/iface generation boundary — no
+/// get/set shim is produced, so the field stays opaque inside the C struct
+/// (correct: nothing can safely move an overlapping/anonymous blob by value
+/// through Lime's 8-byte model). Generic: any library with an anonymous field
+/// is handled identically. No library-specific name appears here.
+pub const ANON_RECORD_MARKER: &str = "__anon_record__";
+
+/// True when a raw clang type spelling denotes an anonymous record (struct or
+/// union) with no usable C type name. Such spellings look like
+/// `union (unnamed at src/foo.h:123:4)` or `struct (unnamed at ...)`. They are
+/// emitted by clang whenever a record is declared inline without a typedef name.
+fn is_anon_record_spelling(qual: &str) -> bool {
+    let q = qual.trim();
+    (q.starts_with("struct (") || q.starts_with("union ("))
+        && (q.contains("(unnamed") || q.contains("(anonymous"))
+}
+
+/// True when a field's type is the anonymous-record marker. Such fields must be
+/// skipped by the adapter/iface generators (they cannot be named or moved by
+/// value through Lime), while still being preserved in the AST metadata.
+fn is_anon_record_field(ty: &CType) -> bool {
+    matches!(ty, CType::Other(s) if s == ANON_RECORD_MARKER)
+}
+
+/// Best-effort ABI width (in bytes) of a `CType`, used to pick the widest member
+/// of an anonymous union when flattening it into a value-type record. The exact
+/// byte count is not required for correctness of the ABI (the union's total size
+/// comes from the real C struct via `sizeof`), only a relative ordering between
+/// members so the largest one survives as the surfaced field. Conservative
+/// over-estimates are safe — they only bias the selection toward that member.
+fn type_width_bytes(ty: &CType) -> usize {
+    match ty {
+        CType::Int | CType::Float | CType::Bool => 4,
+        CType::Long | CType::Double | CType::Pointer(_) | CType::Opaque(_) | CType::String | CType::Function(..) => 8,
+        CType::Struct(_) | CType::Other(_) => 8, // opaque/named record -> pointer-sized
+        CType::Array(elem, size) => {
+            let elem_w = type_width_bytes(elem);
+            size.unwrap_or(0) * elem_w.max(1)
+        }
+        _ => 8,
+    }
+}
+
+/// True when a field's type is (a pointer to) an array whose element is a
+/// function pointer — and more generally when, after stripping any number of
+/// `Array`/`Pointer` wrappers from the element, the base is a `CType::Function`
+/// OR an `Other` whose spelling contains `(*` (the clang spelling of a function
+/// pointer `int (*)(...)` or a pointer-to-array-of-incomplete `int (*)[N]` — a
+/// malformed element type that cannot be surfaced as a Lime scalar member or an
+/// element-wise C accessor). Such fields cannot be surfaced as element-wise
+/// scalar accessors (the element C type is invalid as a parameter without a
+/// name, and Lime has no function-pointer *value* type — only `Callback` for a
+/// single fn pointer). Skip the element-wise get/set shim; the field stays
+/// opaque in the C struct. Generic — applies to any library with a
+/// function-pointer / pointer-to-array-of-incomplete array field.
+fn is_fn_ptr_array(ty: &CType) -> bool {
+    match ty {
+        CType::Array(elem, _) | CType::Pointer(elem) => is_fn_ptr_array(elem),
+        CType::Function(..) => true,
+        CType::Other(s) => s.contains("(*"), // fn-ptr / ptr-to-array-of-incomplete spelling
+        _ => false,
     }
 }
 
@@ -560,6 +895,141 @@ fn parse_c_type(qual: &str) -> CType {
 ///   `long long (*)(long long, long long)`   (no name)
 ///   `int (*fn)(int, int)`                    (named pointer)
 /// Returns `None` if the string is not a recognizable function-pointer type.
+/// C-standard / POSIX opaque handle or array-backed types that are NEVER
+/// meant to be field-accessed from Lime. When a public header transitively
+/// includes `<setjmp.h>` / `<stdio.h>` / `<pthread.h>` etc., clang surfaces
+/// these as records/arrays with member names that do not exist under the
+/// real (often array-typedef) definition. Charger drops them from the surfaced
+/// struct set so the generated field accessors compile. Generic C-standard
+/// library knowledge, not library-specific code.
+fn is_stdlib_opaque(name: &str) -> bool {
+    const SET: &[&str] = &[
+        "jmp_buf", "sigjmp_buf", "va_list", "__builtin_va_list",
+        "FILE", "fpos_t", "__locale_t", "locale_t", "DIR",
+        "pthread_mutex_t", "pthread_mutexattr_t", "pthread_cond_t",
+        "pthread_condattr_t", "pthread_rwlock_t", "pthread_t", "pthread_attr_t",
+        "pthread_key_t", "pthread_once_t", "mbstate_t", "_Mbstatet",
+        "time_t", "clock_t", "struct_tm", "tm", "tm_zone",
+        "div_t", "ldiv_t", "lldiv_t", "imaxdiv_t",
+        "sigset_t", "size_t", "ptrdiff_t", "wchar_t", "max_align_t",
+    ];
+    SET.contains(&name)
+}
+
+/// Extract the source file path a declaration lives in (from clang's AST
+/// `loc`/`range` JSON). Returns None when unavailable.
+fn decl_file(node: &serde_json::Value) -> Option<String> {
+    // clang nests the file location in several ways depending on whether the
+    // declaration is a plain definition or a macro expansion:
+    //   * `loc.file`                         — direct definition
+    //   * `loc.includedFrom.file`            — first-level include
+    //   * `loc.spellingLoc.file`             — macro spelling site
+    //   * `loc.expansionLoc.file`            — macro expansion site
+    //   * `range.begin.file` / `.spellingLoc.file` / `.expansionLoc.file`
+    // Pulling the file from every variant lets Charger correctly classify a
+    // declaration as "in the library's own tree" vs "from a system header",
+    // even when it arrived through a macro expansion.
+    let loc = node.get("loc");
+    if let Some(f) = loc.and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    if let Some(f) = loc.and_then(|l| l.get("includedFrom")).and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    if let Some(f) = loc.and_then(|l| l.get("spellingLoc")).and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    if let Some(f) = loc.and_then(|l| l.get("expansionLoc")).and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    let rbeg = node.get("range").and_then(|r| r.get("begin"));
+    if let Some(f) = rbeg.and_then(|b| b.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    if let Some(f) = rbeg.and_then(|b| b.get("spellingLoc")).and_then(|b| b.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    if let Some(f) = rbeg.and_then(|b| b.get("expansionLoc")).and_then(|b| b.get("file")).and_then(|v| v.as_str()) {
+        return Some(f.to_string());
+    }
+    None
+}
+
+/// True when a declaration is part of the library's OWN public source tree
+/// (not a transitive system / compiler header such as <stdio.h>, <setjmp.h>,
+/// the MSVC UCRT, or clang's builtin headers). Charger only surfaces the
+/// library's own API; declarations pulled in by transitive includes belong to
+/// those other headers and must not become Lime extern fns / adapters. Generic
+/// rule keyed on the install source root — no library-specific name filtering.
+fn decl_in_own_tree(node: &serde_json::Value, root: &std::path::Path) -> bool {
+    let loc = node.get("loc");
+    // A declaration whose location is reported ONLY via `includedFrom` (no direct
+    // `file`, `spellingLoc`, or `expansionLoc`) is a transitive include pulled in
+    // from a deeper system header we cannot see directly (e.g. `freopen_s` via
+    // <stdio.h> through pngconf.h). Reject it — it is not the library's own API.
+    let only_included_from = loc
+        .and_then(|l| l.get("includedFrom"))
+        .is_some()
+        && loc.and_then(|l| l.get("file")).is_none()
+        && loc.and_then(|l| l.get("spellingLoc")).is_none()
+        && loc.and_then(|l| l.get("expansionLoc")).is_none();
+    if only_included_from {
+        // The declaration's REAL owning file is its `includedFrom.file` anchor
+        // (e.g. `curl.h` for a function declared right after a `CURL_EXTERN`
+        // export macro). Do NOT fall back to `range.begin` here: clang points an
+        // included declaration's `range.begin` at the *includer* (the
+        // `#include` line in `curl.h`), which would wrongly classify system
+        // headers such as `winsock2.h` as the library's own tree. Keeping the
+        // `includedFrom.file` anchor is generic and correct — no library-specific
+        // logic.
+        if let Some(f) = loc
+            .and_then(|l| l.get("includedFrom"))
+            .and_then(|l| l.get("file"))
+            .and_then(|v| v.as_str())
+        {
+            let p = std::path::Path::new(f);
+            return p.starts_with(root);
+        }
+        return false;
+    }
+    match decl_file(node) {
+        Some(f) => {
+            // A declaration with an explicit file location is part of the API
+            // only when that file lives in the library's own source tree. System
+            // headers (ucrt/MSVC/clang builtins) are rejected.
+            let p = std::path::Path::new(&f);
+            p.starts_with(root)
+        }
+        None => {
+            // No file location means the declaration came from a macro expansion
+            // (e.g. `PNG_FUNCTION(...)` / `PNG_EXPORT` in libpng's png.h) and is
+            // part of the analyzed public header. Keep it — it IS the library's
+            // own API. Only *located* declarations get tree-filtered.
+            true
+        }
+    }
+}
+
+fn is_reserved_name(name: &str) -> bool {
+    // Per the C standard, identifiers beginning with a double underscore or a
+    // single underscore followed by an uppercase letter are reserved to the
+    // implementation in all contexts. Such names (e.g. `__crt_locale_data_public`,
+    // `_Mbstatet`, `__builtin_va_list`) are compiler/system-internal and never
+    // part of a portable public C ABI, so Charger drops them from the surfaced
+    // interface. This is a generic rule — no library-specific name filtering.
+    if name.starts_with("__") {
+        return true;
+    }
+    if let Some(rest) = name.strip_prefix('_') {
+        if let Some(c) = rest.chars().next() {
+            if c.is_ascii_uppercase() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn parse_c_function_ptr(q: &str) -> Option<CType> {
     // Locate the `(*` that marks a function pointer.
     let star = q.find("(*")?;
@@ -606,8 +1076,16 @@ fn classify_node(
     ctx: &mut NormalizeCtx,
     self_ty: Option<String>,
     lang: ApiKind,
+    root: &std::path::Path,
 ) {
     let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Generic: only declarations in the library's own source tree are part of
+    // its public API. Skip anything pulled in by transitive system includes
+    // (CRT/libc/clang builtin headers). This drops `freopen_s`, `jmp_buf`, etc.
+    if !decl_in_own_tree(node, root) && kind != "TranslationUnitDecl" {
+        return;
+    }
 
     match kind {
         "RecordDecl" => {
@@ -622,21 +1100,68 @@ fn classify_node(
                     if f.get("kind").and_then(|v| v.as_str()) == Some("FieldDecl") {
                         let fname = f.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let fty = f.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                        if fname == "aParam" {
+                        }
                         // A bitfield member carries a `bitWidth` in the AST.
                         if f.get("bitWidth").is_some() {
                             seen_bitfield = true;
                         }
                         if !fname.is_empty() {
                             fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown });
+                        } else if f.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()).map(is_anon_record_spelling).unwrap_or(false) {
+                            // Anonymous nested record (`struct { ... } anon;` or
+                            // `union { ... } u;`) used as a field. clang emits it
+                            // as a FieldDecl with no name whose type is an
+                            // anonymous RecordDecl (the RecordDecl is nested inside
+                            // the FieldDecl's `inner`). Lime cannot name or lay out
+                            // an anonymous record, so we must flatten it:
+                            //   * anonymous struct  -> inline each named member
+                            //     (they occupy disjoint storage, so inlining keeps
+                            //     the overall layout correct).
+                            //   * anonymous union    -> keep only the WIDEST member
+                            //     (a union's size is its largest member; surfacing
+                            //     every overlapping member to Lime would corrupt the
+                            //     value-type width and let Lime write through the
+                            //     wrong field). Generic — no library-specific name
+                            //     filtering.
+                            let rec = f.get("inner").and_then(|v| v.as_array())
+                                .and_then(|arr| arr.iter().find(|c| c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl")));
+                            if let Some(rec) = rec {
+                                let sub_union = rec.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
+                                let members = rec.get("inner").and_then(|v| v.as_array()).map(|a| a.iter().filter(|c| c.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")).collect::<Vec<_>>()).unwrap_or_default();
+                                if sub_union {
+                                    let mut widest: Option<CParam> = None;
+                                    for m in &members {
+                                        let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        if mn.is_empty() { continue; }
+                                        let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                                        let w = type_width_bytes(&mt);
+                                        if widest.as_ref().map(|x| w > type_width_bytes(&x.ty)).unwrap_or(true) {
+                                            widest = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown });
+                                        }
+                                    }
+                                    if let Some(w) = widest {
+                                        fields.push(w);
+                                    }
+                                } else {
+                                    for m in &members {
+                                        let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        if mn.is_empty() { continue; }
+                                        let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                                        fields.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown });
+                                    }
+                                }
+                            }
                         }
                     }
+
                 }
             }
             // For a union, only the largest member needs to survive in the Lime
             // struct spelling so the value-type ABI width matches (a union's size
             // is its largest member). Keep the widest scalar/ptr member; fall back
             // to the last field if nothing obvious stands out.
-            if !name.is_empty() && !is_implicit {
+            if !name.is_empty() && !is_implicit && !is_reserved_name(&name) && !is_stdlib_opaque(&name) {
                 // A union is surfaced as an opaque handle with accessor shims
                 // (Lime cannot model overlapping members or sub-8-byte fields),
                 // so keep ALL members for the shim generator rather than
@@ -665,7 +1190,7 @@ fn classify_node(
             }
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
-                    classify_node(c, api, ctx, Some(name.clone()), lang);
+                    classify_node(c, api, ctx, Some(name.clone()), lang, root);
                 }
             }
         }
@@ -680,7 +1205,7 @@ fn classify_node(
                 for e in inner {
                     if e.get("kind").and_then(|v| v.as_str()) == Some("EnumConstantDecl") {
                         let ename = e.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        if ename.is_empty() {
+                        if ename.is_empty() || is_reserved_name(&ename) {
                             continue;
                         }
                         let val = e
@@ -718,6 +1243,11 @@ fn classify_node(
             // in `tls` so the accessor can be generated correctly if needed.
             let vname = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if vname.is_empty() {
+                return;
+            }
+            // Phase 1 Iteration 8: ignore compiler-internal / reserved globals
+            // (e.g. `__builtin_*` synthetic vars) — never part of a public ABI.
+            if vname.starts_with("__") || vname.starts_with("__builtin") || is_reserved_name(&vname) {
                 return;
             }
             let storage = node.get("storageClass").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -772,14 +1302,33 @@ fn classify_node(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            if !name.is_empty() {
+            if !name.is_empty() && !is_reserved_name(&name) && !is_stdlib_opaque(&name) {
                 ctx.typedefs.push((name.clone(), underlying.clone()));
                 // A typedef of an anonymous record body (`typedef struct { ... } X;`
                 // or `typedef union { ... } X;`) — the body was remembered in
                 // `ctx.anon_struct` by the preceding RecordDecl. Surface it as a
                 // named struct so Lime has a concrete type to use.
+                // Only consume a remembered anonymous record body when this
+                // typedef actually names a record type. A scalar typedef
+                // (e.g. `typedef unsigned char png_byte;`) must NOT inherit a
+                // stale anonymous struct's fields (that would fabricate bogus
+                // struct accessors and fail to compile). Generic correctness fix.
                 if let Some(fields) = ctx.anon_struct.take() {
-                    if !underlying.contains("enum") {
+                    // Only consume a remembered anonymous record body when this
+                    // typedef's underlying type is ITSELF an anonymous record
+                    // (`struct (anonymous ...)` / `union (anonymous ...)`). A
+                    // named-tag re-typedef (`typedef struct CURLMsg CURLMsg;`)
+                    // has a non-anonymous underlying and must NOT inherit the
+                    // body — otherwise a stale anonymous body left from a prior
+                    // record (e.g. an anonymous union's members) would be
+                    // grafted onto the wrong named struct, producing duplicate
+                    // struct defs and bogus accessors that fail to compile.
+                    // Generic correctness fix — applies to any library with
+                    // mixed anonymous and named records.
+                    if !underlying.contains("enum")
+                        && is_anon_record_spelling(&underlying)
+                        && !underlying.contains('*')
+                    {
                         let is_union_typedef = underlying.contains("union");
                         let all_8 = fields.iter().all(|f| matches!(
                             f.ty,
@@ -804,6 +1353,17 @@ fn classify_node(
         "FunctionDecl" => {
             let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if name.is_empty() {
+                return;
+            }
+            // Phase 1 Iteration 8: ignore compiler-internal / reserved symbols.
+            // Real-world headers (via the compiler's own <stdarg.h> / builtin
+            // headers, or macro-expanded CRT decls) leak reserved identifiers
+            // such as `__va_start`, `__builtin_va_list`, but also C-runtime
+            // functions like `freopen_s`, `fopen_s`, `_wfopen_s` (which have no
+            // file location and so escape the own-tree filter). Per the C
+            // standard these are implementation-reserved and never part of a
+            // public library ABI. Generic rule: skip reserved-namespace names.
+            if is_reserved_name(&name) {
                 return;
             }
             let ftype = node.get("type").cloned().unwrap_or(serde_json::Value::Null);
@@ -885,7 +1445,7 @@ fn classify_node(
         _ => {
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
-                    classify_node(c, api, ctx, self_ty.clone(), lang);
+                    classify_node(c, api, ctx, self_ty.clone(), lang, root);
                 }
             }
         }
@@ -1071,10 +1631,28 @@ fn strip_param_name(p: &str) -> String {
 fn lime_type_name(t: &CType) -> String {
     match t {
         CType::Int | CType::Long | CType::Bool => "Int".to_string(),
+        // Width-critical typedefs (`size_t`, ...) are ABI-compatible scalars on
+        // the Lime side — surfaced as `Int` (i64). The exact C spelling is
+        // preserved separately by `c_type_text`.
+        CType::WidthTypedef(_) => "Int".to_string(),
         CType::Float | CType::Double => "Float".to_string(),
         CType::Void => "Unit".to_string(),
         CType::String => "String".to_string(),
-        CType::Pointer(inner) => lime_type_name(inner), // simplify: treat as pointee
+        // A pointer to a SCALAR (`int*`, `double*`, `char*`, `unsigned long*`)
+        // is an 8-byte pointer handle, NOT the pointee itself. Collapsing it to
+        // the scalar would make Lime treat `double* aParam` as a 4-byte `Float`
+        // and emit `return (double)u->aParam` on a `double*` field -> crash
+        // (sqlite3_rtree_geometry.aParam, `sqlite3_rtree_dbl*`). So a scalar
+        // pointee keeps the pointer as an 8-byte handle (rendered `Opaque` so
+        // Lime stores a bare address). A pointer to an opaque/record name still
+        // renders as the pointee (`Opaque(Name)`) — the established ABI for
+        // handle/struct pointers in function signatures. Generic: driven purely
+        // by pointee kind, no library-specific names.
+        CType::Pointer(inner) => match &**inner {
+            CType::Int | CType::Long | CType::Bool | CType::Float | CType::Double
+            | CType::WidthTypedef(_) | CType::Void | CType::String => "Opaque(ScalarPtr)".to_string(),
+            _ => lime_type_name(inner),
+        },
         CType::Function(_, _) => "Callback".to_string(), // opaque C fn pointer, ABI = i8*
         // A bare struct name as a *field type* (nested struct, or a struct that
         // surfaces as an opaque handle) is surfaced to Lime as `Opaque(Name)` —
@@ -1108,6 +1686,9 @@ fn field_width(t: &CType) -> usize {
     match t {
         CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_) => 8,
         CType::Int | CType::Float | CType::Bool => 4,
+        // Width-critical typedefs are pointer-width on the target (8 bytes on
+        // 64-bit); conservative 8 matches the common platform ABI.
+        CType::WidthTypedef(_) => 8,
         CType::Struct(_) | CType::Other(_) => 8, // be conservative
         CType::Void | CType::String => 8,
         CType::Array(elem, size) => {
@@ -1121,6 +1702,17 @@ fn field_width(t: &CType) -> usize {
 /// Handles: scalar/struct/opaque (get/set), arrays (element-wise get_i/set_i),
 /// and flexible array members (element-wise get_i/set_i + sized constructor).
 fn emit_field_accessors(out: &mut String, s: &CStruct, f: &CParam) {
+    // Anonymous-record fields (union/struct ... unnamed ...) cannot be named or
+    // moved by value through Lime; skip the get/set shim entirely (the field
+    // stays opaque inside its C struct). Generic — applies to any library.
+    if is_anon_record_field(&f.ty) {
+        return;
+    }
+    // Function-pointer array fields cannot be surfaced as element-wise scalar
+    // accessors in Lime (Lime has no fn-pointer *value* type). Skip the shim.
+    if is_fn_ptr_array(&f.ty) {
+        return;
+    }
     match &f.ty {
         CType::Array(elem, size) => {
             // Element-wise accessor shims. The C side indexes into the real
@@ -1207,6 +1799,96 @@ fn is_out_param(t: &CType) -> Option<String> {
 /// Render a `CType` as the C type text needed to declare a shim's parameters /
 /// locals. Opaque/Struct/Other named types are pointers in the C ABI
 /// (`sqlite3*`); each `Pointer` adds one more level of indirection.
+/// Phase 1 Iteration 8: C spelling of a struct *field* type for generated
+/// adapter accessors. Like `c_type_text`, but a field whose target type is an
+/// opaque / incomplete named record (e.g. zlib `struct internal_state`, which
+/// is forward-declared but never completed in the public header, or any
+/// `struct X*`/`X*` where `X` has no modeled fields) is rendered as `void*`.
+/// Emitting the bare name would reference an undeclared/incomplete type and
+/// fail to compile; an opaque pointer is ABI-correct and safe. The rule is
+/// generic (covers any incomplete/opaque named type), not library-specific.
+/// `String` (`char*`) fields are rendered as `char*` (a real pointer).
+fn c_field_c_type(t: &CType, structs: &[CStruct]) -> String {
+    // A name Charger modeled as a record, and whether that record has a body.
+    let is_record = |name: &str| -> bool {
+        structs.iter().any(|st| st.name == name)
+    };
+    let is_complete = |name: &str| -> bool {
+        structs.iter().any(|st| st.name == name && !st.fields.is_empty())
+    };
+    match t {
+        // `char*` / `const char*` -> a real C string pointer.
+        CType::String => "char*".to_string(),
+        CType::Pointer(inner) => {
+            // Pointer to a named record: always emit `struct name*` (a pointer to
+            // a possibly-incomplete struct is valid C as long as the tag is
+            // present, and the tag survives forward declarations / out-of-order
+            // definitions — e.g. libjpeg-turbo's `struct jpeg_progress_mgr *`,
+            // referenced before its body). A pointer to a name that is NOT a
+            // known record (e.g. zlib's `internal_state`, never completed) is an
+            // opaque handle -> `void*`.
+            if let CType::Struct(s) | CType::Other(s) | CType::Opaque(s) = inner.as_ref() {
+                if is_record(s) {
+                    return format!("struct {}*", s);
+                }
+                return "void*".to_string();
+            }
+            c_type_text(t)
+        }
+        CType::Struct(s) => {
+            if is_record(s) && is_complete(s) {
+                c_type_text(t)
+            } else {
+                "void*".to_string()
+            }
+        }
+        CType::Other(s) => {
+            // A named record (e.g. an `Other`-spelled record field) needs the
+            // tag when complete, `void*` when incomplete; a scalar typedef
+            // (e.g. `uInt`) renders verbatim and compiles via the header.
+            if is_record(s) {
+                if is_complete(s) {
+                    format!("struct {}*", s)
+                } else {
+                    "void*".to_string()
+                }
+            } else {
+                c_type_text(t)
+            }
+        }
+        // `Opaque(name)` is a pointer-like handle (e.g. `internal_state`, a
+        // typedef to an incomplete struct, or a known opaque handle like
+        // `sqlite3`). An incomplete-record opaque is an undefined type in the
+        // adapter TU -> `void*`; a complete/known opaque keeps its spelling
+        // (ABI-correct: it is just a pointer).
+        CType::Opaque(s) => {
+            if is_record(s) && !is_complete(s) {
+                "void*".to_string()
+            } else {
+                c_type_text(t)
+            }
+        }
+        _ => c_type_text(t),
+    }
+}
+
+/// True when a field type is a pointer-like (its setter should take `void*`).
+/// A field is pointer-like iff it is a C string (`char*`) or a genuine pointer
+/// (`Pointer(...)`). A *bare* `Opaque(s)` field is a **value** record in C
+/// (`struct s field;`), NOT a pointer — a C pointer to an opaque type is always
+/// modeled as `Pointer(Opaque(s))`, never as bare `Opaque(s)`. Treating a bare
+/// `Opaque` as a pointer (the old behavior) routed value records such as
+/// curl's `struct sockaddr addr;` into the `(void*)v` setter, which is a type
+/// error (`void*` cannot be assigned to a struct). Generic — driven purely by
+/// the CType shape, no library name.
+fn is_pointer_field(t: &CType, _structs: &[CStruct]) -> bool {
+    matches!(t, CType::String | CType::Pointer(_))
+}
+// NOTE: scalar typedefs (CType::Other like `uInt`) and bare value records
+// (`Opaque`/`Struct`/`Other` naming a record) do NOT match here, so their
+// setters keep the value-record memcpy (e.g. `memcpy(&u->field, v,
+// sizeof(u->field))`), which is correct.
+
 fn c_type_text(t: &CType) -> String {
     match t {
         CType::Int => "int".to_string(),
@@ -1215,9 +1897,10 @@ fn c_type_text(t: &CType) -> String {
         CType::Double => "double".to_string(),
         CType::Bool => "int".to_string(),
         CType::Void => "void".to_string(),
-        // `CType::String` is the scalar `char`; a C string `char*` is modeled as
-        // `Pointer(String)` (an extra indirection), so render the base as `char`.
-        CType::String => "char".to_string(),
+        // `CType::String` is a C string `char*` (Lime String <=> char*). Render
+        // it as `char*` so adapter shim parameter declarations match the C ABI
+        // (a bare `char` would be a 1-byte scalar, wrong for string params).
+        CType::String => "char*".to_string(),
         CType::Pointer(inner) => format!("{}*", c_type_text(inner)),
         CType::Function(params, ret) => {
             let ps: Vec<String> = params.iter().map(|p| c_type_text(p)).collect();
@@ -1227,7 +1910,28 @@ fn c_type_text(t: &CType) -> String {
         // opaque handle). Reference it as `struct Name*` so forward-declared /
         // anonymous-typedef structs resolve correctly.
         CType::Struct(s) => format!("struct {}*", s),
-        CType::Opaque(s) => format!("{}*", s),
+        CType::Opaque(s) => {
+            // A named Opaque is a pointer-like handle. If `s` is a known struct
+            // record (even one that is only forward-declared in the public
+            // header, e.g. curl's `struct curl_httppost`), render it as
+            // `struct s*` — a pointer to a (possibly-incomplete) struct is valid
+            // C and the tag survives forward declarations. Emitting the bare
+            // name `s*` would mis-reference a type that was never `typedef`'d to
+            // that bare spelling and fail to compile (`unknown type name 's'`).
+            // When `s` is NOT a known record it is a genuine opaque typedef
+            // handle (`sqlite3`) and the bare `s*` spelling is correct.
+            let is_record = KNOWN_RECORDS.with(|r| {
+                r.borrow()
+                    .as_ref()
+                    .map(|set| set.contains(s))
+                    .unwrap_or(false)
+            });
+            if is_record {
+                format!("struct {}*", s)
+            } else {
+                format!("{}*", s)
+            }
+        }
         // `CType::Other(s)` is an unmodeled type spelling (e.g. a typedef'd
         // scalar like `sqlite3_int64`, or a forward-declared record). Emit it
         // verbatim — do NOT append `*` — because we cannot tell from the spelling
@@ -1235,6 +1939,10 @@ fn c_type_text(t: &CType) -> String {
         // `CType::Pointer` wrapper when one was present. Appending `*` here would
         // wrongly turn `sqlite3_int64` into `sqlite3_int64*` and break adapter C.
         CType::Other(s) => s.clone(),
+        // A width-critical typedef (`size_t`, `ssize_t`, ...) must be emitted
+        // verbatim so the generated adapter C signature matches the header ABI
+        // (e.g. `size_t*` not `int*`). The Lime side treats it as a scalar.
+        CType::WidthTypedef(s) => s.clone(),
         CType::Array(elem, size) => {
             let elem_text = c_type_text(elem);
             match size {
@@ -1256,6 +1964,28 @@ fn c_struct_spelling(st: &CStruct) -> String {
         st.name.clone()
     } else {
         format!("struct {}", st.name)
+    }
+}
+
+/// Render a named handle type `name` as a C pointer spelling for adapter
+/// declarations / return types. If `name` is a known (possibly-incomplete)
+/// record — a forward-declared `struct X` that has no `typedef` to the bare
+/// name (e.g. curl's `curl_httppost`, `curl_slist`) — it must be spelled
+/// `struct X*` so the tag survives and the type resolves. If `name` is a genuine
+/// opaque typedef handle (`sqlite3`) the bare `name*` spelling is correct.
+/// Driven purely by the AST-extracted record set (`KNOWN_RECORDS`); generic and
+/// library-agnostic.
+fn opaque_or_struct_ptr(name: &str) -> String {
+    let is_record = KNOWN_RECORDS.with(|r| {
+        r.borrow()
+            .as_ref()
+            .map(|set| set.contains(name))
+            .unwrap_or(false)
+    });
+    if is_record {
+        format!("struct {}*", name)
+    } else {
+        format!("{}*", name)
     }
 }
 
@@ -1289,6 +2019,13 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
     let mut by_sym: std::collections::HashMap<String, AdapterSpec> = std::collections::HashMap::new();
     for f in &api.functions {
         let out_idx = f.params.iter().position(|p| is_out_param(&p.ty).is_some());
+        // The out-param's pointee name is the opaque handle type the bridge
+        // returns (e.g. `sqlite3**` -> "sqlite3", `JOCTET**` -> "JOCTET"). This
+        // drives the adapter's C return type (`<name>*`) and the Lime iface
+        // return (`Opaque(name)`), keeping the handle's type consistent with
+        // the body that returns the written handle. Generic — derived purely
+        // from the type, no library-specific name.
+        let out_name = out_idx.and_then(|oi| is_out_param(&f.params[oi].ty));
         // A `Callback` (CType::Function) trailing parameter is the common
         // "optional callback + user data + errmsg" idiom; drop it and the
         // params after it, passing NULL.
@@ -1318,7 +2055,7 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
                 format!("lime_nonnull_{}_{}", sanitize_name(&f.name), nn)
             },
             real_symbol: sym.clone(),
-            ret_name: None,
+            ret_name: out_name.clone(),
             ret: f.ret.clone(),
             params: f.params.clone(),
             out_idx,
@@ -1368,6 +2105,13 @@ fn gen_adapter_c_source(
     api: &NormalizedApi,
     shapes: &VariadicShapes,
 ) -> String {
+    let defined: std::collections::BTreeSet<String> =
+        api.structs.iter().map(|st| st.name.clone()).collect();
+    // Publish the known record names for `c_type_text` so `Opaque(name)` that
+    // names a real (possibly-incomplete) struct renders as `struct name*`.
+    // Cleared at the end of this pass (see below).
+    let known_records: BTreeSet<String> = api.structs.iter().map(|st| st.name.clone()).collect();
+    KNOWN_RECORDS.with(|r| *r.borrow_mut() = Some(known_records));
     let mut s = String::new();
     s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors + variadic). DO NOT EDIT. */\n");
     s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n");
@@ -1381,16 +2125,27 @@ fn gen_adapter_c_source(
         // Generate accessor shims for any record Lime cannot model as a real
         // struct: unions (overlapping members), bitfields (sub-byte fields),
         // and sub-8-byte structs (char/short/int members — Lime's int is i64).
-        if st.is_union || st.is_bitfield || !st.all_8byte {
+        if st.is_union || st.is_bitfield || !st.all_8byte || st.has_fn_ptr {
             // Constructor allocating the record on the heap (Lime owns the pointer).
             s.push_str(&format!(
                 "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
                 st.name, spelling
             ));
         for f in &st.fields {
+            // Anonymous-record fields (union/struct ... unnamed ...) cannot be
+            // named or moved by value; skip the C accessor shim (the field stays
+            // opaque inside the C struct). Generic — applies to any library.
+            if is_anon_record_field(&f.ty) {
+                continue;
+            }
             match &f.ty {
                 CType::Array(elem, size) => {
-                    // Element-wise accessor shims: index into the real C array.
+                    // Function-pointer array fields cannot be surfaced as
+                    // element-wise scalar accessors — skip the shim (the field
+                    // stays opaque inside the C struct). Generic.
+                    if is_fn_ptr_array(&f.ty) {
+                        continue;
+                    }
                     let c_ty = c_type_text(elem);
                     if size.is_none() {
                         // Flexible array member: emit a sized constructor that
@@ -1412,22 +2167,60 @@ fn gen_adapter_c_source(
                     ));
                 }
                 _ => {
-                    let c_ty = c_type_text(&f.ty);
-                    s.push_str(&format!(
-                        "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
-                        c_ty, st.name, f.name, spelling, c_ty, f.name
-                    ));
-                    // Setter: a Lime `Opaque(Name)` value is a bare pointer (i8*);
-                    // for a *nested struct field* we must copy the pointed-to
-                    // struct into the inline field (not store the pointer). Use
-                    // memcpy so the C layout (clang source of truth) is preserved.
-                    if matches!(&f.ty, CType::Struct(_) | CType::Other(_)) {
-                        // Lime passes `Opaque(Name)` as a bare pointer (i8*); the C
-                        // setter receives it as a pointer and memcpy's the pointed-to
-                        // struct into the inline field (preserving clang's layout).
+                    // Function-pointer fields are surfaced exclusively by the
+                    // callback-table (`has_fn_ptr`) block below, which emits the
+                    // store + NULL-setter shims. Skip them here to avoid a
+                    // duplicate `lime_set_*` symbol with a conflicting type.
+                    if matches!(&f.ty, CType::Function(..)) {
+                        continue;
+                    }
+                    let c_ty = c_field_c_type(&f.ty, structs);
+                    // Getter: a pointer-like field is surfaced as `void*` on
+                    // the getter side and cast via `(void*)` — every C object
+                    // pointer converts to/from `void*`, so this is ABI-correct
+                    // for any pointee (`int*`, `struct X*`, opaque/incomplete
+                    // pointers, ...). It avoids emitting a wrong/unknown pointee
+                    // type name (e.g. a struct tag that is forward-declared or
+                    // not yet visible in the adapter TU) which would fail to
+                    // compile. A scalar/aggregate field keeps its concrete type.
+                    if is_pointer_field(&f.ty, structs) {
                         s.push_str(&format!(
-                            "void lime_set_{}_{}({}* u, {}* v) {{ memcpy(&u->{}, v, sizeof({})); }}\n",
-                            st.name, f.name, spelling, c_ty, f.name, c_ty
+                            "void* lime_get_{}_{}({}* u) {{ return (void*)u->{}; }}\n",
+                            st.name, f.name, spelling, f.name
+                        ));
+                    } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
+                        // Value-record field (`struct X field;`): expose the
+                        // address of the nested struct as `void*` so Lime can
+                        // memcpy into / out of it via the matching value-record
+                        // setter. Taking the address (not the value) is required
+                        // — a struct value cannot be cast to `void*`.
+                        s.push_str(&format!(
+                            "void* lime_get_{}_{}({}* u) {{ return (void*)&u->{}; }}\n",
+                            st.name, f.name, spelling, f.name
+                        ));
+                    } else {
+                        s.push_str(&format!(
+                            "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
+                            c_ty, st.name, f.name, spelling, c_ty, f.name
+                        ));
+                    }
+                    // Setter: any pointer field is surfaced as `void*` on the
+                    // setter side and assigned via `(void*)v` — every C object
+                    // pointer converts to/from `void*`, so this is ABI-correct
+                    // for any pointee (`int*`, `unsigned char*`, `struct X*`,
+                    // opaque/incomplete pointers, ...). It avoids emitting a
+                    // wrong pointee type (e.g. normalizing `unsigned char*` as
+                    // `int*` would fail to compile when assigned back). A nested
+                    // struct/aggregate field is copied via memcpy.
+                    if is_pointer_field(&f.ty, structs) {
+                        s.push_str(&format!(
+                            "void lime_set_{}_{}({}* u, void* v) {{ u->{} = (void*)v; }}\n",
+                            st.name, f.name, spelling, f.name
+                        ));
+                    } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
+                        s.push_str(&format!(
+                            "void lime_set_{}_{}({}* u, void* v) {{ memcpy(&u->{}, v, sizeof(u->{})); }}\n",
+                            st.name, f.name, spelling, f.name, f.name
                         ));
                     } else {
                         s.push_str(&format!(
@@ -1445,11 +2238,11 @@ fn gen_adapter_c_source(
         // into each field. Nullable callbacks get a separate NULL-setter so the
         // C side's `if (t->f != NULL)` guard works without ever invoking a
         // dangling/zero address.
+        // NOTE: the heap-allocating constructor `lime_make_<name>` for a
+        // function-pointer struct is already emitted by the record-accessor
+        // block above (every fn-ptr struct is surfaced as an opaque handle), so
+        // we must NOT emit a second one here — that would be a duplicate symbol.
         if st.has_fn_ptr {
-            s.push_str(&format!(
-                "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
-                st.name, spelling
-            ));
             for f in &st.fields {
                 if matches!(f.ty, CType::Function(..)) {
                     s.push_str(&format!(
@@ -1460,13 +2253,10 @@ fn gen_adapter_c_source(
                         "void lime_set_{}_{}_null({}* t) {{ t->{} = 0; }}\n",
                         st.name, f.name, spelling, f.name
                     ));
-                } else {
-                    let c_ty = c_type_text(&f.ty);
-                    s.push_str(&format!(
-                        "void lime_set_{}_{}({}* t, {} v) {{ t->{} = ({})v; }}\n",
-                        st.name, f.name, spelling, c_ty, f.name, c_ty
-                    ));
                 }
+                // Non-function-pointer fields of a callback-table struct are
+                // surfaced by the record-accessor block above (which now always
+                // runs for `has_fn_ptr` structs), so we do NOT re-emit them here.
             }
             s.push_str("\n");
         }
@@ -1500,9 +2290,12 @@ fn gen_adapter_c_source(
             }
             decls.push(format!("{} a{}", c_type_text(&p.ty), i));
         }
-        // Return type (C).
+        // Return type (C). For an out-param the handle's pointee name is used;
+        // render it through the record-aware helper so a forward-declared struct
+        // (`curl_httppost`) becomes `struct curl_httppost*` rather than a bare
+        // `curl_httppost*` (which fails to compile).
         let ret_c = if let Some(name) = &a.ret_name {
-            format!("{}*", name) // out-param: return the handle pointer
+            opaque_or_struct_ptr(name)
         } else {
             c_type_text(&a.ret)
         };
@@ -1512,7 +2305,14 @@ fn gen_adapter_c_source(
             if Some(i) == a.out_idx {
                 call_args.push(format!("&a{}", i)); // write handle here
             } else if drop.contains(&i) {
-                call_args.push("0".to_string()); // NULL
+                // Dropped argument (trailing callback + its tail). Pass a typed
+                // NULL so pointer-shaped params compile (a bare `0` is an int and
+                // triggers `-Wint-conversion` for `const char*` etc.).
+                let null = match &a.params[i].ty {
+                    CType::Pointer(_) | CType::Opaque(_) | CType::String | CType::Function(..) => "(void*)0".to_string(),
+                    _ => "0".to_string(),
+                };
+                call_args.push(null);
             } else {
                 call_args.push(format!("a{}", i));
             }
@@ -1523,7 +2323,11 @@ fn gen_adapter_c_source(
         // emits C for these semantics; it records nothing and frees nothing.
         let guard = emit_nonnull_guards(&a.nonnull, &a.ret);
         if let Some(oi) = a.out_idx {
-            // The local holding the handle is the pointee of the out-param.
+            // The local holding the handle is the POINTEE of the out-param
+            // (`T` for an out-param of type `T*`, `struct X*` for `struct X**`).
+            // Taking `&local` then yields exactly the pointer type the C function
+            // expects (`struct X**` from a `struct X**` param, `T*` from a `T*`
+            // param), avoiding one level of `*` mismatch.
             let local_ty = if let CType::Pointer(inner) = &a.params[oi].ty {
                 c_type_text(inner)
             } else {
@@ -1599,7 +2403,7 @@ fn gen_adapter_c_source(
                     if let Some(def) = structs.iter().find(|st| &st.name == sname) {
                         // Reuse the record-field shim generator with the *global*
                         // name as the prefix so accessors read lime_get_<global>_<field>.
-                        emit_struct_field_shims_c(&mut s, g.name.as_str(), def);
+                        emit_struct_field_shims_c(&mut s, g.name.as_str(), def, structs);
                     }
                 }
                 CType::Array(elem, size) => {
@@ -1624,15 +2428,29 @@ fn gen_adapter_c_source(
                 _ => {}
             }
         } else {
-            s.push_str(&format!(
-                "{} lime_get_{}(void) {{ return ({})({}); }}\n",
-                c_ty, g.name, c_ty, g.name
-            ));
-            if !g.is_const {
+            // Pointer globals (incl. incomplete named types -> void*) take void*.
+            if is_pointer_field(&g.ty, structs) {
                 s.push_str(&format!(
-                    "void lime_set_{}({} v) {{ {} = ({})(v); }}\n",
-                    g.name, c_ty, g.name, c_ty
+                    "void* lime_get_{}(void) {{ return (void*)({}); }}\n",
+                    g.name, g.name
                 ));
+                if !g.is_const {
+                    s.push_str(&format!(
+                        "void lime_set_{}(void* v) {{ {} = (void*)(v); }}\n",
+                        g.name, g.name
+                    ));
+                }
+            } else {
+                s.push_str(&format!(
+                    "{} lime_get_{}(void) {{ return ({})({}); }}\n",
+                    c_ty, g.name, c_ty, g.name
+                ));
+                if !g.is_const {
+                    s.push_str(&format!(
+                        "void lime_set_{}({} v) {{ {} = ({})(v); }}\n",
+                        g.name, c_ty, g.name, c_ty
+                    ));
+                }
             }
         }
     }
@@ -1645,6 +2463,9 @@ fn gen_adapter_c_source(
     // *promoted* C type and (b) forward it positionally. This keeps Lime's ABI
     // and the Lime type system untouched.
     emit_variadic_c_adapters(&mut s, api, shapes);
+    // Drop the published record names so a later adapter pass for a different
+    // library does not inherit this library's struct set.
+    KNOWN_RECORDS.with(|r| *r.borrow_mut() = None);
     s
 }
 
@@ -1664,6 +2485,17 @@ fn gen_adapter_c_source(
 fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &VariadicShapes) {
     for f in &api.functions {
         if !f.variadic {
+            continue;
+        }
+        // Phase 1 Iteration 8: an unshaped variadic C function is genuinely
+        // uncallable from Lime — its `...` tail has no recoverable ABI type
+        // (this is inherent to C variadics, not a parser gap). Emitting a
+        // guessed homogeneous-int shim would produce a wrong ABI (e.g. turning
+        // `const char* format, ...` into `char, int, int, ...`), which both
+        // fails to compile and would be "fake ABI". Skip such functions; only
+        // shaped variadics (charger_variadic.json) get adapters. This is a
+        // generic rule, not library-specific.
+        if shapes.map.get(&f.symbol).is_none() {
             continue;
         }
         // Fixed-parameter C spellings (e.g. "int a0", "const char* a0").
@@ -1715,18 +2547,13 @@ fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &Variad
 /// accessor names/signatures match the extern-global shims exactly, so the Lime
 /// interface is identical regardless of linkage. Struct/array field accessors
 /// are emitted with the same ABI rules as the extern path.
-fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct]) -> String {
+fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct], defined: &std::collections::BTreeSet<String>) -> String {
     let mut s = String::new();
     for g in globals {
         if !matches!(g.storage, StorageClass::Static) {
             continue;
         }
-        let c_ty = match &g.ty {
-            CType::Struct(name) => format!("struct {}", name),
-            CType::Other(name) => name.clone(),
-            CType::String => "void*".to_string(),
-            _ => c_type_text(&g.ty),
-        };
+        let c_ty = c_field_c_type(&g.ty, structs);
         let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _));
         if is_agg {
             s.push_str(&format!(
@@ -1742,7 +2569,7 @@ fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct]) -> Str
             match &g.ty {
                 CType::Struct(sname) | CType::Other(sname) => {
                     if let Some(def) = structs.iter().find(|st| &st.name == sname) {
-                        emit_struct_field_shims_c(&mut s, &g.name, def);
+                        emit_struct_field_shims_c(&mut s, &g.name, def, structs);
                     }
                 }
                 CType::Array(elem, _size) => {
@@ -1761,15 +2588,29 @@ fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct]) -> Str
                 _ => {}
             }
         } else {
-            s.push_str(&format!(
-                "{} lime_get_{}(void) {{ return ({})({}); }}\n",
-                c_ty, g.name, c_ty, g.name
-            ));
-            if !g.is_const {
+            // Pointer globals (incl. incomplete named types -> void*) take void*.
+            if is_pointer_field(&g.ty, structs) {
                 s.push_str(&format!(
-                    "void lime_set_{}({} v) {{ {} = ({})(v); }}\n",
-                    g.name, c_ty, g.name, c_ty
+                    "void* lime_get_{}(void) {{ return (void*)({}); }}\n",
+                    g.name, g.name
                 ));
+                if !g.is_const {
+                    s.push_str(&format!(
+                        "void lime_set_{}(void* v) {{ {} = (void*)(v); }}\n",
+                        g.name, g.name
+                    ));
+                }
+            } else {
+                s.push_str(&format!(
+                    "{} lime_get_{}(void) {{ return ({})({}); }}\n",
+                    c_ty, g.name, c_ty, g.name
+                ));
+                if !g.is_const {
+                    s.push_str(&format!(
+                        "void lime_set_{}({} v) {{ {} = ({})(v); }}\n",
+                        g.name, c_ty, g.name, c_ty
+                    ));
+                }
             }
         }
     }
@@ -1783,10 +2624,21 @@ fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct]) -> Str
 /// accessors. Kept as a shared helper so globals and records stay in lockstep.
 /// The C pointer type is the *struct definition* name (`st.name`), while the
 /// accessor function name uses `prefix` (which may be a global variable name).
-fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct) {
+fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct, structs: &[CStruct]) {
     for f in &st.fields {
+        // Anonymous-record fields (union/struct ... unnamed ...) cannot be
+        // named or moved by value; skip the C accessor shim (the field stays
+        // opaque inside the C struct). Generic — applies to any library.
+        if is_anon_record_field(&f.ty) {
+            continue;
+        }
         match &f.ty {
             CType::Array(elem, size) => {
+                // Function-pointer array fields cannot be surfaced as
+                // element-wise scalar accessors — skip the shim. Generic.
+                if is_fn_ptr_array(&f.ty) {
+                    continue;
+                }
                 let c_ty = c_type_text(elem);
                 if size.is_none() {
                     s.push_str(&format!(
@@ -1804,15 +2656,42 @@ fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct) {
                 ));
             }
             _ => {
-                let c_ty = c_type_text(&f.ty);
-                s.push_str(&format!(
-                    "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
-                    c_ty, prefix, f.name, c_struct_spelling(st), c_ty, f.name
-                ));
-                if matches!(&f.ty, CType::Struct(_) | CType::Other(_)) {
+                let c_ty = c_field_c_type(&f.ty, structs);
+                // Getter: a pointer-like field is surfaced as `void*` on the
+                // getter side (see the parallel branch above) — ABI-correct for
+                // any pointee and avoids emitting an unknown struct tag.
+                if is_pointer_field(&f.ty, structs) {
                     s.push_str(&format!(
-                        "void lime_set_{}_{}({}* u, {}* v) {{ memcpy(&u->{}, v, sizeof({})); }}\n",
-                        prefix, f.name, c_struct_spelling(st), c_ty, f.name, c_ty
+                        "void* lime_get_{}_{}({}* u) {{ return (void*)u->{}; }}\n",
+                        prefix, f.name, c_struct_spelling(st), f.name
+                    ));
+                } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
+                    s.push_str(&format!(
+                        "void* lime_get_{}_{}({}* u) {{ return (void*)&u->{}; }}\n",
+                        prefix, f.name, c_struct_spelling(st), f.name
+                    ));
+                } else {
+                    s.push_str(&format!(
+                        "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
+                        c_ty, prefix, f.name, c_struct_spelling(st), c_ty, f.name
+                    ));
+                }
+                // Phase 1 Iteration 8: a pointer field is surfaced as `void*` on
+                // the setter side and assigned via `(void*)v`. ALL C object
+                // pointers convert to/from `void*`, so this is ABI-correct for
+                // any pointee (a `unsigned char*` field, a `struct X*` field, an
+                // opaque/incomplete pointer, ...). It also avoids emitting the
+                // wrong pointee type (e.g. normalizing `unsigned char*` as
+                // `int*` would otherwise fail to compile when assigned back).
+                if matches!(&f.ty, CType::Pointer(_)) {
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}({}* u, void* v) {{ u->{} = (void*)v; }}\n",
+                        prefix, f.name, c_struct_spelling(st), f.name
+                    ));
+                } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
+                    s.push_str(&format!(
+                        "void lime_set_{}_{}({}* u, void* v) {{ memcpy(&u->{}, v, sizeof(u->{})); }}\n",
+                        prefix, f.name, c_struct_spelling(st), f.name, f.name
                     ));
                 } else {
                     s.push_str(&format!(
@@ -1840,10 +2719,11 @@ fn build_adapters_into(
     lang: ApiKind,
     api: &NormalizedApi,
     shapes: &VariadicShapes,
+    include_dirs: &[PathBuf],
 ) -> Result<(), String> {
     if adapters.is_empty() && constants.is_empty() && structs.is_empty()
         && !globals.iter().any(|g| matches!(g.storage, StorageClass::Static))
-        && !api.functions.iter().any(|f| f.variadic)
+        && !api.functions.iter().any(|f| f.variadic && shapes.map.contains_key(&f.symbol))
     {
         return Ok(());
     }
@@ -1876,6 +2756,13 @@ fn build_adapters_into(
     }
     if let Some(dir) = header.parent() {
         cmd.arg("-I").arg(dir);
+    }
+    // Generic: honor cross-library dependency include dirs (from explicit
+    // `deps` / local `#include` scans) so the adapter shim can resolve a
+    // dependent header that pulls in a dependency header (e.g. libiter8b.h
+    // including iter8.h from libiter8). Completes the cross-library dep fix.
+    for inc in include_dirs {
+        cmd.arg("-I").arg(inc);
     }
     cmd.arg(&c_path).arg("-o").arg(&obj_path);
     let status = cmd
@@ -2042,6 +2929,10 @@ fn generate_lime_iface(
                         "extern fn lime_set_{}_{}_null(Opaque({}): a0) \"lime_set_{}_{}_null\"\n",
                         s.name, f.name, s.name, s.name, f.name
                     ));
+                } else if is_anon_record_field(&f.ty) || is_fn_ptr_array(&f.ty) {
+                    // Fields that cannot be surfaced in Lime (anonymous record,
+                    // function-pointer array) get no accessor — they stay opaque
+                    // inside the C struct. Generic.
                 } else {
                     // Non-function field (e.g. `void *userdata`): typed set.
                     out.push_str(&format!(
@@ -2092,6 +2983,12 @@ fn generate_lime_iface(
         }
         out.push_str(&format!("struct {} {{\n", s.name));
         for f in &s.fields {
+            if is_anon_record_field(&f.ty) {
+                continue; // anonymous-record field stays opaque in C; not a Lime member
+            }
+            if is_fn_ptr_array(&f.ty) {
+                continue; // fn-ptr array stays opaque in C; Lime has no fn-ptr value type
+            }
             out.push_str(&format!("    {}: {}\n", f.name, lime_type_name(&f.ty)));
         }
         out.push_str("}\n\n");
@@ -2203,6 +3100,11 @@ fn generate_lime_iface(
     // parser change required. Variadic slot Lime types come from `shapes`.
     for f in &api.functions {
         if !f.variadic {
+            continue;
+        }
+        // Mirror the adapter guard: only shaped variadics surface in the Lime
+        // interface (unshaped variadics are uncallable; see emit_variadic_c_adapters).
+        if shapes.map.get(&f.symbol).is_none() {
             continue;
         }
         let ret_lime = lime_type_name(&f.ret);
@@ -2739,12 +3641,54 @@ pub fn store_root() -> PathBuf {
     PathBuf::from(".lime-charger").join("store")
 }
 
+/// Charger component version identifiers, folded into the install cache key so
+/// ANY change to charger's AST extraction / normalization / adapter generation
+/// / ABI-metadata logic invalidates stale store artifacts. Without this, a
+/// charger.rs change that alters generated adapters would silently reuse an old
+/// (now-incorrect) `.lib`/manifest from a prior install — the exact footgun hit
+/// during Iteration 8 (the size_t normalization, anonymous-union flatten, and
+/// guarded-`main` source-filter fixes each *should* have forced a cache miss but
+/// did not). These are independent semantic categories; bump the relevant one
+/// when its subsystem changes in a way that is not captured by the automatic
+/// binary hash below (e.g. a default-config change). They are supplemented by
+/// `charger_binary_hash`, which hashes the running `lime` executable, so the
+/// cache also invalidates automatically on ANY charger.rs edit + rebuild.
+const CHARGER_VERSION: &str = "1.0.4-iter8-stable";
+const NORMALIZATION_VERSION: &str = "1.0.0";
+const ADAPTER_GEN_VERSION: &str = "1.0.0";
+const ABI_META_VERSION: &str = "1.0.0";
+
+/// Hash of the running `lime` executable. Changing (rebuilding) charger.rs
+/// changes this hash, which is folded into the install cache key so a stale
+/// store entry from a previous charger build is never reused. Generic — no
+/// library-specific content.
+fn charger_binary_hash() -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(bytes) = std::fs::read(&exe) {
+            let mut h = DefaultHasher::new();
+            bytes.hash(&mut h);
+            return format!("{:016x}", h.finish());
+        }
+    }
+    "no-exe".to_string()
+}
+
 fn toolchain_hash(abi: &AbiMeta, build_flags: &[String]) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
     format!("{:?}", abi).hash(&mut h);
     build_flags.join("|").hash(&mut h);
+    // Phase 1 Iteration 8 (i8-10): cache identity now includes charger component
+    // versions AND the running binary hash, so any charger logic change forces a
+    // cache miss instead of reusing a stale generated artifact.
+    CHARGER_VERSION.hash(&mut h);
+    NORMALIZATION_VERSION.hash(&mut h);
+    ADAPTER_GEN_VERSION.hash(&mut h);
+    ABI_META_VERSION.hash(&mut h);
+    charger_binary_hash().hash(&mut h);
     format!("{:016x}", h.finish())
 }
 
@@ -2811,7 +3755,8 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     }
 
     // Determine language: if any .cpp/.cc/.cxx present -> C++, else C.
-    let (lang, sources, header) = collect_sources(&src_path)?;
+    let config = load_charger_config(&src_path);
+    let (lang, sources, header) = collect_sources(&src_path, &config)?;
     if header.is_none() && sources.is_empty() {
         return Err("AST extraction failed: no C/C++ source or header found".to_string());
     }
@@ -2825,7 +3770,64 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
 
     // #7: detect dependencies (and the include dirs needed to compile the
     // dependent sources) from local `#include "..."` directives in this lib.
-    let (deps, include_dirs) = detect_dependencies(&sources, &header, &lib_name);
+    let (mut deps, mut include_dirs) = detect_dependencies(&sources, &header, &lib_name);
+    // Generic: also honor explicit `deps` from charger.toml (covers system
+    // <...>-style dependencies that the quoted-include scan cannot see).
+    for d in &config.deps {
+        if !deps.contains(d) {
+            deps.push(d.clone());
+        }
+        // Add the dependency's source dir as an include path so the dependent's
+        // `#include <dep.h>` (system-form) resolves at compile time. Locate the
+        // real header under the dependency's source tree (it may be nested under
+        // a versioned subdir), generic — no library-specific names.
+        if let Some(dep_entry) = find_artifact_entry(d) {
+            if let Some(m) = load_manifest(&dep_entry) {
+                let stem = strip_version_suffix(d);
+                if let Some(hdir) = find_header_dir(&m.source_origin, &stem) {
+                    if !include_dirs.iter().any(|p| p == &hdir) {
+                        include_dirs.push(hdir);
+                    }
+                } else {
+                    let origin = Path::new(&m.source_origin);
+                    let dir = if origin.is_file() { origin.parent() } else { Some(origin) };
+                    if let Some(dpath) = dir {
+                        if !include_dirs.iter().any(|p| p == dpath) {
+                            include_dirs.push(dpath.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Generic: add every source file's own directory (and the API header's
+    // directory) as an include path so intra-library "quoted" includes resolve
+    // regardless of subdir layout (e.g. an app `src/` helper that pulls a
+    // `lib/`-local header). This broadens header search only; it does not change
+    // which translation units are compiled. Generic — applies to every library.
+    let mut self_inc_seen = std::collections::HashSet::new();
+    for s in &sources {
+        if let Some(d) = s.parent() {
+            if include_dirs.iter().all(|p| p != d) && self_inc_seen.insert(d.to_path_buf()) {
+                include_dirs.push(d.to_path_buf());
+            }
+        }
+    }
+    if let Some(hd) = header.parent() {
+        if include_dirs.iter().all(|p| p != hd) {
+            include_dirs.push(hd.to_path_buf());
+        }
+        // Also expose the header's *parent* directory so package-style includes
+        // (`#include <pkg/header.h>`, e.g. curl's `<curl/system.h>`) resolve to
+        // `<header_parent>/pkg/header.h`. Generic — matches the common
+        // `include/pkg/*.h` convention without naming any library.
+        if let Some(gp) = hd.parent() {
+            if include_dirs.iter().all(|p| p != gp) {
+                include_dirs.push(gp.to_path_buf());
+            }
+        }
+    }
 
     // Deterministic store key + cache inputs (cheap; no native build yet).
     let abi = detect_abi(llvm_bindir, lang);
@@ -2834,17 +3836,10 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     } else {
         vec!["-O2".to_string()]
     };
-    // SQLite amalgamation declares optional features (unlock-notify, snapshot,
-    // rtree) in the header but only compiles them when the matching SQLITE_ENABLE_*
-    // macro is set; otherwise the symbols are declared-but-undefined and the link
-    // step fails. Enable the commonly-declared optional features so the prepared
-    // artifact is self-contained. This is a SQLite-specific build flag, not a
-    // general ABI change.
-    if lib_name == "sqlite" {
-        build_flags.push("-DSQLITE_ENABLE_UNLOCK_NOTIFY".to_string());
-        build_flags.push("-DSQLITE_ENABLE_SNAPSHOT".to_string());
-        build_flags.push("-DSQLITE_ENABLE_RTREE".to_string());
+    for f in &config.build_flags {
+        build_flags.push(f.clone());
     }
+
     let tool_hash = toolchain_hash(&abi, &build_flags);
     let version = "0.1.0".to_string();
     let entry = store_root().join(&lib_name).join(&version).join(&tool_hash);
@@ -2854,8 +3849,19 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // out-param / null-callback adapter shims before any native build. The
     // normalized API is needed both for the cache-hit path (to (re)generate the
     // iface + shims) and the full build path.
-    let ast = extract_ast_json(&header, lang, llvm_bindir)?;
-    let mut api = normalize(&ast, lang);
+    let ast = extract_ast_json(&header, lang, llvm_bindir, &include_dirs, &build_flags)?;
+    let mut api = normalize(&ast, lang, &src_path);
+    let mut fc = 0usize; let mut rc = 0usize;
+    fn walk(o: &serde_json::Value, fc: &mut usize, rc: &mut usize) {
+        if let Some(k) = o.get("kind").and_then(|v| v.as_str()) {
+            if k == "FunctionDecl" { *fc += 1; }
+            else if k == "RecordDecl" { *rc += 1; }
+        }
+        if let Some(a) = o.get("inner").and_then(|v| v.as_array()) {
+            for c in a { walk(c, fc, rc); }
+        }
+    }
+    walk(&ast, &mut fc, &mut rc);
     // Macros are preprocessor text and never appear in the AST JSON, so scan
     // the header source directly for `#define NAME <int>` forms. This is the
     // only place macros can be recovered; AST-based extraction cannot see them.
@@ -2885,7 +3891,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // the reused artifact (a stale artifact built by an older
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
-                build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang, &api, &shapes)?;
+                build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang, &api, &shapes, &include_dirs)?;
                 let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes, &sem);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
@@ -2939,8 +3945,16 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     }
 
     let build_dir = std::env::temp_dir().join(format!("charger_build_{}", lib_name));
+    // Phase 1 Iteration 8: the build dir is persistent across `charger install`
+    // invocations. A prior install leaves its compiled `.obj` files behind; if
+    // the current install compiles a DIFFERENT (or combined) set of translation
+    // units, `llvm-ar rcs` only replaces same-named members and RETAINs the
+    // stale ones — producing duplicate-symbol archives (e.g. an old `shell.obj`
+    // + `sqlite3.obj` both defining `sqlite3_*` alongside the new amalgamation
+    // object). Blow the dir away each install so every archive is built from
+    // exactly the sources collected this run. Generic — no library names.
+    let _ = std::fs::remove_dir_all(&build_dir);
     let _ = std::fs::create_dir_all(&build_dir);
-    let obj_path = build_dir.join(format!("{}.obj", lib_name));
     let clang = if lang == ApiKind::Cpp {
         PathBuf::from(llvm_bindir).join("clang++.exe")
     } else {
@@ -2951,29 +3965,16 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     } else {
         PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp { "clang++" } else { "clang" })
     };
-    let mut cmd = Command::new(&clang);
-    cmd.arg("-O2").arg("-c");
-    if lang == ApiKind::Cpp {
-        cmd.arg("-std=c++17");
-    }
-    for inc in &include_dirs {
-        cmd.arg("-I").arg(inc);
-    }
-    // The combined TU is written to a temp dir, so ensure the library header's
-    // directory is on the include path (the original sources sit beside it).
-    if let Some(hdir) = header.parent() {
-        cmd.arg("-I").arg(hdir);
-    }
     // Static (internal-linkage) globals cannot be reached from a separate
     // adapter translation unit, so their accessors must live in the SAME TU as
     // the static variable. We append the generated accessor source to the first
-    // library source (combined TU) and compile that instead of the raw source.
-    // Single-TU libraries (the common Charger case) get a correct, self-contained
-    // member; the accessor and the static share one TU so the symbol resolves.
-    let static_src = gen_static_accessor_c_source(&api.globals, &api.structs);
-    let compiled_sources: Vec<PathBuf> = if static_src.is_empty() {
-        sources.clone()
-    } else {
+    // library source and compile THAT instead of the raw first source. The
+    // accessor and the static then share one TU so the symbol resolves.
+    let defined: std::collections::BTreeSet<String> =
+        api.structs.iter().map(|st| st.name.clone()).collect();
+    let static_src = gen_static_accessor_c_source(&api.globals, &api.structs, &defined);
+    let mut compiled_sources: Vec<PathBuf> = sources.clone();
+    if !static_src.is_empty() {
         let first = sources.first().ok_or_else(|| {
             "native build failed: no source to host static-global accessors".to_string()
         })?;
@@ -2990,24 +3991,69 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
             format!("{}\n\n/* Charger static-global accessors */\n{}\n", orig, static_src),
         )
         .map_err(|e| format!("static inject failed: write {}: {}", combined.display(), e))?;
-        let mut v = Vec::new();
-        v.push(combined);
-        for s in sources.iter().skip(1) {
-            v.push(s.clone());
-        }
-        v
-    };
+        compiled_sources[0] = combined;
+    }
+    // Phase 1 Iteration 8: compile each C translation unit to its own object
+    // file, then archive ALL of them into one native artifact. Charger must
+    // handle multi-file C libraries (zlib, libpng, libjpeg-turbo, curl, OpenSSL,
+    // SDL, FFmpeg, ...) as well as single-amalgamation libraries. A single clang
+    // invocation compiling every .c into one object is only valid for one TU, so
+    // we compile per-source and collect the object paths.
+    let mut obj_paths: Vec<PathBuf> = Vec::new();
     for s in &compiled_sources {
-        cmd.arg(s);
+        let stem = s.file_stem().and_then(|x| x.to_str()).unwrap_or("src").to_string();
+        let obj_path = build_dir.join(format!("{}.obj", sanitize_name(&stem)));
+        // Phase 1 Iteration 8: compile each translation unit in its OWN language.
+        // One C++ file anywhere in the tree must NOT force the entire library
+        // into C++ mode (that would break every C TU — e.g. libjpeg-turbo mixes
+        // C library sources with C++ fuzz harnesses). Pick the compiler/flags
+        // per source by extension. Generic; no library-specific names.
+        let is_cpp = matches!(
+            s.extension().and_then(|e| e.to_str()),
+            Some("cpp") | Some("cc") | Some("cxx")
+        );
+        let (cc, stdarg) = if is_cpp {
+            let cpp = if lang == ApiKind::Cpp {
+                clang.clone()
+            } else {
+                PathBuf::from(llvm_bindir).join("clang++.exe")
+            };
+            let cpp = if cpp.exists() {
+                cpp
+            } else {
+                PathBuf::from(llvm_bindir).join("clang++")
+            };
+            (cpp, "-std=c++17")
+        } else {
+            (clang.clone(), "")
+        };
+        let mut cmd = Command::new(&cc);
+        cmd.arg("-O2").arg("-c");
+        if !stdarg.is_empty() {
+            cmd.arg(stdarg);
+        }
+        // Apply the per-library build flags from charger.toml (e.g. -DBUILDING_LIBCURL
+        // for libcurl, -DSQLITE_ENABLE_* for SQLite). Generic: every library's
+        // configured preprocessor/compile flags reach the native compile.
+        for f in &build_flags {
+            cmd.arg(f);
+        }
+        for inc in &include_dirs {
+            cmd.arg("-I").arg(inc);
+        }
+        if let Some(hdir) = header.parent() {
+            cmd.arg("-I").arg(hdir);
+        }
+        cmd.arg(s).arg("-o").arg(&obj_path);
+        let status = cmd
+            .status()
+            .map_err(|e| format!("native build failed: {} launch error: {}", clang.display(), e))?;
+        if !status.success() {
+            return Err(format!("native build failed: {} exited with {}", clang.display(), status));
+        }
+        obj_paths.push(obj_path);
     }
-    cmd.arg("-o").arg(&obj_path);
-    let status = cmd
-        .status()
-        .map_err(|e| format!("native build failed: {} launch error: {}", clang.display(), e))?;
-    if !status.success() {
-        return Err(format!("native build failed: {} exited with {}", clang.display(), status));
-    }
-    // archive into .lib (use llvm-ar)
+    // archive into .lib (use llvm-ar) — all per-TU objects + any future members.
     let ar = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
     let ar = if ar.exists() {
         ar
@@ -3017,10 +4063,12 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     let art_ext = if cfg!(windows) { "lib" } else { "a" };
     let art_name = format!("{}.{}", lib_name, art_ext);
     let art_path = build_dir.join(&art_name);
-    let ar_status = Command::new(&ar)
-        .arg("rcs")
-        .arg(&art_path)
-        .arg(&obj_path)
+    let mut ar_cmd = Command::new(&ar);
+    ar_cmd.arg("rcs").arg(&art_path);
+    for o in &obj_paths {
+        ar_cmd.arg(o);
+    }
+    let ar_status = ar_cmd
         .status()
         .map_err(|e| format!("native build failed: llvm-ar launch error: {}", e))?;
     if !ar_status.success() {
@@ -3030,7 +4078,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // 2b. Build out-param / null-callback adapter shims and insert them into
     // the prepared native artifact (so the Lime `extern fn` shim symbols
     // resolve at link time).
-    build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_path, &header, llvm_bindir, lang, &api, &shapes)?;
+    build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_path, &header, llvm_bindir, lang, &api, &shapes, &include_dirs)?;
 
     // Phase 1 Iteration 6: derive artifact metadata from what was actually
     // built. Charger always produces an archive (.lib on Windows, .a elsewhere)
@@ -3109,7 +4157,6 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         name: g.name.clone(),
         ty: ctype_tag(&g.ty),
     }).collect();
-
     // Phase 1 Iteration 7: gate the auxiliary semantic metadata BEFORE the
     // manifest is written / native build is declared good. Invalid metadata
     // (dangling free_with, out-of-range param index, nullable on a scalar, ...)
@@ -3155,7 +4202,251 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     })
 }
 
-fn collect_sources(path: &Path) -> Result<(ApiKind, Vec<PathBuf>, Option<PathBuf>), String> {
+/// Phase 1 Iteration 8: choose the public API header from a directory of
+/// headers. Heuristic (library-agnostic): the API header is the one NOT
+/// `#include`d by any other `.c`/`.h` file in the directory. Internal/private
+/// headers (`crc32.h`, `deflate.h`, ...) are almost always included by some
+/// translation unit, while the public header (`zlib.h`, `png.h`, ...) is only
+/// included by users, never by the library's own files. If every header is
+/// included (ambiguous) or none is, we fall back to the first header found.
+fn select_api_header(_dir: &Path, headers: &[PathBuf], sources: &[PathBuf]) -> Option<PathBuf> {
+    if headers.is_empty() {
+        return None;
+    }
+    if headers.len() == 1 {
+        return Some(headers[0].clone());
+    }
+    // Collect local inclusions separately for headers and for sources so a
+    // public API header can be told apart from an internal one.
+    let mut header_includes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut source_includes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut scan = |p: &Path, into: &mut std::collections::HashSet<String>| {
+        if let Ok(txt) = std::fs::read_to_string(p) {
+            for line in txt.lines() {
+                if line.trim_start().starts_with("#include") {
+                    if let Some(q) = line.find('"') {
+                        let rest = &line[q + 1..];
+                        if let Some(end) = rest.find('"') {
+                            into.insert(rest[..end].to_string());
+                        }
+                    } else if let Some(lt) = line.find('<') {
+                        let rest = &line[lt + 1..];
+                        if let Some(end) = rest.find('>') {
+                            into.insert(rest[..end].to_string());
+                        }
+                    }
+                }
+            }
+        }
+    };
+    for s in sources {
+        scan(s, &mut source_includes);
+    }
+    for h in headers {
+        scan(h, &mut header_includes);
+    }
+    // Phase 1 Iteration 8 root-header heuristic:
+    //  * A root candidate is a header NOT `#include`d by any OTHER header in the
+    //    directory. Internal headers (`crc32.h`, `deflate.h`, `gzguts.h`, ...)
+    //    are pulled in by sibling headers, so they drop out.
+    //  * Among the roots, the public API header is the one `#include`d by at
+    //    least one `.c` file (the library's own sources include the public
+    //    header; a generated internal table header is included by none). This
+    //    selects `zlib.h` / `png.h` / `jpeglib.h` generically, with no
+    //    library-specific name matching. Falls back to the first header when
+    //    the heuristic is ambiguous.
+    let roots: Vec<&PathBuf> = headers
+        .iter()
+        .filter(|h| {
+            let stem = h.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            !header_includes.contains(stem)
+        })
+        .collect();
+    let public: Vec<&PathBuf> = roots
+        .iter()
+        .filter(|h| {
+            let stem = h.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            source_includes.contains(stem)
+        })
+        .cloned()
+        .collect();
+    if public.len() == 1 {
+        Some(public[0].clone())
+    } else if roots.len() == 1 {
+        Some(roots[0].clone())
+    } else {
+        Some(headers[0].clone())
+    }
+}
+
+/// True if `path` defines a *real* (unguarded) `main()` entry point — i.e. a
+/// `main(` token that appears at C preprocessor `#if`/`#ifdef`/`#ifndef` depth
+/// 0. Library translation units that embed a unit-test `main` behind a
+/// conditional (`#ifdef UNITTESTS` / `#ifdef CURLDEBUG`, as curl's `cookie.c`
+/// and `curl_sasl.c` do) are NOT executable entry points and must be retained
+/// when building the library archive. A genuine standalone executable (cjpeg,
+/// djpeg, ...) defines `main` at top level (depth 0) and is dropped. Generic:
+/// the signal is purely the preprocessor guard state, never a library name.
+fn has_unguarded_main(path: &Path) -> bool {
+    let txt = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    // Strip C-style comments and string literals so that prose such as
+    // `"A main() routine is also"` (zlib's `crc32.c` line 19, inside a string
+    // literal in a comment block) does NOT trigger a false "has main" match.
+    // A real `main` definition is the only thing we must detect. Generic — no
+    // library-specific text is referenced.
+    let stripped: String = strip_c_comments_and_strings(&txt);
+    // Preprocessor nesting tracker. `#else`/`#elif` does NOT change nesting
+    // depth — it only flips the *current* branch to its alternate (which is
+    // compiled when the enclosing `#if` is false, so a `main` there IS a real
+    // executable entry point). We must track both:
+    //   * `depth`      — `#if`/`#endif` nesting (so we never corrupt NESTED
+    //                    blocks, e.g. zlib's `crc32.c` has an inner `#else`
+    //                    inside an outer `#ifdef MAKECRCH` that guards `main()`;
+    //                    decrementing depth on `#else` would drop that guard and
+    //                    wrongly discard `crc32.c`, taking `crc32()` with it).
+    //   * `alt` stack  — whether the current branch is an `#else`/`#elif`
+    //                    alternate. A `main` in an alternate branch is a genuine
+    //                    entry point (sqlite's `shell.c`: `#else /* standalone
+    //                    program */ int main(...)`), so such files are dropped
+    //                    from the library build. A `main` in a plain `#if` true
+    //                    branch (curl's `#ifdef UNITTESTS`, crc32's
+    //                    `#ifdef MAKECRCH`) is guarded and the file is kept.
+    // Generic — only preprocessor structure is inspected, never a name.
+    let mut depth: i32 = 0;
+    let mut alt: Vec<bool> = Vec::new(); // per level: alternate (else/elif) branch?
+    for line in stripped.lines() {
+        let t = line.trim();
+        if t.starts_with("#ifdef")
+            || t.starts_with("#ifndef")
+            || (t.starts_with("#if") && !t.starts_with("#ifdef") && !t.starts_with("#ifndef"))
+        {
+            depth += 1;
+            alt.push(false); // new level starts in its true branch
+        } else if t.starts_with("#endif") {
+            depth = depth.saturating_sub(1);
+            alt.pop();
+        } else if t.starts_with("#else") || t.starts_with("#elif") {
+            if let Some(top) = alt.last_mut() {
+                *top = true; // this level is now in its alternate branch
+            }
+        }
+        // A `main` definition is a real entry point when it is top-level
+        // (depth == 0) OR inside an `#else`/`#elif` alternate branch.
+        let in_alt = alt.last().copied().unwrap_or(false);
+        if (depth <= 0 || in_alt) && is_main_definition(t) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Strip C block/line comments and string/char literals from `src`, leaving
+/// everything else (including preprocessor directives, which must be tracked
+/// for `#if` depth) intact. Block comments may span lines; we handle them with
+/// a simple state machine. Generic helper — used only by `has_unguarded_main`.
+fn strip_c_comments_and_strings(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let bytes: Vec<char> = src.chars().collect();
+    let mut i = 0;
+    let n = bytes.len();
+    let nl: char = '\n';
+    let squote: char = '\'';
+    let dquote: char = '"';
+    let mut in_block = false;
+    while i < n {
+        let c = bytes[i];
+        if in_block {
+            if c == '*' && i + 1 < n && bytes[i + 1] == '/' {
+                in_block = false;
+                i += 2;
+                out.push(' ');
+            } else {
+                if c == nl {
+                    out.push(nl);
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && i + 1 < n && bytes[i + 1] == '/' {
+            while i < n && bytes[i] != nl {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && i + 1 < n && bytes[i + 1] == '*' {
+            in_block = true;
+            i += 2;
+            out.push(' ');
+            continue;
+        }
+        if c == dquote {
+            i += 1;
+            while i < n {
+                if bytes[i] == '\\' {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == dquote {
+                    i += 1;
+                    break;
+                }
+                if bytes[i] == nl {
+                    out.push(nl);
+                    i += 1;
+                    continue;
+                }
+                i += 1;
+            }
+            out.push(dquote);
+            continue;
+        }
+        if c == squote {
+            i += 1;
+            while i < n {
+                if bytes[i] == '\\' {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == squote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            out.push(squote);
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+fn is_main_definition(line: &str) -> bool {
+    // Find "main" as a standalone identifier.
+    let mut idx = 0;
+    let chars: Vec<char> = line.chars().collect();
+    while let Some(pos) = line[idx..].find("main") {
+        let abs = idx + pos;
+        let before_ok = abs == 0
+            || !chars[abs - 1].is_alphanumeric() && chars[abs - 1] != '_';
+        if before_ok && abs + 4 < chars.len() && chars[abs + 4] == '(' {
+            // ensure '(' directly follows "main" (allow no space)
+            return true;
+        }
+        idx = abs + 4;
+    }
+    false
+}
+
+fn collect_sources(
+    path: &Path,
+    config: &ChargerConfig,
+) -> Result<(ApiKind, Vec<PathBuf>, Option<PathBuf>), String> {
     let mut sources = Vec::new();
     let mut header = None;
     let mut has_cpp = false;
@@ -3170,24 +4461,225 @@ fn collect_sources(path: &Path) -> Result<(ApiKind, Vec<PathBuf>, Option<PathBuf
             _ => return Err("unsupported source file".to_string()),
         }
     } else {
-        for entry in std::fs::read_dir(path).map_err(|e| format!("compiler not found / cannot read dir: {}", e))? {
-            let p = entry.map_err(|e| e.to_string())?.path();
-            match p.extension().and_then(|e| e.to_str()) {
-                Some("h") | Some("hpp") | Some("hh") => {
-                    if header.is_none() {
-                        header = Some(p);
+        let mut headers: Vec<PathBuf> = Vec::new();
+        // Real-world C libraries frequently nest their sources under a
+        // subdirectory (e.g. libjpeg-turbo's `src/`, curl's `lib/`, OpenSSL's
+        // `crypto/` + `ssl/`, FFmpeg's `libav*/`). A flat `read_dir` of the
+        // library root would find only the directory entry and miss every
+        // translation unit, producing an archive that contains nothing but the
+        // adapter shim (linking then fails with undefined symbols). Recurse so
+        // every `*.c` / `*.cpp` under the tree is compiled. Generic — applies to
+        // any library layout, and still degrades to the flat scan for libraries
+        // that keep sources at the root.
+        let mut stack: Vec<PathBuf> = vec![path.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir)
+                .map_err(|e| format!("compiler not found / cannot read dir: {}", e))?
+            {
+                let p = entry.map_err(|e| e.to_string())?.path();
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                match p.extension().and_then(|e| e.to_str()) {
+                    Some("h") | Some("hpp") | Some("hh") => headers.push(p),
+                    Some("c") => sources.push(p),
+                    Some("cpp") | Some("cc") | Some("cxx") => {
+                        has_cpp = true;
+                        sources.push(p)
                     }
+                    _ => {}
                 }
-                Some("c") => sources.push(p),
-                Some("cpp") | Some("cc") | Some("cxx") => {
-                    has_cpp = true;
-                    sources.push(p)
-                }
-                _ => {}
             }
         }
+        // Phase 1 Iteration 8: a real-world C library source tree frequently
+        // ships standalone *executables* alongside the library (example apps,
+        // fuzzers, test harnesses — e.g. libjpeg-turbo's `cjpeg`/`djpeg`). Those
+        // translation units define their own `main()` and pull in build-time
+        // generated headers that are absent from a raw checkout, so compiling
+        // them into the library archive either fails or produces an executable
+        // symbol nobody wants. A source that defines `main()` is not library
+        // code — drop it. Generic: applies to any library layout.
+        //
+        // Refinement (Phase 1 Iteration 8, curl): some *library* translation
+        // units embed a unit-test `main()` that is guarded by a preprocessor
+        // conditional (e.g. curl's `cookie.c` / `curl_sasl.c` define `main`
+        // only under `#ifdef UNITTESTS`). A naive `text.contains("main(")`
+        // check wrongly discards those library files, leaving the built
+        // archive missing their symbols (and a later `curl_easy_cleanup` call
+        // then segfaults on an undefined internal function). Keep a TU unless
+        // its `main(` is UNGUARDED — i.e. it appears at preprocessor `#if`
+        // depth 0 (a real executable entry point). A guarded `main` is library
+        // test code and must be retained. Generic: signal is purely the
+        // preprocessor guard state, no library-specific names.
+        sources = sources
+            .into_iter()
+            .filter(|p| !has_unguarded_main(p))
+            .collect();
+        // Phase 1 Iteration 8: some C libraries split a translation unit across
+        // multiple files by `#include`-ing a `.c` chunk from a driver TU
+        // (libjpeg-turbo's `jccolext.c`/`jcgryext.c`/... are pulled into
+        // `jccolor.c`). Compiling such a chunk standalone fails because it relies
+        // on the driver TU's includes/macros. Drop any source that is itself
+        // `#include`d by ANOTHER source in the set. Generic: detected purely by
+        // `#include "X.c"` relationships (no library-specific names).
+        let all_text: Vec<String> = sources
+            .iter()
+            .map(|p| std::fs::read_to_string(p).unwrap_or_default().to_lowercase())
+            .collect();
+        // Names that appear as a `#include "X.c"` target in some OTHER source.
+        let mut included_as_chunk: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for txt in &all_text {
+            for line in txt.lines() {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("#include") {
+                    let rest = rest.trim_start();
+                    if rest.starts_with('"') {
+                        if let Some(rel) = rest[1..].find('"') {
+                            let end = 1 + rel; // closing quote position in `rest`
+                            let target = &rest[1..end]; // exclude both quotes
+                            if target.ends_with(".c") {
+                                included_as_chunk.insert(target.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        sources = sources
+            .into_iter()
+            .filter(|p| {
+                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                !included_as_chunk.contains(&name)
+            })
+            .collect();
+        // Phase 1 Iteration 8: architecture-specific SIMD/intrinsics
+        // subdirectories (e.g. `simd/`, `neon/`, `x86_64/`) contain translation
+        // units that require special compiler flags / target intrinsics and are
+        // not portable C. A correct plain-C build uses the library's C fallback
+        // paths instead, so drop any source living under a directory whose name
+        // signals SIMD/intrinsics. Generic: matched by directory name only.
+        sources = sources
+            .into_iter()
+            .filter(|p| {
+                let simd_dir = p.components().any(|c| {
+                    let s = c.as_os_str().to_string_lossy().to_lowercase();
+                    s == "simd" || s == "neon" || s == "sse" || s == "avx"
+                        || s == "x86_64" || s.starts_with("mmx") || s == "intrinsics"
+                        || s == "java" || s == "jni" || s == "android" || s == "objc"
+                        || s == "wasm" || s == "emscripten"
+                        || s == "fuzz" || s == "test" || s == "tests"
+                        || s == "doc" || s == "docs" || s == "example"
+                        || s == "examples" || s == "sample" || s == "samples"
+                        || s == "packages" || s == "vms" || s == "os400" || s == "macos"
+                        || s == "win32" || s == "build" || s == "cmake" || s == "m4"
+                        || s == "autom4te.cache" || s == "scripts" || s == "projects"
+                        || s == "contrib" || s == "third_party" || s == "thirdparty"
+                });
+                !simd_dir
+            })
+            .collect();
+        // Phase 1 Iteration 8: many real-world libraries ship the actual
+        // library under `lib/` (or similar) AND a standalone CLI application
+        // under `src/`. The CLI app's `main()` is already dropped, but its
+        // non-main helpers still pull in app-only headers / opposite macro
+        // conventions (e.g. curl's `src/tool_cfgable.h` uses `curlx_dynbuf`,
+        // which only exists when the library-build macro is UNdefined — the
+        // opposite of what the library needs). When a `lib/` and a `src/`
+        // directory are siblings, `src/` is the application, not the library:
+        // drop every source living directly under that `src/`. Generic —
+        // triggered solely by the `lib/` + `src/` sibling layout, so it leaves
+        // libraries that keep code under `src/` (libjpeg-turbo) or at the root
+        // (zlib, libpng) untouched.
+        let lib_src_sibling: Option<PathBuf> = {
+            let mut dirs: Vec<PathBuf> = Vec::new();
+            let mut stack2: Vec<PathBuf> = vec![path.to_path_buf()];
+            while let Some(d) = stack2.pop() {
+                if let Ok(rd) = std::fs::read_dir(&d) {
+                    for e in rd.flatten() {
+                        let p = e.path();
+                        if p.is_dir() {
+                            stack2.push(p.clone());
+                            dirs.push(p);
+                        }
+                    }
+                }
+            }
+            let mut found: Option<PathBuf> = None;
+            for d in &dirs {
+                if d.file_name().map(|n| n == "lib").unwrap_or(false) {
+                    if let Some(parent) = d.parent() {
+                        if dirs.iter().any(|o| {
+                            o.file_name().map(|n| n == "src").unwrap_or(false)
+                                && o.parent() == Some(parent)
+                        }) {
+                            found = Some(parent.to_path_buf());
+                            break;
+                        }
+                    }
+                }
+            }
+            found
+        };
+        if let Some(lib_parent) = lib_src_sibling {
+            sources = sources
+                .into_iter()
+                .filter(|p| {
+                    let under_src = p.starts_with(&lib_parent)
+                        && {
+                            let after = p.strip_prefix(&lib_parent).unwrap_or(p.as_path());
+                            after
+                                .components()
+                                .next()
+                                .map(|c| c.as_os_str() == "src")
+                                .unwrap_or(false)
+                        };
+                    !under_src
+                })
+                .collect();
+        }
+        // Explicit per-library exclude list (corpus charger.toml). Drops leaf
+        // translation units that do not compile under a flattened single-include
+        // build. Corpus config, not charger logic — no library name is hardcoded.
+        if !config.exclude.is_empty() {
+            let excl: std::collections::HashSet<String> =
+                config.exclude.iter().map(|s| s.to_lowercase()).collect();
+            sources = sources
+                .into_iter()
+                .filter(|p| {
+                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    !excl.contains(&name)
+                })
+                .collect();
+        }
+        // Phase 1 Iteration 8: a real-world C library directory often contains
+        // many headers — one public API header plus several private/internal
+        // headers (e.g. zlib's `zlib.h` is public while `crc32.h`, `deflate.h`
+        // are internal and not meant to be parsed standalone). Picking the
+        // first header alphabetically would wrongly choose an internal header.
+        // Instead we pick the *root* header: the one not `#include`d by any
+        // other source/header in the directory. This is a generic rule (no
+        // library-specific names), and degrades to "first header" when there is
+        // no clear root (single-header libraries keep working).
+        header = select_api_header(path, &headers, &sources);
     }
-    let lang = if has_cpp { ApiKind::Cpp } else { ApiKind::C };
+    if let Some(name) = &config.api_header {
+        let explicit = path.join(name);
+        if explicit.exists() {
+            header = Some(explicit);
+        }
+    }
+    // The library's public API language is determined by the API HEADER's
+    // extension, not by the presence of any C++ file anywhere in the tree.
+    // Real-world C libraries frequently ship C++ harnesses/fuzzers alongside the
+    // C sources (libjpeg-turbo, curl, OpenSSL, FFmpeg, ...); those must NOT force
+    // the public interface — and the C compilation of every C translation unit —
+    // into C++ mode. Per-source language selection happens later, in the build
+    // loop, where each TU is compiled in its own language.
+    let lang = match header.as_ref().and_then(|h| h.extension().and_then(|e| e.to_str())) {
+        Some("hpp") | Some("hh") | Some("hxx") => ApiKind::Cpp,
+        _ => ApiKind::C,
+    };
     Ok((lang, sources, header))
 }
 
@@ -3219,6 +4711,31 @@ fn strip_header_ext(name: &str) -> String {
 /// store entry and are not the library being installed are treated as
 /// dependencies. This keeps the slice honest (no fabricated edges) while
 /// extending — not changing — the existing store/hash/lookup foundation.
+/// Locate the directory containing a dependency's public header so it can be
+/// added as an `-I` include path. Scans the dependency's source tree for a
+/// header whose stem matches `name` (e.g. `zlib` -> `zlib.h`). Generic — no
+/// library-specific names. Returns `None` if no match is found.
+fn find_header_dir(source_origin: &str, name: &str) -> Option<PathBuf> {
+    let root = Path::new(source_origin);
+    if !root.exists() {
+        return None;
+    }
+    let target = format!("{}.h", name);
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let rd = std::fs::read_dir(&dir).ok()?;
+        for entry in rd.filter_map(|e| e.ok()) {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.file_name().map(|f| f.to_string_lossy() == target).unwrap_or(false) {
+                return p.parent().map(|pp| pp.to_path_buf());
+            }
+        }
+    }
+    None
+}
+
 fn detect_dependencies(
     sources: &[PathBuf],
     header: &Path,
@@ -3265,21 +4782,30 @@ fn detect_dependencies(
     }
 
     // Resolve each candidate against the prepared store.
-    for cand in candidates {
+    for cand in &candidates {
         if let Some(dep_entry) = find_artifact_entry(&cand) {
             if let Some(m) = load_manifest(&dep_entry) {
                 if !deps.contains(&cand) {
                     deps.push(cand.clone());
                 }
-                // Add the dependency's source directory as an include path so
-                // the dependent's `#include "dep.h"` resolves at compile time.
+                // Add the directory containing the dependency's matching header
+                // as an include path, so the dependent's `#include "dep.h"`
+                // resolves. The dependency's source tree may nest its public
+                // header under a versioned subdir (e.g. zlib's `src/zlib-1.3.1/
+                // zlib.h`), so we locate the real header file rather than blindly
+                // using the corpus root. Generic — no library-specific names.
+                let header_stem = cand.clone();
                 let origin = Path::new(&m.source_origin);
-                let dir = if origin.is_file() {
+                let dir: Option<&Path> = if origin.is_file() {
                     origin.parent()
                 } else {
                     Some(origin)
                 };
-                if let Some(d) = dir {
+                if let Some(hdir) = find_header_dir(&m.source_origin, &header_stem) {
+                    if include_seen.insert(hdir.clone()) {
+                        include_dirs.push(hdir);
+                    }
+                } else if let Some(d) = dir {
                     if include_seen.insert(d.to_path_buf()) {
                         include_dirs.push(d.to_path_buf());
                     }
@@ -3552,6 +5078,60 @@ fn hash_file(p: &Path) -> String {
 /// Find the best (newest version/toolchain) prepared store entry for `lib`,
 /// returning its directory path. Shared by `lookup_artifact` / `lookup_iface`.
 fn find_artifact_entry(lib: &str) -> Option<PathBuf> {
+    // Fast path: a store entry named exactly `lib`.
+    if let Some(p) = find_artifact_entry_exact(lib) {
+        return Some(p);
+    }
+    // Fallback: a dependency may be named with a version suffix
+    // (e.g. `zlib-1.3.1` while the installed store entry is `zlib`). Match by
+    // stripping a trailing `-<version>` and by the manifest's `library` field.
+    // Generic — never library-specific.
+    let bare = strip_version_suffix(lib);
+    let mut best: Option<(String, PathBuf)> = None;
+    if let Ok(rd) = std::fs::read_dir(store_root()) {
+        for lib_dir in rd.filter_map(|e| e.ok()) {
+            let lpath = lib_dir.path();
+            if !lpath.is_dir() {
+                continue;
+            }
+            let name = lpath.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+            let matches = name == bare
+                || name == lib
+                || {
+                    if let Some(ent) = find_artifact_entry_exact(&name) {
+                        load_manifest(&ent).map(|m| m.library == lib || m.library == bare).unwrap_or(false)
+                    } else {
+                        false
+                    }
+                };
+            if matches {
+                if let Some(p) = find_artifact_entry_exact(&name) {
+                    let key = format!("{}/{}", lpath.display(), p.display());
+                    match &best {
+                        Some((bk, _)) if *bk >= key => {}
+                        _ => best = Some((key, p)),
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// Strip a trailing `-<version>` token from a library name
+/// (`zlib-1.3.1` -> `zlib`). Generic helper for dependency name resolution.
+fn strip_version_suffix(name: &str) -> String {
+    if let Some(idx) = name.rfind('-') {
+        let tail = &name[idx + 1..];
+        // a version tail looks like `1.3.1` / `3_1_0` (digits and dots/underscores)
+        if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '_') {
+            return name[..idx].to_string();
+        }
+    }
+    name.to_string()
+}
+
+fn find_artifact_entry_exact(lib: &str) -> Option<PathBuf> {
     let base = store_root().join(lib);
     if !base.exists() {
         return None;
@@ -3608,6 +5188,82 @@ pub fn resolve(lib: &str) -> Result<(String, PathBuf), String> {
             "Charger native artifact for '{}' is missing from the store. Run `charger install {}` again.",
             lib, lib))?;
     Ok((iface, art))
+}
+
+/// Phase 1 Iteration 8: optional per-library build configuration
+/// (`charger.toml` sitting beside the library sources). This is a *build*
+/// configuration (which header is the public API, extra preprocessor flags),
+/// NOT semantic metadata and NOT library-specific code. Every corpus entry may
+/// declare one; Charger falls back to the generic root-header heuristic when it
+/// is absent.
+#[derive(Debug, Default)]
+struct ChargerConfig {
+    /// Override the auto-selected public API header (a filename in the dir).
+    api_header: Option<String>,
+    /// Extra preprocessor / compile flags appended to the native build.
+    build_flags: Vec<String>,
+    /// Explicit native-link dependencies (names of already-prepared Charger
+    /// libraries, e.g. "zlib-1.3.1"). Generic: a corpus entry that builds on
+    /// top of another prepared artifact declares it here so the transitive
+    /// native objects are linked. System `<...>` includes are not auto-detected.
+    deps: Vec<String>,
+    /// Explicit per-library source exclude list (filenames, no directory). These
+    /// are leaf translation units that do not compile under a flattened single-
+    /// include build (optional modules that depend on feature macros / include
+    /// order the generic pipeline does not replicate). Corpus configuration — NOT
+    /// charger logic — so no library name is hardcoded in the binary.
+    exclude: Vec<String>,
+}
+
+/// Load `<dir>/charger.toml` if present. Missing file or parse error -> empty
+/// config (generic defaults remain in force). Errors are intentionally not
+/// fatal: build configuration is advisory, never required.
+fn load_charger_config(dir: &Path) -> ChargerConfig {
+    let p = dir.join("charger.toml");
+    let s = match std::fs::read_to_string(&p) {
+        Ok(s) => s,
+        Err(_) => return ChargerConfig::default(),
+    };
+    let val: toml::Value = match toml::from_str(&s) {
+        Ok(v) => v,
+        Err(_) => return ChargerConfig::default(),
+    };
+    let table = match val.get("charger").and_then(|t| t.as_table()) {
+        Some(t) => t,
+        None => return ChargerConfig::default(),
+    };
+    let api_header = table
+        .get("api_header")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let build_flags = table
+        .get("build_flags")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let deps = table
+        .get("deps")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let exclude = table
+        .get("exclude")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    ChargerConfig { api_header, build_flags, deps, exclude }
 }
 
 fn load_manifest(entry: &Path) -> Option<Manifest> {
