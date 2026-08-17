@@ -1,0 +1,50 @@
+// Iteration 8 — curl (C ecosystem) native execution proof.
+//
+// Proves from Lime, through the automatic Charger adapter + native artifact:
+//   * native library linking (libcurl.lib resolved by symbol),
+//   * a const string returned to Lime (curl_version),
+//   * an opaque handle returned from C and handed back (CURL*),
+//   * global init/cleanup (no callback indirection).
+//
+// No new Lime type categories, no library-specific code. The extern symbols
+// are matched by name against the prepared store manifest.
+
+// curl_version() -> const char* (library + feature string).
+extern fn curl_version() -> String "curl_version"
+
+// curl_global_init(long flags) -> int.
+extern fn curl_global_init(Int: flags) -> Int "curl_global_init"
+
+// curl_global_cleanup() -> void.
+extern fn curl_global_cleanup() -> Unit "curl_global_cleanup"
+
+// curl_easy_init() -> CURL* (opaque handle).
+extern fn curl_easy_init() -> Opaque(CURL) "curl_easy_init"
+
+// curl_easy_cleanup(CURL*) -> void.
+extern fn curl_easy_cleanup(Opaque(CURL): handle) -> Unit "curl_easy_cleanup"
+
+// curl_easy_strerror(int code) -> const char*.
+extern fn curl_easy_strerror(Int: code) -> String "curl_easy_strerror"
+
+fn main():
+    // 1) Library version string round-trips from C.
+    let v = curl_version()
+    print(v)
+    print("\n")
+
+    // 2) Global init (CURL_GLOBAL_DEFAULT == 3), then a handle round-trip.
+    let rc = curl_global_init(3)
+    print(rc)
+    print("\n")
+
+    let easy = curl_easy_init()
+    // Close the handle (the opaque CURL* created in C is released in C).
+    curl_easy_cleanup(easy)
+
+    // 3) A known error code stringifies (CURLE_OK == 0).
+    let msg = curl_easy_strerror(0)
+    print(msg)
+    print("\n")
+
+    curl_global_cleanup()

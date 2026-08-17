@@ -1,0 +1,6 @@
+# Phase 1 Iteration 8 corpus build configuration for zlib.
+# `api_header` names the PUBLIC API header for this multi-header source dir.
+# It is a build configuration (not semantic metadata, not library-specific
+# code): Charger would otherwise fall back to a generic root-header heuristic.
+[charger]
+api_header = "zlib.h"

@@ -1,0 +1,15 @@
+// Minimal: crc32(Int, String, Int) -> Int.
+extern fn crc32(Int: crc, String: buf, Int: len) -> Int "crc32"
+extern fn zlibVersion() -> String "zlibVersion"
+extern fn compressBound(Int: len) -> Int "compressBound"
+
+fn main():
+    let v = zlibVersion()
+    print(v)
+    print("\n")
+    let b = compressBound(1000)
+    print(b)
+    print("\n")
+    let c = crc32(0, "123456789", 9)
+    print(c)
+    print("\n")

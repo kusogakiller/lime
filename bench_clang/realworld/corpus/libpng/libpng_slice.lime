@@ -1,0 +1,19 @@
+// Iteration 8 — libpng (C ecosystem) native execution proof.
+//
+// Proves from Lime, through the automatic Charger adapter + native artifact:
+//   * native library linking (libpng-1.6.50.lib resolved by symbol),
+//   * transitive dependency linking (libpng pulls in zlib-1.3.1.lib — both are
+//     archived into the link and their symbols resolve),
+//   * a real libpng entry-point call returning a u32 ABI version number.
+//
+// `png_access_version_number()` returns (major*10000 + minor*100 + release);
+// for libpng 1.6.50 that is 10650. The linker matches the symbol and the
+// 32-bit value in RAX is read as i64. No new Lime type categories.
+
+extern fn png_access_version_number() -> Int "png_access_version_number"
+
+fn main():
+    // ABI version number: 10650 for libpng 1.6.50.
+    let ver = png_access_version_number()
+    print(ver)
+    print("\n")

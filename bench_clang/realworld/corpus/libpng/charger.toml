@@ -1,0 +1,8 @@
+[charger]
+# libpng public API header (relative to this corpus root).
+# png.h requires pnglibconf.h (prebuilt copy shipped in the source tree) and
+# zlib (declared as a dependency so its header dir is added to the include
+# path). Charger extracts only the public ABI surface.
+api_header = "src/libpng-1.6.50/png.h"
+build_flags = []
+deps = ["zlib-1.3.1"]

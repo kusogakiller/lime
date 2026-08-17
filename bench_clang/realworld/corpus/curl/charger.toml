@@ -1,0 +1,16 @@
+[charger]
+# curl public API header. curl.h is the umbrella header for libcurl's easy,
+# URL, and version APIs; the recursive source collector handles lib/*.c and
+# the main() filter drops the curl/clib examples automatically.
+api_header = "include/curl/curl.h"
+# Standard libcurl library build macro. Without it, curl's internal dynbuf.h
+# redefines Curl_dyn_addn with the wrong arity for the call sites in lib/*.c.
+# Corpus build configuration (not charger logic) — the way you would build
+# libcurl itself.
+build_flags = ["-DBUILDING_LIBCURL"]
+deps = []
+# Optional feature modules that do not compile under a flattened single-include
+# build on this toolchain / target (missing platform SDK types or feature
+# macros). Corpus config, not charger logic — the core easy/url/version API is
+# unaffected.
+exclude = ["ldap.c"]

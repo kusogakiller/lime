@@ -1,0 +1,45 @@
+// Iteration 8 — zlib (C ecosystem) native execution proof.
+//
+// Proves from Lime, through the automatic Charger adapter + native artifact:
+//   * native library linking (zlib-1.3.1.lib resolved by symbol),
+//   * a string literal passed as a `char*`/`Bytef*` buffer (crc32),
+//   * an opaque-length return surfaced as Int (crc32 result),
+//   * a const string returned to Lime (zlibVersion),
+//   * a known CRC32 test vector (crc32("123456789") == 0xCBF43926).
+//
+// No new Lime type categories, no library-specific code. The extern symbols
+// are matched by name against the prepared store manifest.
+
+// zlibVersion() -> const char* (the library version string).
+extern fn zlibVersion() -> String "zlibVersion"
+
+// crc32(unsigned long crc, const Bytef* buf, uInt len) -> unsigned long.
+// `Bytef*` is `char*`, so a Lime String maps directly; lengths are Int (i64).
+extern fn crc32(Int: crc, String: buf, Int: len) -> Int "crc32"
+
+// adler32(unsigned long adler, const Bytef* buf, uInt len) -> unsigned long.
+extern fn adler32(Int: adler, String: buf, Int: len) -> Int "adler32"
+
+// compressBound(unsigned long len) -> unsigned long.
+extern fn compressBound(Int: len) -> Int "compressBound"
+
+fn main():
+    // 1) Library version string round-trips from C.
+    let v = zlibVersion()
+    print(v)
+    print("\n")
+
+    // 2) Known CRC32 test vector: crc32("123456789") == 0xCBF43926 == 3421789422.
+    let c = crc32(0, "123456789", 9)
+    print(c)
+    print("\n")
+
+    // 3) Adler32 of "123456789": reference value 0x0BCBFA30 == 197704050.
+    let a = adler32(1, "123456789", 9)
+    print(a)
+    print("\n")
+
+    // 4) compressBound reports the worst-case compressed size for 1000 bytes.
+    let b = compressBound(1000)
+    print(b)
+    print("\n")

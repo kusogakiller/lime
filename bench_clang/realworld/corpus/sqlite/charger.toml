@@ -1,0 +1,7 @@
+[charger]
+# SQLite amalgamation public API header. sqlite3.h declares the whole public ABI.
+api_header = "sqlite3.h"
+# The amalgamation (sqlite3.c) is a single translation unit; the recursive source
+# collector and main()-filter handle shell.c automatically.
+build_flags = ["-DSQLITE_ENABLE_UNLOCK_NOTIFY", "-DSQLITE_ENABLE_SNAPSHOT", "-DSQLITE_ENABLE_RTREE"]
+deps = []

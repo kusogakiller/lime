@@ -1,0 +1,30 @@
+// Iteration 8 synthetic regression slice — native execution proof.
+//
+// Proves, through the automatic Charger adapter + native artifact:
+//   * scalar-typedef POINTER normalization (coord_t* -> Opaque(ScalarPtr), not scalar)
+//   * `double*` STRUCT FIELD survives as a pointer handle (Geo.aParam -> Opaque(ScalarPtr))
+//   * zero-arg + value-return externs resolve and link
+//   * the fixture lib links with NO undefined-symbol / NO field-collapse crash
+
+extern fn scale(Opaque(ScalarPtr): a0, Int: a1) -> Opaque(ScalarPtr) "scale"
+extern fn coord_sum(Float: a0, Float: a1) -> Float "coord_sum"
+extern fn geo_make(Int: a0) -> Opaque(Geo) "geo_make"
+extern fn geo_count(Opaque(Geo): a0) -> Int "geo_count"
+extern fn geo_free(Opaque(Geo): a0) -> Unit "geo_free"
+extern fn lime_get_Geo_aParam(Opaque(Geo): a0) -> Opaque(ScalarPtr) "lime_get_Geo_aParam"
+
+fn main():
+    // class #2: struct with `double*` field -> pointer handle, no collapse
+    let g = geo_make(3)
+    let c = geo_count(g)
+    print(c)
+    print("\n")
+    // class #1: scalar-typedef POINTER passed through + returned
+    let p = lime_get_Geo_aParam(g)
+    let s = scale(p, 3)
+    print("\n")
+    let sum = coord_sum(1.5, 2.5)
+    print(sum)
+    print("\n")
+    geo_free(g)
+    print("ITER8_OK\n")

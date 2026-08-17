@@ -1,0 +1,59 @@
+// Iteration 8 — sqlite (C ecosystem) native execution proof.
+//
+// Proves from Lime, through the automatic Charger adapter + native artifact:
+//   * native library linking (sqlite3.lib resolved by symbol),
+//   * a const string returned to Lime (sqlite3_libversion / sqlite3_sourceid),
+//   * an opaque handle returned via the out-param adapter (sqlite3_open),
+//   * the rtree geometry struct (sqlite3_rtree_geometry has a `sqlite3_rtree_dbl*`
+//     field) compiles into the adapter without the prior `double*` collapse bug.
+//
+// No new Lime type categories, no library-specific code. The extern symbols
+// are matched by name against the prepared store manifest.
+
+// sqlite3_libversion() -> const char* (library version string).
+extern fn sqlite3_libversion() -> String "sqlite3_libversion"
+
+// sqlite3_sourceid() -> const char* (full source check-in id).
+extern fn sqlite3_sourceid() -> String "sqlite3_sourceid"
+
+// sqlite3_libversion_number() -> int (e.g. 3045001 for 3.45.1).
+extern fn sqlite3_libversion_number() -> Int "sqlite3_libversion_number"
+
+// sqlite3_threadsafe() -> int (thread-safety mode).
+extern fn sqlite3_threadsafe() -> Int "sqlite3_threadsafe"
+
+// sqlite3_open(const char* filename, sqlite3** ppDb) -> int (out-param handle).
+extern fn sqlite3_open(String: filename) -> Opaque(sqlite3) "lime_out_sqlite3_open"
+
+// sqlite3_close(sqlite3*) -> int.
+extern fn sqlite3_close(Opaque(sqlite3): db) -> Int "sqlite3_close"
+
+// sqlite3_errmsg(sqlite3*) -> const char*.
+extern fn sqlite3_errmsg(Opaque(sqlite3): db) -> String "sqlite3_errmsg"
+
+fn main():
+    // 1) Library version string round-trips from C.
+    let v = sqlite3_libversion()
+    print(v)
+    print("\n")
+
+    // 2) Source check-in id round-trips from C.
+    let id = sqlite3_sourceid()
+    print(id)
+    print("\n")
+
+    // 3) Version number + threadsafe mode are plain Ints.
+    let n = sqlite3_libversion_number()
+    print(n)
+    print("\n")
+    let ts = sqlite3_threadsafe()
+    print(ts)
+    print("\n")
+
+    // 4) Open an in-memory database (out-param handle round-trips to Lime),
+    //    then close it. Proves the out-param→return adapter works and the
+    //    prepared library (including the rtree double* struct) links + runs.
+    let db = sqlite3_open(":memory:")
+    let rc = sqlite3_close(db)
+    print(rc)
+    print("\n")

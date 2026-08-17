@@ -1,0 +1,7 @@
+[charger]
+# Iteration 8 cross-library dependency regression fixture.
+# Must resolve libiter8's header dir via deps + find_artifact_entry
+# (version-suffix fallback: store entry is "libiter8", declared dep "libiter8").
+api_header = "iter8b.h"
+build_flags = []
+deps = ["libiter8"]
