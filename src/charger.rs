@@ -703,8 +703,12 @@ fn type_from_json(t: &serde_json::Value) -> CType {
 }
 
 fn parse_c_type(qual: &str) -> CType {
+    // Bare `const` / `const*` spellings (clang sometimes emits these for a
+    // const-qualified pointer with no usable pointee name) — treat as `void *`.
+    if qual.trim() == "const" || qual.trim() == "const*" || qual.trim() == "const *" {
+        return CType::Opaque("void".to_string());
+    }
     let q = qual.trim();
-    // Strip leading `const ` qualifiers (e.g. `const Padded *` -> `Padded *`).
     // `const`-ness is an ABI-irrelevant qualifier for our purposes; the pointee
     // type name is what Lime surfaces (as `Opaque(Name)` / `Struct(Name)`).
     let q = q.trim_start_matches("const ").trim();
@@ -725,6 +729,12 @@ fn parse_c_type(qual: &str) -> CType {
     // normalize pointers
     if let Some(inner) = q.strip_suffix('*') {
         let inner = inner.trim();
+        // `const *` / `*` with no pointee spelling (clang sometimes emits a
+        // bare `const *` for `const void *`) — treat as `void *` rather than an
+        // empty-named opaque that would render as malformed `const* aN` C text.
+        if inner.is_empty() {
+            return CType::Opaque("void".to_string());
+        }
         // function pointer: "int (*)(int, int)" => skip detailed parse
         if inner.contains("(*") {
             return CType::Pointer(Box::new(CType::Other(q.to_string())));
@@ -814,6 +824,18 @@ fn parse_c_type(qual: &str) -> CType {
         | "uintmax_t" | "intmax_t" | "wchar_t" | "sig_atomic_t" => {
             CType::WidthTypedef(q.to_string())
         }
+        // clang's internal typedef spellings leak `__size_t` / `__intN` into the
+        // AST `qualType`. These are the canonical C types under different names;
+        // normalize them so they get correct scalar ABI (not `CType::Other`,
+        // which would wrongly trigger struct-by-value adapter generation and
+        // produce invalid `__size_t` C text). Generic — any header including
+        // <stddef.h> / <stdint.h> can surface these spellings.
+        "__size_t" => CType::WidthTypedef("size_t".to_string()),
+        "__int64" | "unsigned __int64" => CType::Long,
+        "__int32" | "unsigned __int32" => CType::Int,
+        "__int16" | "unsigned __int16" => CType::Int,
+        "__int8" | "unsigned __int8" | "__int128" | "unsigned __int128" => CType::Other(q.to_string()),
+        "__builtin_va_list" => CType::Opaque("va_list".to_string()),
         "int" | "unsigned int" | "short" | "unsigned short"
         | "int32_t" | "uint32_t" => CType::Int,
         "long" | "unsigned long" | "long long" | "unsigned long long"
@@ -831,6 +853,14 @@ fn parse_c_type(qual: &str) -> CType {
         s if s.starts_with("enum ") => CType::Int, // enums are ABI-compatible with int
         s if s.starts_with("typedef ") => CType::Opaque(s["typedef ".len()..].to_string()),
         s => {
+            // C standard-library opaque handles (`FILE`, `DIR`, `jmp_buf`, ...)
+            // are ALWAYS used by pointer in the C ABI even though clang's
+            // canonical spelling drops the `*`. Surface them as `Opaque(name)`
+            // so the adapter renders `name *` (correct pointer ABI) instead of a
+            // by-value `name` that fails to compile / mismatches the call.
+            if is_stdlib_opaque(s) {
+                return CType::Opaque(s.to_string());
+            }
             // Resolve a typedef name against the AST-extracted scalar typedef
             // table (generic; driven by the header, no library names). A scalar
             // typedef (`uLong`, `Bytef`, `png_uint_32`, ...) collapses to its
@@ -2166,7 +2196,7 @@ fn gen_adapter_c_source(
         }
         let args: Vec<String> = (0..f.params.len()).map(|i| format!("a{}", i)).collect();
         s.push_str(&format!(
-            "extern \"C\" void* {}({}) {{ {}* p = ({}*)malloc(sizeof({})); *p = {}({}); return (void*)p; }}\n",
+            "void* {}({}) {{ {}* p = ({}*)malloc(sizeof({})); *p = {}({}); return (void*)p; }}\n",
             shim,
             params.join(", "),
             ret_name,
@@ -2581,7 +2611,20 @@ fn gen_adapter_c_source(
     // Drop the published record names so a later adapter pass for a different
     // library does not inherit this library's struct set.
     KNOWN_RECORDS.with(|r| *r.borrow_mut() = None);
-    s
+    // De-duplicate generated shim lines. Charger may emit the same adapter
+    // symbol twice (e.g. a variadic function that also matches a struct-by-value
+    // path, or a symbol surfaced from two transitively-included headers).
+    // Identical lines are true duplicates and would be a C redefinition error;
+    // keep the first occurrence. Generic — no library-specific logic.
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut deduped = String::new();
+    for line in s.lines() {
+        if seen.insert(line) {
+            deduped.push_str(line);
+            deduped.push('\n');
+        }
+    }
+    deduped
 }
 
 /// Emit, for every variadic `CFunction`, a family of fixed-arity C adapter
@@ -3278,6 +3321,7 @@ pub struct Primitives {
 /// arm64-apple-darwin — but only targets actually verified by the toolchain
 /// probe are marked verified = true.
 #[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone)]
+#[serde(default)]
 pub struct AbiMeta {
     pub triple: String,
     pub arch: String,
@@ -3808,7 +3852,8 @@ pub struct ManifestGlobal {
     pub ty: String, // ctype_tag
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone)]
+#[serde(default)]
 pub struct Manifest {
     pub library: String,
     pub version: String,
