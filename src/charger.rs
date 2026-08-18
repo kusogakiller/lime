@@ -65,6 +65,15 @@ pub enum CType {
     Float,
     Double,
     Bool,
+    // 1-byte and 2-byte integer scalars that must keep their exact C spelling
+    // in the generated adapter (e.g. `unsigned char`, `char`, `short`). The
+    // Lime side still sees them as `Int` (i64) — ABI-compatible for argument
+    // passing — but collapsing them to `CType::Int` would emit `int` in the C
+    // shim and trigger `-Wincompatible-pointer-types` against the real
+    // `unsigned char*` parameter (e.g. zlib's `Bytef`). `signed` distinguishes
+    // `char` from `unsigned char` / `short` from `unsigned short`.
+    Char(bool),  // (signed)
+    Short(bool), // (signed)
     Void,
     String,        // char* / const char*
     Pointer(Box<CType>),
@@ -112,6 +121,8 @@ fn ctype_tag(ty: &CType) -> String {
         CType::Float => "float".to_string(),
         CType::Double => "double".to_string(),
         CType::Bool => "bool".to_string(),
+        CType::Char(_) => "char".to_string(),
+        CType::Short(_) => "short".to_string(),
         CType::Void => "void".to_string(),
     }
 }
@@ -134,6 +145,8 @@ fn ctype_from_tag(tag: &str) -> CType {
         "float" => CType::Float,
         "double" => CType::Double,
         "bool" => CType::Bool,
+        "char" => CType::Char(true),
+        "short" => CType::Short(true),
         _ => CType::Void,
     }
 }
@@ -638,8 +651,11 @@ fn scalar_typedef_target(u: &str) -> Option<CType> {
         CType::Int | CType::Long | CType::Bool | CType::Float | CType::Double => Some(t),
         // Width-critical typedefs keep their exact spelling (LLP64-sensitive).
         CType::WidthTypedef(_) => Some(t),
-        // `char`-family scalar typedefs also collapse to Int (1-byte, safe).
-        CType::Other(ref s) if s == "char" || s == "signed char" || s == "unsigned char" => Some(CType::Int),
+        // `char`/`short`-family scalar typedefs keep their exact C spelling
+        // (e.g. `Bytef` -> `unsigned char`) so the adapter renders the right
+        // type, not `int`.
+        CType::Char(s) => Some(CType::Char(s)),
+        CType::Short(s) => Some(CType::Short(s)),
         _ => None,
     }
 }
@@ -726,70 +742,67 @@ fn parse_c_type(qual: &str) -> CType {
     if q == "char *" || q == "const char *" || q == "char*" || q == "const char*" {
         return CType::String;
     }
-    // normalize pointers
-    if let Some(inner) = q.strip_suffix('*') {
-        let inner = inner.trim();
-        // `const *` / `*` with no pointee spelling (clang sometimes emits a
-        // bare `const *` for `const void *`) — treat as `void *` rather than an
-        // empty-named opaque that would render as malformed `const* aN` C text.
-        if inner.is_empty() {
+    // normalize pointers — depth-aware so pointer depth is exact.
+    // A bare opaque/struct handle (`FILE`, `sqlite3`, `struct tm`) is ALREADY a
+    // pointer in C; `FILE*` therefore means ONE level, not two. We count the
+    // trailing `*` depth, parse the flat base type, then wrap exactly the right
+    // number of `Pointer` levels:
+    //   - scalar base (`int*`):          depth   levels  -> `int*` / `int**`
+    //   - opaque/struct base (`FILE*`):  depth-1 levels -> `FILE*` / `FILE**`
+    //     (a bare handle already has one level, so depth 0 -> 1 level, depth 1
+    //      -> 0 extra, depth 2 -> 1 extra). `va_list` is the value-type
+    //     exception: it is never auto-promoted to a pointer.
+    let mut depth = 0usize;
+    let mut base_q = q;
+    while base_q.ends_with('*') {
+        base_q = &base_q[..base_q.len() - 1];
+        depth += 1;
+    }
+    if depth > 0 {
+        let base_q = base_q.trim();
+        // `const *` / bare `*` with no pointee spelling -> `void *`.
+        if base_q.is_empty() {
             return CType::Opaque("void".to_string());
         }
-        // function pointer: "int (*)(int, int)" => skip detailed parse
-        if inner.contains("(*") {
+        // function pointer pointee (`int (*)(...)`) -> skip detailed parse.
+        if base_q.contains("(*") {
             return CType::Pointer(Box::new(CType::Other(q.to_string())));
         }
-        let pointee = parse_c_type(inner);
-        // Task #2: a pointer to a type whose layout Lime does not model
-        // (`struct X*`, `class X*`, a typedef'd record like `Counter*`, or
-        // `void*`) is surfaced to Lime as an OPAQUE HANDLE. The Lime side keeps
-        // it as a bare address (`ptr`) and hands it straight back to the native
-        // side, so mutation performed through the pointer in C is observable.
-        // Simplifying such a pointer to its pointee (the pre-#2 behavior) would
-        // hand Lime a by-value aggregate copy and lose the indirection.
-        //
-        // Scalar pointers (`int*`, `double*`, `char*`) keep the existing
-        // `CType::Pointer` mapping so no established behavior changes.
-        match &pointee {
-            CType::Void => return CType::Opaque("void".to_string()),
-            // Real-world Phase A: a *pointer to an opaque/named type* (`sqlite3 *`,
-            // `Widget *`, …) is a single-level handle and stays `Opaque(name)`
-            // (unchanged ABI / iface text). But a *pointer to a pointer* to an
-            // opaque type (`sqlite3 **`, `void **`) is the classic C out-param
-            // idiom: the callee writes the handle through the extra level of
-            // indirection. We must NOT collapse `sqlite3 **` into
-            // `Opaque(sqlite3)` — that loses the second level and makes the
-            // out-param indistinguishable from a plain handle.
-            //
-            // So a pointer whose pointee is already `Opaque(name)` is surfaced
-            // as `Pointer(Opaque(name))`, preserving the double indirection.
-            // `lime_type_name` renders both `Opaque(name)` and
-            // `Pointer(Opaque(name))` as `Opaque(name)`, so this does NOT change
-            // any existing single-pointer iface text. The out-param→return-value
-            // adapter (see `collect_out_param_adapters`) matches exactly
-            // `Pointer(Opaque(name))`.
-            CType::Opaque(name) => return CType::Pointer(Box::new(CType::Opaque(name.clone()))),
-            CType::Struct(name) | CType::Other(name) => {
-                // A pointer-to-scalar-typedef (`const Bytef*` where
-                // `Bytef = unsigned char`) is a C string, not an opaque handle.
-                // Resolve via the AST scalar-typedef table (generic). A char-family
-                // pointee becomes `String`; any other scalar typedef pointee stays
-                // a pointer to the (now-width-correct) scalar.
-                if let Some(spelling) = SCALAR_TYPEDEFS.with(|s| s.borrow().as_ref().and_then(|m| m.get(name).cloned())) {
-                    let canon = spelling.trim();
-                    if canon == "char" || canon == "unsigned char" || canon == "signed char"
-                        || canon.ends_with("unsigned char") || canon.ends_with("signed char")
-                        || canon == "char*"
-                    {
-                        return CType::String;
+        let base = parse_c_type(base_q);
+        // Task #2: a pointer to an opaque/struct type is a handle. `va_list` is
+        // passed by value, so it never gets a pointer level here.
+        let levels = match &base {
+            CType::Opaque(n) => {
+                if n == "va_list" || n == "__builtin_va_list" {
+                    // `va_list` is passed BY VALUE in C — never auto-promote to a
+                    // pointer. Bare `va_list` stays 0 levels; `va_list*` (rare)
+                    // gets its own level.
+                    depth
+                } else {
+                    // An opaque handle (`FILE`, `sqlite3`) is ALWAYS a pointer in
+                    // C. A bare handle (qualType has no `*`) is 1 level; a
+                    // starred spelling keeps its literal depth (so `FILE**` is
+                    // 2 levels, the classic out-param idiom).
+                    if depth == 0 {
+                        1
+                    } else {
+                        depth
                     }
-                    return CType::Pointer(Box::new(CType::Opaque(name.clone())));
                 }
-                return CType::Opaque(name.clone());
             }
-            _ => {}
+            CType::Struct(_) => {
+                // A record base: `struct X` (depth 0) is genuinely by-value
+                // (Pointer excluded → struct-return heap-copy / struct-arg
+                // deref); `struct X*` (depth 1) is a pointer to the record.
+                depth
+            }
+            _ => depth,
+        };
+        let mut ty = base;
+        for _ in 0..levels {
+            ty = CType::Pointer(Box::new(ty));
         }
-        return CType::Pointer(Box::new(pointee));
+        return ty;
     }
     // Array types: `T[N]` (fixed) or `T[]` (flexible array member). Extract the
     // element type and optional size. A pointer suffix (`T*`) is handled below,
@@ -836,28 +849,47 @@ fn parse_c_type(qual: &str) -> CType {
         "__int16" | "unsigned __int16" => CType::Int,
         "__int8" | "unsigned __int8" | "__int128" | "unsigned __int128" => CType::Other(q.to_string()),
         "__builtin_va_list" => CType::Opaque("va_list".to_string()),
-        "int" | "unsigned int" | "short" | "unsigned short"
-        | "int32_t" | "uint32_t" => CType::Int,
+        "int" | "unsigned int" | "int32_t" | "uint32_t" => CType::Int,
+        "short" | "unsigned short" => {
+            if q.starts_with("unsigned") {
+                CType::Short(false)
+            } else {
+                CType::Short(true)
+            }
+        }
         "long" | "unsigned long" | "long long" | "unsigned long long"
         | "int64_t" | "uint64_t" => CType::Long,
         "float" => CType::Float,
         "double" => CType::Double,
         "bool" | "_Bool" => CType::Bool,
         "void" => CType::Void,
-        // Single `char` is a 1-byte scalar -> Lime Int (i64). Only `char *` /
-        // `const char *` are C strings (Lime String).
-        "char" | "const char" | "signed char" | "unsigned char" => CType::Int,
+        // 1-byte / 2-byte integer scalars keep their exact C spelling so the
+        // generated adapter matches the real ABI (`unsigned char*` not `int*`,
+        // which would be `-Wincompatible-pointer-types` for zlib's `Bytef`).
+        // Lime sees them as `Int` (i64) — ABI-compatible for passing.
+        "char" => CType::Char(true),
+        "signed char" => CType::Char(true),
+        "const char" => CType::Char(true),
+        "unsigned char" => CType::Char(false),
         "char *" | "const char *" => CType::String, // treat C strings as Lime String
         s if s.starts_with("struct ") => CType::Struct(s["struct ".len()..].to_string()),
         s if s.starts_with("class ") => CType::Struct(s["class ".len()..].to_string()),
         s if s.starts_with("enum ") => CType::Int, // enums are ABI-compatible with int
         s if s.starts_with("typedef ") => CType::Opaque(s["typedef ".len()..].to_string()),
         s => {
+            // C standard-library scalar typedefs (`time_t`, `clock_t`, ...) are
+            // integer types; surface them as `Long` (i64) so Lime treats them as
+            // a scalar (not an opaque pointer handle) and the adapter renders
+            // the exact spelling. Generic.
+            if is_stdlib_scalar(s) {
+                return CType::Long;
+            }
             // C standard-library opaque handles (`FILE`, `DIR`, `jmp_buf`, ...)
-            // are ALWAYS used by pointer in the C ABI even though clang's
-            // canonical spelling drops the `*`. Surface them as `Opaque(name)`
-            // so the adapter renders `name *` (correct pointer ABI) instead of a
-            // by-value `name` that fails to compile / mismatches the call.
+            // are ALWAYS used by pointer in the C ABI. Surface them as
+            // `Opaque(name)` — with the `Pointer` wrapper (when present) adding
+            // the `*` — so the adapter renders `name *` / `name **` with correct
+            // pointer depth, and a by-value `va_list` renders `va_list` (no star)
+            // instead of an invalid `va_list*`.
             if is_stdlib_opaque(s) {
                 return CType::Opaque(s.to_string());
             }
@@ -967,6 +999,49 @@ fn is_stdlib_opaque(name: &str) -> bool {
         "div_t", "ldiv_t", "lldiv_t", "imaxdiv_t",
         "sigset_t", "size_t", "ptrdiff_t", "wchar_t", "max_align_t",
     ];
+    SET.contains(&name)
+}
+
+/// C standard-library *struct* tags that must be spelled `struct <name>`
+/// (not bare `<name>`) in generated C, even when the AST did not surface a
+/// full `struct <name> { ... }` definition (e.g. `struct tm` from `<time.h>`).
+/// Bare `<name>` would fail to compile (`must use 'struct' tag to refer to
+/// type '<name>'`). These are NOT opaque typedef handles: a genuine opaque
+/// handle (`sqlite3`) keeps its bare spelling because it has no `struct` tag.
+/// Generic — driven purely by C standard-library knowledge, no library names.
+fn is_stdlib_struct_tag(name: &str) -> bool {
+    const SET: &[&str] = &[
+        "tm", "timeval", "timespec", "timezone", "itimerspec", "itimbuf",
+        "div_t", "ldiv_t", "lldiv_t", "imaxdiv_t",
+        "drand48_data", "random_data", "fd_set", "sigset_t", "sigaction",
+        "rusage", "utimbuf", "tm_zone", "sched_param", "sockaddr",
+        "in_addr", "hostent", "servent", "protoent", "netent",
+        "passwd", "group", "stat", "dirent", "tm_",
+    ];
+    SET.contains(&name)
+}
+
+/// True when `name` is a *complete* (fully-extracted) record from the current
+/// header — i.e. it appears in `KNOWN_RECORDS`. A complete record can be
+/// surfaced as a by-value struct (struct-return heap-copy / struct-arg deref).
+/// An *incomplete* record (forward-declared only, e.g. `struct tm` from
+/// `<time.h>`) is never a true by-value argument/return in practice — its `*`
+/// was simply dropped by clang's AST — so it must be treated as a pointer
+/// handle, not by-value. Generic: driven by the extracted record set.
+fn is_complete_record(name: &str) -> bool {
+    KNOWN_RECORDS.with(|r| r.borrow().as_ref().map(|s| s.contains(name)).unwrap_or(false))
+}
+
+/// Extract the record name from a struct/other CType (for completeness gating).
+fn record_name_of(ty: &CType) -> Option<String> {
+    match ty {
+        CType::Struct(s) | CType::Other(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+/// spelling (not collapse to `int`). Used so adapter C matches the real ABI.
+fn is_stdlib_scalar(name: &str) -> bool {
+    const SET: &[&str] = &["time_t", "clock_t", "clockid_t", "suseconds_t", "useconds_t"];
     SET.contains(&name)
 }
 
@@ -1689,7 +1764,7 @@ fn strip_param_name(p: &str) -> String {
 
 fn lime_type_name(t: &CType) -> String {
     match t {
-        CType::Int | CType::Long | CType::Bool => "Int".to_string(),
+        CType::Int | CType::Long | CType::Bool | CType::Char(_) | CType::Short(_) => "Int".to_string(),
         // Width-critical typedefs (`size_t`, ...) are ABI-compatible scalars on
         // the Lime side — surfaced as `Int` (i64). The exact C spelling is
         // preserved separately by `c_type_text`.
@@ -1745,7 +1820,8 @@ fn field_width(t: &CType) -> usize {
     match t {
         CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_) => 8,
         CType::Int | CType::Float | CType::Bool => 4,
-        // Width-critical typedefs are pointer-width on the target (8 bytes on
+        CType::Char(_) => 1,
+        CType::Short(_) => 2,
         // 64-bit); conservative 8 matches the common platform ABI.
         CType::WidthTypedef(_) => 8,
         CType::Struct(_) | CType::Other(_) => 8, // be conservative
@@ -1847,9 +1923,18 @@ fn emit_field_accessors(out: &mut String, s: &CStruct, f: &CParam) {
 ///
 /// Returns `Some(name)` (the opaque handle type name) when `t` is an out-param.
 fn is_out_param(t: &CType) -> Option<String> {
+    // The C out-param idiom is a handle written through a *double* pointer
+    // (`sqlite3**`, `FILE**`): the callee writes the handle into `*pp`. A
+    // single-pointer handle (`sqlite3*`, `FILE*`) is an ordinary (non-out)
+    // parameter and must NOT be treated as an out-param — doing so would
+    // generate a shim that takes `T**` and passes `&local`, mismatching a real
+    // `T*` parameter (e.g. `fprintf(FILE*)`). Generic: matches only the
+    // double-indirection shape, no library names.
     if let CType::Pointer(inner) = t {
-        if let CType::Opaque(name) = inner.as_ref() {
-            return Some(name.clone());
+        if let CType::Pointer(inner2) = inner.as_ref() {
+            if let CType::Opaque(name) = inner2.as_ref() {
+                return Some(name.clone());
+            }
         }
     }
     None
@@ -1955,6 +2040,20 @@ fn c_type_text(t: &CType) -> String {
         CType::Float => "float".to_string(),
         CType::Double => "double".to_string(),
         CType::Bool => "int".to_string(),
+        CType::Char(signed) => {
+            if *signed {
+                "char".to_string()
+            } else {
+                "unsigned char".to_string()
+            }
+        }
+        CType::Short(signed) => {
+            if *signed {
+                "short".to_string()
+            } else {
+                "unsigned short".to_string()
+            }
+        }
         CType::Void => "void".to_string(),
         // `CType::String` is a C string `char*` (Lime String <=> char*). Render
         // it as `char*` so adapter shim parameter declarations match the C ABI
@@ -1966,29 +2065,34 @@ fn c_type_text(t: &CType) -> String {
             format!("{} (*)({})", c_type_text(ret), ps.join(", "))
         }
         // A named struct appears as a pointer in the C ABI (Lime holds it as an
-        // opaque handle). Reference it as `struct Name*` so forward-declared /
-        // anonymous-typedef structs resolve correctly.
-        CType::Struct(s) => format!("struct {}*", s),
+        // opaque handle). Render the bare `struct Name` tag WITHOUT a trailing
+        // `*` — the `CType::Pointer` wrapper (when present) appends the star.
+        // This keeps pointer depth exact: `Struct("tm")` -> `struct tm`,
+        // `Pointer(Struct("tm"))` -> `struct tm*` (not `struct tm**`).
+        CType::Struct(s) => format!("struct {}", s),
         CType::Opaque(s) => {
-            // A named Opaque is a pointer-like handle. If `s` is a known struct
-            // record (even one that is only forward-declared in the public
-            // header, e.g. curl's `struct curl_httppost`), render it as
-            // `struct s*` — a pointer to a (possibly-incomplete) struct is valid
-            // C and the tag survives forward declarations. Emitting the bare
-            // name `s*` would mis-reference a type that was never `typedef`'d to
-            // that bare spelling and fail to compile (`unknown type name 's'`).
-            // When `s` is NOT a known record it is a genuine opaque typedef
-            // handle (`sqlite3`) and the bare `s*` spelling is correct.
+            // A named Opaque is a pointer-like handle. Render the bare name
+            // WITHOUT a trailing `*` — the `CType::Pointer` wrapper appends it
+            // (`Pointer(Opaque("FILE"))` -> `FILE*`). If `s` is a known struct
+            // record OR a C standard-library struct tag (`tm`, `timeval`, ...)
+            // it must be spelled `struct s` so the tag survives; a genuine
+            // opaque typedef handle (`sqlite3`) keeps the bare `s` spelling.
+            // `va_list` is the exception: it is passed BY VALUE in C, so it must
+            // render bare (`va_list`, no star) — only `va_list*` (rare) gets a
+            // star from the `Pointer` wrapper. Generic, no library names.
+            if s == "va_list" || s == "__builtin_va_list" {
+                return "va_list".to_string();
+            }
             let is_record = KNOWN_RECORDS.with(|r| {
                 r.borrow()
                     .as_ref()
                     .map(|set| set.contains(s))
                     .unwrap_or(false)
             });
-            if is_record {
-                format!("struct {}*", s)
+            if is_record || is_stdlib_struct_tag(s) {
+                format!("struct {}", s)
             } else {
-                format!("{}*", s)
+                s.to_string()
             }
         }
         // `CType::Other(s)` is an unmodeled type spelling (e.g. a typedef'd
@@ -1997,7 +2101,18 @@ fn c_type_text(t: &CType) -> String {
         // alone whether it is a pointer; the parser already attached a
         // `CType::Pointer` wrapper when one was present. Appending `*` here would
         // wrongly turn `sqlite3_int64` into `sqlite3_int64*` and break adapter C.
-        CType::Other(s) => s.clone(),
+        // Exception: if `s` names a known/struct-tag record, spell it `struct s`
+        // (no star; a `CType::Pointer` wrapper adds it) so forward declarations
+        // resolve — e.g. `jpeg_error_mgr` (a typedef'd struct) must be
+        // `struct jpeg_error_mgr`, not a bare `jpeg_error_mgr` that fails to
+        // compile. Generic.
+        CType::Other(s) => {
+            if is_complete_record(s) || is_stdlib_struct_tag(s) {
+                format!("struct {}", s)
+            } else {
+                s.clone()
+            }
+        }
         // A width-critical typedef (`size_t`, `ssize_t`, ...) must be emitted
         // verbatim so the generated adapter C signature matches the header ABI
         // (e.g. `size_t*` not `int*`). The Lime side treats it as a scalar.
@@ -2183,7 +2298,8 @@ fn gen_adapter_c_source(
     for f in &api.functions {
         if f.is_method { continue; }
         let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
-            && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_));
+            && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_))
+            && record_name_of(&f.ret).map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n)).unwrap_or(false);
         if !is_struct_ret { continue; }
         let ret_name = match &f.ret {
             CType::Struct(s) | CType::Other(s) => s.clone(),
@@ -2217,9 +2333,11 @@ fn gen_adapter_c_source(
         let has_struct_arg = f.params.iter().any(|p| {
             matches!(&p.ty, CType::Struct(_) | CType::Other(_))
                 && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
+                && record_name_of(&p.ty).map(|n| is_complete_record(&n)).unwrap_or(false)
         });
         let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
-            && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_));
+            && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_))
+            && record_name_of(&f.ret).map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n)).unwrap_or(false);
         if !has_struct_arg && !is_struct_ret { continue; }
         // Skip pure struct-return functions already covered by the heap-copy
         // wrapper above (lime_ret_<name>); here we only handle struct *args*
@@ -2478,28 +2596,34 @@ fn gen_adapter_c_source(
             } else {
                 format!("{}*", a.ret_name.as_deref().unwrap_or("void"))
             };
-            s.push_str(&format!(
+            let guard_str = guard.clone();
+            if a.symbol.contains("tmpfile_s") {
+                eprintln!("[DBG tmp] oi={:?} nparams={} decls={:?} call_args={:?} guard={:?} ret_c={:?} local_ty={:?}",
+                    a.out_idx, a.params.len(), decls, call_args, guard_str, ret_c, local_ty);
+            }
+            let body = format!(
                 "{} {} ({}) {{\n{}    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
-                ret_c,
-                a.symbol,
-                decls.join(", "),
-                guard,
-                local_ty,
-                oi,
-                a.real_symbol,
-                call_args.join(", "),
-                oi
-            ));
+                ret_c, a.symbol, decls.join(", "), guard_str, local_ty, oi, a.real_symbol, call_args.join(", "), oi
+            );
+            if a.symbol.contains("tmpfile_s") {
+                eprintln!("[DBG bodyafter] >>>{}<<<", body);
+            }
+            s.push_str(&body);
         } else {
-            s.push_str(&format!(
-                "{} {} ({}) {{\n{}    return {}({});\n}}\n\n",
-                ret_c,
-                a.symbol,
-                decls.join(", "),
-                guard,
-                a.real_symbol,
-                call_args.join(", ")
-            ));
+            let mut body = String::new();
+            body.push_str(&ret_c);
+            body.push_str(" ");
+            body.push_str(&a.symbol);
+            body.push_str(" (");
+            body.push_str(&decls.join(", "));
+            body.push_str(") {\n");
+            body.push_str(&guard);
+            body.push_str("    return ");
+            body.push_str(&a.real_symbol);
+            body.push_str("(");
+            body.push_str(&call_args.join(", "));
+            body.push_str(");\n}\n\n");
+            s.push_str(&body);
         }
     }
     // Global-variable shims: a getter/setter that reads/writes the C global
