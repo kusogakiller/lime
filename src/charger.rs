@@ -2333,7 +2333,7 @@ fn gen_adapter_c_source(
         let has_struct_arg = f.params.iter().any(|p| {
             matches!(&p.ty, CType::Struct(_) | CType::Other(_))
                 && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
-                && record_name_of(&p.ty).map(|n| is_complete_record(&n)).unwrap_or(false)
+                && record_name_of(&p.ty).map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n)).unwrap_or(false)
         });
         let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
             && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_))
@@ -2591,39 +2591,21 @@ fn gen_adapter_c_source(
             // Taking `&local` then yields exactly the pointer type the C function
             // expects (`struct X**` from a `struct X**` param, `T*` from a `T*`
             // param), avoiding one level of `*` mismatch.
-            let local_ty = if let CType::Pointer(inner) = &a.params[oi].ty {
-                c_type_text(inner)
-            } else {
-                format!("{}*", a.ret_name.as_deref().unwrap_or("void"))
+            // Compute the local type immediately before emission (avoids any
+            // stale thread-local `KNOWN_RECORDS` state captured into `local_ty`).
+            let lt = match &a.params[oi].ty {
+                CType::Pointer(i) => c_type_text(i),
+                _ => format!("{}*", a.ret_name.as_deref().unwrap_or("void")),
             };
-            let guard_str = guard.clone();
-            if a.symbol.contains("tmpfile_s") {
-                eprintln!("[DBG tmp] oi={:?} nparams={} decls={:?} call_args={:?} guard={:?} ret_c={:?} local_ty={:?}",
-                    a.out_idx, a.params.len(), decls, call_args, guard_str, ret_c, local_ty);
-            }
-            let body = format!(
+            s.push_str(&format!(
                 "{} {} ({}) {{\n{}    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
-                ret_c, a.symbol, decls.join(", "), guard_str, local_ty, oi, a.real_symbol, call_args.join(", "), oi
-            );
-            if a.symbol.contains("tmpfile_s") {
-                eprintln!("[DBG bodyafter] >>>{}<<<", body);
-            }
-            s.push_str(&body);
+                ret_c, a.symbol, decls.join(", "), guard, lt, oi, a.real_symbol, call_args.join(", "), oi
+            ));
         } else {
-            let mut body = String::new();
-            body.push_str(&ret_c);
-            body.push_str(" ");
-            body.push_str(&a.symbol);
-            body.push_str(" (");
-            body.push_str(&decls.join(", "));
-            body.push_str(") {\n");
-            body.push_str(&guard);
-            body.push_str("    return ");
-            body.push_str(&a.real_symbol);
-            body.push_str("(");
-            body.push_str(&call_args.join(", "));
-            body.push_str(");\n}\n\n");
-            s.push_str(&body);
+            s.push_str(&format!(
+                "{} {} ({}) {{\n{}    return {}({});\n}}\n\n",
+                ret_c, a.symbol, decls.join(", "), guard, a.real_symbol, call_args.join(", ")
+            ));
         }
     }
     // Global-variable shims: a getter/setter that reads/writes the C global
