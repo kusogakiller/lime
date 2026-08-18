@@ -2597,10 +2597,11 @@ fn gen_adapter_c_source(
                 CType::Pointer(i) => c_type_text(i),
                 _ => format!("{}*", a.ret_name.as_deref().unwrap_or("void")),
             };
-            s.push_str(&format!(
+            let body = format!(
                 "{} {} ({}) {{\n{}    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
                 ret_c, a.symbol, decls.join(", "), guard, lt, oi, a.real_symbol, call_args.join(", "), oi
-            ));
+            );
+            s.push_str(&body);
         } else {
             s.push_str(&format!(
                 "{} {} ({}) {{\n{}    return {}({});\n}}\n\n",
@@ -2717,15 +2718,27 @@ fn gen_adapter_c_source(
     // Drop the published record names so a later adapter pass for a different
     // library does not inherit this library's struct set.
     KNOWN_RECORDS.with(|r| *r.borrow_mut() = None);
-    // De-duplicate generated shim lines. Charger may emit the same adapter
+    // De-duplicate generated shim blocks. Charger may emit the same adapter
     // symbol twice (e.g. a variadic function that also matches a struct-by-value
     // path, or a symbol surfaced from two transitively-included headers).
-    // Identical lines are true duplicates and would be a C redefinition error;
-    // keep the first occurrence. Generic — no library-specific logic.
-    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    // Identical *whole shims* are true duplicates and would be a C redefinition
+    // error; keep the first occurrence. We dedup on the shim *signature* (the
+    // top-level `name(params) {` line, which is unique per shim and carries no
+    // leading indentation) and skip the entire duplicated shim — NOT individual
+    // body lines. A naive per-line dedup wrongly drops shared body lines such
+    // as `}` or `    return a0;` that legitimately recur across distinct shims,
+    // which would truncate their bodies. Generic — no library-specific logic.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut deduped = String::new();
+    let mut skip = false;
     for line in s.lines() {
-        if seen.insert(line) {
+        let is_sig = !line.starts_with(char::is_whitespace)
+            && line.contains('(')
+            && line.trim_end().ends_with('{');
+        if is_sig {
+            skip = !seen.insert(line.to_string());
+        }
+        if !skip {
             deduped.push_str(line);
             deduped.push('\n');
         }
@@ -6025,5 +6038,144 @@ fn norm_arch(a: &str) -> &str {
         "aarch64" | "arm64" => "aarch64",
         "i386" | "i686" | "x86" => "i386",
         _ => a,
+    }
+}
+
+#[cfg(test)]
+mod adapter_dedup_tests {
+    use super::*;
+
+    // Build a minimal NormalizedApi / VariadicShapes to drive
+    // `gen_adapter_c_source`. Only the pieces the generator reads matter.
+    fn empty_api() -> NormalizedApi {
+        NormalizedApi {
+            functions: Vec::new(),
+            structs: Vec::new(),
+            constants: Vec::new(),
+            globals: Vec::new(),
+            kind: ApiKind::C,
+            handle_types: BTreeSet::new(),
+        }
+    }
+
+    fn shapes() -> VariadicShapes {
+        VariadicShapes { map: std::collections::HashMap::new() }
+    }
+
+    // Regression: a void-return function whose only parameter is a `T**`
+    // out-param (e.g. `FILE**` -> `tmpfile_s`) must emit a COMPLETE shim body:
+    // the local handle declaration `FILE* a0 = 0;`, the call, and the `return
+    // a0;` + closing brace must all be present. A naive per-line de-duplicator
+    // dropped shared body lines (`}`, `    return a0;`, `    FILE* a0 = 0;`)
+    // because they recur across distinct out-param shims, truncating the body.
+    #[test]
+    fn single_out_param_shim_is_not_truncated() {
+        let mut api = empty_api();
+        api.functions.push(CFunction {
+            name: "tmpfile_s".to_string(),
+            symbol: "tmpfile_s".to_string(),
+            params: vec![CParam {
+                name: "p".to_string(),
+                ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))),
+                nullable: Nullability::Unknown,
+            }],
+            ret: CType::Void,
+            is_method: false,
+            is_constructor: false,
+            is_const: false,
+            self_ty: None,
+            variadic: false,
+            calling_convention: String::new(),
+        });
+        let adapters = vec![AdapterSpec {
+            lime_name: "tmpfile_s".to_string(),
+            symbol: "lime_out_tmpfile_s".to_string(),
+            real_symbol: "tmpfile_s".to_string(),
+            ret_name: Some("FILE".to_string()),
+            ret: CType::Void,
+            params: vec![CParam {
+                name: "p".to_string(),
+                ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))),
+                nullable: Nullability::Unknown,
+            }],
+            out_idx: Some(0),
+            drop_from: None,
+            nonnull: Vec::new(),
+        }];
+        let src = gen_adapter_c_source(&adapters, &[], &[], &[], "stdio.h", &api, &shapes());
+        let trimmed = src.trim_end().to_string();
+        assert!(
+            trimmed.contains("FILE* lime_out_tmpfile_s () {"),
+            "missing shim signature in:\n{}",
+            src
+        );
+        assert!(
+            trimmed.contains("    FILE* a0 = 0;"),
+            "missing local handle declaration in:\n{}",
+            src
+        );
+        assert!(
+            trimmed.contains("    tmpfile_s(&a0);"),
+            "missing real call in:\n{}",
+            src
+        );
+        assert!(
+            trimmed.contains("    return a0;"),
+            "missing return in:\n{}",
+            src
+        );
+        assert!(
+            trimmed.ends_with('}'),
+            "shim missing closing brace in:\n{}",
+            src
+        );
+    }
+
+    // Regression: two out-param shims with IDENTICAL body lines (`FILE* a0 = 0;`,
+    // `return a0;`, `}`) must BOTH keep their full bodies — the de-duplicator
+    // must key on the shim signature, not on individual body lines.
+    #[test]
+    fn shared_body_lines_are_not_deduplicated_across_shims() {
+        let mut api = empty_api();
+        let mk = |name: &str| CFunction {
+            name: name.to_string(),
+            symbol: name.to_string(),
+            params: vec![
+                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown },
+                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown },
+                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown },
+            ],
+            ret: CType::Void,
+            is_method: false, is_constructor: false, is_const: false,
+            self_ty: None, variadic: false, calling_convention: String::new(),
+        };
+        api.functions.push(mk("fopen_s"));
+        api.functions.push(mk("freopen_s"));
+        let mk_adapter = |name: &str| AdapterSpec {
+            lime_name: name.to_string(),
+            symbol: format!("lime_out_{}", name),
+            real_symbol: name.to_string(),
+            ret_name: Some("FILE".to_string()),
+            ret: CType::Void,
+            params: vec![
+                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown },
+                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown },
+                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown },
+            ],
+            out_idx: Some(0),
+            drop_from: None,
+            nonnull: Vec::new(),
+        };
+        let adapters = vec![mk_adapter("fopen_s"), mk_adapter("freopen_s")];
+        let src = gen_adapter_c_source(&adapters, &[], &[], &[], "stdio.h", &api, &shapes());
+        let count_a0 = src.matches("    FILE* a0 = 0;").count();
+        let count_ret = src.matches("    return a0;").count();
+        assert_eq!(count_a0, 2, "expected 2 `FILE* a0 = 0;` (one per shim), got {} in:\n{}", count_a0, src);
+        assert_eq!(count_ret, 2, "expected 2 `return a0;` (one per shim), got {} in:\n{}", count_ret, src);
+        assert!(
+            src.contains("    fopen_s(&a0, a1, a2);") && src.contains("    freopen_s(&a0, a1, a2);"),
+            "real calls missing in:\n{}",
+            src
+        );
     }
 }
