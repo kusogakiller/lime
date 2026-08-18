@@ -3072,6 +3072,9 @@ fn load_target(path: &str) -> Result<LoadedProject, String> {
             if !charger_artifacts.is_empty() {
                 eprintln!("[charger] linking {} native artifact(s) for {} extern symbol(s)",
                     charger_artifacts.len(), syms.len());
+                for a in &charger_artifacts {
+                    eprintln!("[charger]   artifact: {}", a.display());
+                }
             }
         }
         Ok(LoadedProject {
@@ -3969,8 +3972,12 @@ pub fn compile_pipeline(
                                     Ok(s) if s.success() => {
                                         report.emitted_exe = Some(exe_path);
                                     }
-                                    _ => {
-                                        eprintln!("warning: `lld-link` not found or failed");
+                                    Ok(s) => {
+                                        eprintln!("warning: `lld-link` exited with failure (status {:?})", s);
+                                        eprintln!("warning: charger_artifacts = {:?}", charger_artifacts);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("warning: `lld-link` failed to launch: {}", e);
                                     }
                                 }
                             } else {

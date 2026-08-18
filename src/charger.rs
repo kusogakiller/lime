@@ -198,6 +198,33 @@ pub struct CFunction {
     pub calling_convention: String,
 }
 
+/// Compute the native symbol a Lime `extern fn` must reference for a given C
+/// function, after Charger's adapter layer rewrites it. This is the single
+/// source of truth shared by `generate_lime_iface` (the Lime declaration's
+/// symbol literal) and by `install` (the manifest `symbols` list used for
+/// build-time artifact resolution). Keeping it in one place guarantees the
+/// iface reference and the store resolution always agree.
+///
+/// Rules (C-only — no C++ constructors / methods):
+///   * C struct-by-value ret  -> `lime_ret_<name>`   (heap-copy wrapper)
+///   * C struct-by-value arg  -> `lime_val_<name>`   (deref-pointer wrapper)
+///   * plain C function       -> the real symbol (no rewrite)
+fn lime_shim_symbol(f: &CFunction) -> String {
+    let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
+        && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_));
+    let has_struct_arg = f.params.iter().any(|p| {
+        matches!(&p.ty, CType::Struct(_) | CType::Other(_))
+            && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
+    });
+    if has_struct_arg {
+        format!("lime_val_{}", sanitize_name(&f.name))
+    } else if is_struct_ret {
+        format!("lime_ret_{}", sanitize_name(&f.name))
+    } else {
+        f.symbol.clone()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CStruct {
     pub name: String,
@@ -304,9 +331,6 @@ fn extract_ast_json(
 
     let mut cmd = Command::new(&clang);
     cmd.arg("-Xclang").arg("-ast-dump=json").arg("-fsyntax-only");
-    if lang == ApiKind::Cpp {
-        cmd.arg("-std=c++17");
-    }
     // Phase 1 Iteration 8: the AST parse must use the SAME include dirs and
     // build flags as the native compile. A header that pulls sibling headers
     // (`#include "zutil.h"`) or depends on a library build macro
@@ -790,10 +814,10 @@ fn parse_c_type(qual: &str) -> CType {
         | "uintmax_t" | "intmax_t" | "wchar_t" | "sig_atomic_t" => {
             CType::WidthTypedef(q.to_string())
         }
-        "int" | "unsigned int" | "short" | "unsigned short" | "long" | "unsigned long"
-        | "long long" | "unsigned long long" | "int32_t" | "uint32_t"
-        | "int64_t" | "uint64_t" => CType::Int,
-        "long" => CType::Long,
+        "int" | "unsigned int" | "short" | "unsigned short"
+        | "int32_t" | "uint32_t" => CType::Int,
+        "long" | "unsigned long" | "long long" | "unsigned long long"
+        | "int64_t" | "uint64_t" => CType::Long,
         "float" => CType::Float,
         "double" => CType::Double,
         "bool" | "_Bool" => CType::Bool,
@@ -1355,6 +1379,11 @@ fn classify_node(
             if name.is_empty() {
                 return;
             }
+            // C++ instance methods / constructors are out of scope for the C-only
+            // Iteration 8 gate: no CXXRecordDecl / CXXMethodDecl / CXXConstructorDecl
+            // handling. `is_method` / `is_constructor` stay false here.
+            let is_method = false;
+            let is_ctor = false;
             // Phase 1 Iteration 8: ignore compiler-internal / reserved symbols.
             // Real-world headers (via the compiler's own <stdarg.h> / builtin
             // headers, or macro-expanded CRT decls) leak reserved identifiers
@@ -1434,9 +1463,9 @@ fn classify_node(
                 symbol,
                 params,
                 ret: ret_ty,
-                is_method: false,
-                is_constructor: false,
-                is_const: false,
+                is_method,
+                is_constructor: is_ctor,
+                is_const: node.get("isConst").and_then(|v| v.as_bool()).unwrap_or(false),
                 self_ty: None,
                 variadic,
                 calling_convention,
@@ -2116,6 +2145,92 @@ fn gen_adapter_c_source(
     s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors + variadic). DO NOT EDIT. */\n");
     s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n");
     s.push_str(&format!("#include \"{}\"\n", header_name));
+    // C struct-by-value return: a C function returning `struct Point` uses the
+    // platform struct-return convention (hidden sret pointer / register pair),
+    // which Lime cannot model — Lime's `Opaque(Point)` is a bare pointer. So we
+    // generate a wrapper that calls the real function and stores the result in
+    // a heap-allocated `Point`, returning that pointer as the opaque handle.
+    for f in &api.functions {
+        if f.is_method { continue; }
+        let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
+            && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_));
+        if !is_struct_ret { continue; }
+        let ret_name = match &f.ret {
+            CType::Struct(s) | CType::Other(s) => s.clone(),
+            _ => continue,
+        };
+        let shim = format!("lime_ret_{}", sanitize_name(&f.name));
+        let mut params: Vec<String> = Vec::new();
+        for (i, p) in f.params.iter().enumerate() {
+            params.push(format!("{} a{}", c_type_text(&p.ty), i));
+        }
+        let args: Vec<String> = (0..f.params.len()).map(|i| format!("a{}", i)).collect();
+        s.push_str(&format!(
+            "extern \"C\" void* {}({}) {{ {}* p = ({}*)malloc(sizeof({})); *p = {}({}); return (void*)p; }}\n",
+            shim,
+            params.join(", "),
+            ret_name,
+            ret_name,
+            ret_name,
+            f.symbol,
+            args.join(", ")
+        ));
+    }
+    // C struct-by-value argument: a C function taking `struct Point p` by value
+    // uses the platform struct-pass convention (registers / stacked fields),
+    // which Lime cannot model — Lime passes an `Opaque(Point)` pointer. We
+    // generate a wrapper that dereferences the pointer into a local value and
+    // forwards it by value to the real function. Combined with the struct-return
+    // wrapper above, this makes any by-value struct function callable from Lime
+    // through opaque-handle pointers.
+    for f in &api.functions {
+        let has_struct_arg = f.params.iter().any(|p| {
+            matches!(&p.ty, CType::Struct(_) | CType::Other(_))
+                && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
+        });
+        let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
+            && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_));
+        if !has_struct_arg && !is_struct_ret { continue; }
+        // Skip pure struct-return functions already covered by the heap-copy
+        // wrapper above (lime_ret_<name>); here we only handle struct *args*
+        // (the return wrapper is emitted separately and shares the same shim
+        // name scheme would collide, so return-only is excluded).
+        if is_struct_ret && !has_struct_arg { continue; }
+        let shim = format!("lime_val_{}", sanitize_name(&f.name));
+        // Parameter list: struct-by-value params become `Type* aN` (the opaque
+        // handle pointer); everything else keeps its C type.
+        let mut decls: Vec<String> = Vec::new();
+        for (i, p) in f.params.iter().enumerate() {
+            let c_ty = c_type_text(&p.ty);
+            if matches!(&p.ty, CType::Struct(_) | CType::Other(_))
+                && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
+            {
+                decls.push(format!("{}* a{}", c_ty, i));
+            } else {
+                decls.push(format!("{} a{}", c_ty, i));
+            }
+        }
+        // Forwarding args: struct-by-value params are dereferenced (`*aN`).
+        let mut call_args: Vec<String> = Vec::new();
+        for (i, p) in f.params.iter().enumerate() {
+            if matches!(&p.ty, CType::Struct(_) | CType::Other(_))
+                && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
+            {
+                call_args.push(format!("*a{}", i));
+            } else {
+                call_args.push(format!("a{}", i));
+            }
+        }
+        let ret_c = c_type_text(&f.ret);
+        s.push_str(&format!(
+            "{} {}({}) {{ return {}({}); }}\n",
+            ret_c,
+            shim,
+            decls.join(", "),
+            f.symbol,
+            call_args.join(", ")
+        ));
+    }
     // Union / bitfield accessor shims: since Lime cannot model overlapping
     // members or sub-byte bitfields (Lime `int` is i64), the record is surfaced
     // as an opaque handle and these C shims do the real field access on the C
@@ -3012,28 +3127,7 @@ fn generate_lime_iface(
             .map(|p| format!("{}: {}", lime_type_name(&p.ty), p.name))
             .collect();
         // Symbol literal: the linkable name (mangled for C++).
-        if f.is_constructor {
-            // Constructors are exposed as factory functions returning the
-            // struct by value (Lime receives it as the struct type).
-            out.push_str(&format!(
-                "extern fn {}_new({}) -> {} \"{}\"\n",
-                f.self_ty.clone().unwrap_or_default().to_lowercase(),
-                params_lime.join(", "),
-                f.self_ty.clone().unwrap_or_default(),
-                f.symbol
-            ));
-        } else if f.is_method {
-            // Methods: the receiver (`self`) is already the first entry in
-            // `params` (prepended during normalization), so emit them directly.
-            out.push_str(&format!(
-                "extern fn {}_{}({}) -> {} \"{}\"\n",
-                f.self_ty.clone().unwrap_or_default().to_lowercase(),
-                sanitize_method(&f.name),
-                params_lime.join(", "),
-                ret_lime,
-                f.symbol
-            ));
-        } else if let Some(ad) = adapter_map.get(&sanitize_name(&f.name)) {
+        if let Some(ad) = adapter_map.get(&sanitize_name(&f.name)) {
             // Real-world Phase A: re-spell the Lime `extern fn` through a
             // Charger shim. The out-param (if any) becomes the return value;
             // dropped parameters (trailing NULL callback + its args) are
@@ -3067,12 +3161,17 @@ fn generate_lime_iface(
                 ad.symbol
             ));
         } else {
+            // C struct-by-value return/argument functions cannot be called
+            // directly from Lime (struct-pass/struct-return ABI vs opaque-handle
+            // pointer). Route them through the generated wrappers
+            // (`lime_ret_*` / `lime_val_*`) — see `lime_shim_symbol`.
+            let symbol = lime_shim_symbol(f);
             out.push_str(&format!(
                 "extern fn {}({}) -> {} \"{}\"\n",
                 sanitize_name(&f.name),
                 params_lime.join(", "),
                 ret_lime,
-                f.symbol
+                symbol
             ));
             // Surface a non-default calling convention as a Lime comment so the
             // metadata is visible/verifiable without changing Lime's ABI. The
@@ -4136,7 +4235,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
 
     let art_hash = hash_file(&art_dest);
 
-    let mut symbols: Vec<String> = api.functions.iter().map(|f| f.symbol.clone()).collect();
+    let mut symbols: Vec<String> = api.functions.iter().map(|f| lime_shim_symbol(f)).collect();
     // Real-world Phase A: also record the adapter shim symbols so `lime build`
     // can resolve the prepared artifact when the Lime program references them.
     for a in &adapters {
@@ -5282,10 +5381,19 @@ pub fn lookup_artifacts_for_symbols(symbols: &[String]) -> Vec<std::path::PathBu
     let base = store_root();
     let mut out: Vec<std::path::PathBuf> = Vec::new();
     if !base.exists() { return out; }
+    // Collect every store entry whose manifest symbols intersect the requested
+    // set, but keep at most ONE entry per library (the newest by path ordering)
+    // so re-installs don't link stale/duplicate artifacts of the same library
+    // (which would collide symbols and crash at runtime). Dependencies are still
+    // pulled in transitively below.
+    #[derive(Clone)]
+    struct Cand { lib: String, key: String, entry: std::path::PathBuf, deps: Vec<String> }
+    let mut cands: Vec<Cand> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&base) {
         for lib in rd.filter_map(|e| e.ok()) {
             let libp = lib.path();
             if !libp.is_dir() { continue; }
+            let lib_name = libp.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
             if let Ok(rd2) = std::fs::read_dir(&libp) {
                 for ver in rd2.filter_map(|e| e.ok()) {
                     let verp = ver.path();
@@ -5296,27 +5404,31 @@ pub fn lookup_artifacts_for_symbols(symbols: &[String]) -> Vec<std::path::PathBu
                             if !entry.is_dir() { continue; }
                             if let Some(m) = load_manifest(&entry) {
                                 if m.symbols.iter().any(|s| symbols.contains(s)) {
-                                    let art = entry.join(&m.artifact);
-                                    if art.exists() && !out.contains(&art) {
-                                        out.push(art);
-                                    }
-                                    // #7: also pull in the artifacts of this
-                                    // library's recorded dependencies, so that a
-                                    // program referencing only the top-level
-                                    // symbol (e.g. `app_compute`) still links
-                                    // the transitive native objects it needs
-                                    // (e.g. `libc_common`'s `common_add`).
-                                    for dep in &m.dependencies {
-                                        if let Some(da) = lookup_artifact(dep) {
-                                            if !out.contains(&da) {
-                                                out.push(da);
-                                            }
-                                        }
-                                    }
+                                    let key = format!("{}/{}/{}", lib_name, ver.file_name().to_string_lossy().to_string(), hash.file_name().to_string_lossy().to_string());
+                                    cands.push(Cand { lib: lib_name.clone(), key, entry, deps: m.dependencies.clone() });
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    // Per-library: keep only the newest entry (largest path key == newest dir).
+    let mut best_per_lib: std::collections::HashMap<String, Cand> = std::collections::HashMap::new();
+    for c in cands {
+        let e = best_per_lib.entry(c.lib.clone()).or_insert(c.clone());
+        if c.key > e.key { *e = c; }
+    }
+    for c in best_per_lib.values() {
+        let art = c.entry.join(&load_manifest(&c.entry).map(|m| m.artifact.clone()).unwrap_or_default());
+        if art.exists() && !out.contains(&art) {
+            out.push(art);
+        }
+        for dep in &c.deps {
+            if let Some(da) = lookup_artifact(dep) {
+                if !out.contains(&da) {
+                    out.push(da);
                 }
             }
         }

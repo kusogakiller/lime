@@ -1,0 +1,18 @@
+// C slice: drive the Charger-prepared libmathx from Lime.
+// Exercises plain C functions, an opaque struct (Point) by value
+// (heap-copy return + pointer-arg shims), and scalar math.
+extern fn add(Int: a0, Int: a1) -> Int "add"
+extern fn make_point(Int: a0, Int: a1) -> Opaque(Point) "lime_ret_make_point"
+extern fn point_sum(Opaque(Point): a0) -> Int "lime_val_point_sum"
+extern fn square(Int: a0) -> Int "square"
+
+fn main():
+    let s = add(3, 4)
+    print(s)              // 7
+
+    let p = make_point(3, 4)
+    let t = point_sum(p)
+    print(t)              // 7
+
+    let q = square(5)
+    print(q)              // 25

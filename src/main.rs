@@ -60,10 +60,12 @@ fn cli_finish(path: &str, mode: CompileMode, result: Result<CompileReport, Strin
     }
 }
 
-fn cli_build(path: &str, emit_ll: bool, emit_object: bool, release: bool, verbose: bool) {
+fn cli_build(path: &str, emit_ll: bool, _emit_object: bool, release: bool, verbose: bool) {
     let opts = CompileOptions {
         emit_ll,
-        emit_object,
+        // `lime build` always produces an executable; the `--emit-object` flag
+        // is retained for API compatibility but does not gate executable output.
+        emit_object: true,
         optimize: true,
         release,
         verbose,
