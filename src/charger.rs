@@ -48,6 +48,27 @@ thread_local! {
     // typedefs like `const Bytef*` resolve to `char*`/`String` and scalar
     // typedefs to the right-width scalar. Generic — driven by the AST.
     static SCALAR_TYPEDEFS: RefCell<Option<HashMap<String, String>>> = RefCell::new(None);
+    // Set of type names that are introduced by a `typedef` in the header under
+    // analysis. A typedef'd struct (`typedef struct { ... } JQUANT_TBL;` or
+    // `typedef struct X X;`) makes the bare name the *complete* C type — so a
+    // pointer to it must be spelled `JQUANT_TBL*`, NOT `struct JQUANT_TBL*`
+    // (the latter would name a separate, incomplete tag type and fail to
+    // compile, e.g. libjpeg's `incompatible pointer types assigning to
+    // 'JQUANT_TBL *' from 'struct JQUANT_TBL *'`). Populated by
+    // `gen_adapter_c_source` from `api.typedef_names`. Cleared at the end of
+    // each pass so one library's typedefs never leak into another's adapter.
+    static TYPEDEF_NAMES: RefCell<Option<BTreeSet<String>>> = RefCell::new(None);
+}
+
+/// Is `name` a typedef'd type name in the current adapter-generation pass?
+/// Driven purely by the AST-extracted typedef table; library-agnostic.
+fn is_typedef_name(name: &str) -> bool {
+    TYPEDEF_NAMES.with(|t| {
+        t.borrow()
+            .as_ref()
+            .map(|set| set.contains(name))
+            .unwrap_or(false)
+    })
 }
 
 // ----------------------------------------------------------------------------
@@ -322,6 +343,14 @@ pub struct NormalizedApi {
     // in this set, so the adapter C-shim generator can render them as plain
     // scalars (e.g. `sqlite3_int64`) instead of wrongly adding a `*`.
     pub handle_types: BTreeSet<String>,
+    // Real-world Phase A (typedef tracking): the set of type names introduced
+    // by a `typedef` in the header (`typedef struct {...} JQUANT_TBL;`,
+    // `typedef struct X X;`, `typedef unsigned char Bytef;`, ...). Consulted by
+    // `c_type_text` / `opaque_or_struct_ptr` so a pointer to a typedef'd *record*
+    // is spelled `JQUANT_TBL*` (bare) instead of `struct JQUANT_TBL*` (which
+    // names a distinct, incomplete tag type and fails to compile). Generic:
+    // driven purely by the AST-extracted typedef table.
+    pub typedef_names: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -422,6 +451,7 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
         handle_types: BTreeSet::new(),
         constants: Vec::new(),
         globals: Vec::new(),
+        typedef_names: BTreeSet::new(),
     };
     let mut ctx = NormalizeCtx {
         anon_struct: None,
@@ -611,6 +641,13 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
             }
         }
     }
+    // Record every typedef name so adapter generation can suppress the
+    // `struct` keyword for typedef'd types (e.g. libjpeg's `JQUANT_TBL`). A
+    // pointer to a typedef'd record must spell `JQUANT_TBL*`, not
+    // `struct JQUANT_TBL*` — the latter names a distinct, incomplete tag type
+    // and fails to compile. Generic: driven entirely by `ctx.typedefs` from the
+    // AST; no library name appears here.
+    api.typedef_names = ctx.typedefs.iter().map(|(n, _)| n.clone()).collect();
     api
 }
 
@@ -947,6 +984,19 @@ fn is_anon_record_spelling(qual: &str) -> bool {
 /// value through Lime), while still being preserved in the AST metadata.
 fn is_anon_record_field(ty: &CType) -> bool {
     matches!(ty, CType::Other(s) if s == ANON_RECORD_MARKER)
+}
+
+/// A field whose type is a *union* (named or anonymous) cannot be surfaced as a
+/// scalar get/set accessor in Lime — its members live inside the union, not on
+/// the enclosing struct, so a `lime_get_X_member` shim would reference a
+/// non-existent `X.member` and fail to compile. Union fields are treated as
+/// opaque blobs. Generic — derived purely from the type spelling.
+fn is_union_field(ty: &CType) -> bool {
+    match ty {
+        CType::Struct(s) | CType::Other(s) => s.contains("union"),
+        CType::Pointer(inner) => is_union_field(inner),
+        _ => false,
+    }
 }
 
 /// Extract a C bitfield's width in bits from a clang `FieldDecl` node. clang
@@ -1306,7 +1356,20 @@ fn classify_node(
                             seen_bitfield = true;
                         }
                         if !fname.is_empty() {
-                            fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown, bit_width: bw });
+                            // A named field whose type is a *union* (e.g. libjpeg's
+                            // `msg_parm` of type `union { ... }`) cannot be surfaced
+                            // as a scalar accessor — its members live inside the
+                            // union, not on the enclosing struct, so a
+                            // `lime_get_X_s` shim would reference a non-existent
+                            // `X.s` member and fail to compile. Treat the union
+                            // field as an opaque blob: record nothing. Generic.
+                            // The union type is normalized to ANON_RECORD_MARKER
+                            // (`__anon_record__`), so check both spellings.
+                            if is_union_field(&fty) || is_anon_record_field(&fty) {
+                                // skip — union field stays opaque inside its C struct
+                            } else {
+                                fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown, bit_width: bw });
+                            }
                         } else if f.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()).map(is_anon_record_spelling).unwrap_or(false) {
                             // Anonymous nested record (`struct { ... } anon;` or
                             // `union { ... } u;`) used as a field. clang emits it
@@ -1377,31 +1440,18 @@ fn classify_node(
                             continue; // named record or implicit decl: handled elsewhere
                         }
                         let sub_union = c.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
-                        let members = c.get("inner").and_then(|v| v.as_array())
-                            .map(|a| a.iter().filter(|m| m.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")).collect::<Vec<_>>())
-                            .unwrap_or_default();
-                        if sub_union {
-                            let mut widest: Option<CParam> = None;
-                            for m in &members {
-                                let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                if mn.is_empty() { continue; }
-                                let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
-                                let w = type_width_bytes(&mt);
-                                if widest.as_ref().map(|x| w > type_width_bytes(&x.ty)).unwrap_or(true) {
-                                    widest = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
-                                }
-                            }
-                            if let Some(w) = widest {
-                                fields.push(w);
-                            }
-                        } else {
-                            for m in &members {
-                                let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                if mn.is_empty() { continue; }
-                                let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
-                                fields.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
-                            }
-                        }
+                        // An anonymous nested record (struct OR union) must NOT
+                        // have its members flattened up into the enclosing
+                        // struct. For a union the members overlap (surfacing them
+                        // all corrupts layout); for an anonymous struct the
+                        // members collide with same-named fields on the parent
+                        // (curl `curl_fileinfo.strings.time` vs `curl_fileinfo.time`)
+                        // and Charger cannot name the nested scope, so the
+                        // generated accessors reference non-existent members and
+                        // fail to compile. Skip entirely; the nested record stays
+                        // opaque inside its C struct. Generic — no library names.
+                        let _ = sub_union;
+                        continue;
                     }
                 }
             }
@@ -1456,6 +1506,20 @@ fn classify_node(
                         if cn.is_empty() && !cn_implicit {
                             continue;
                         }
+                    }
+                    // A *union-typed* field (`union { ... } msg_parm;`, libjpeg
+                    // `jpeg_error_mgr`) must not have its inner members flattened
+                    // up into THIS record — that invents a bogus `jpeg_error_mgr.s`
+                    // field and the accessor shim fails to compile. Skip recursing
+                    // into the union members. Generic — no library names.
+                    let is_union_field = c.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")
+                        && c.get("type")
+                            .and_then(|t| t.get("qualType"))
+                            .and_then(|q| q.as_str())
+                            .map(|q| q.contains("union"))
+                            .unwrap_or(false);
+                    if is_union_field {
+                        continue;
                     }
                     classify_node(c, api, ctx, Some(name.clone()), lang, root);
                 }
@@ -1718,6 +1782,26 @@ fn classify_node(
         _ => {
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
+                    // Skip the *members* of a union-typed field. A `union { ... }`
+                    // field (e.g. libjpeg's `msg_parm` inside `jpeg_error_mgr`)
+                    // must NOT have its inner members flattened up into the
+                    // enclosing record — doing so invents bogus fields
+                    // (`jpeg_error_mgr.s`) and the adapter C-shim then fails to
+                    // compile (`no member named 's'`). Treat the union field as
+                    // an opaque blob: classify the field itself but do not recurse
+                    // into its union members. Generic — no library names.
+                    let is_union_field = c.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")
+                        && c.get("type")
+                            .and_then(|t| t.get("qualType"))
+                            .and_then(|q| q.as_str())
+                            .map(|q| q.contains("union"))
+                            .unwrap_or(false);
+                    if is_union_field {
+                        // classify the field node itself (records its name/type)
+                        // but skip recursing into its union members.
+                        classify_node(c, api, ctx, self_ty.clone(), lang, root);
+                        continue;
+                    }
                     classify_node(c, api, ctx, self_ty.clone(), lang, root);
                 }
             }
@@ -2004,6 +2088,14 @@ fn emit_field_accessors(out: &mut String, s: &CStruct, f: &CParam) {
     if is_anon_record_field(&f.ty) {
         return;
     }
+    // A *named* union field (e.g. libjpeg's `msg_parm` inside `jpeg_error_mgr`)
+    // also cannot be surfaced as a scalar accessor — its members live inside
+    // the union, not on the enclosing struct, so a `lime_get_X_s` shim would
+    // reference a non-existent `X.s` member and fail to compile. Treat the
+    // union field as an opaque blob; skip its accessor. Generic — no names.
+    if is_union_field(&f.ty) {
+        return;
+    }
     // Function-pointer array fields cannot be surfaced as element-wise scalar
     // accessors in Lime (Lime has no fn-pointer *value* type). Skip the shim.
     if is_fn_ptr_array(&f.ty) {
@@ -2247,7 +2339,13 @@ fn c_type_text(t: &CType) -> String {
         // `*` — the `CType::Pointer` wrapper (when present) appends the star.
         // This keeps pointer depth exact: `Struct("tm")` -> `struct tm`,
         // `Pointer(Struct("tm"))` -> `struct tm*` (not `struct tm**`).
-        CType::Struct(s) => format!("struct {}", s),
+        CType::Struct(s) => {
+            if is_typedef_name(s) {
+                s.to_string()
+            } else {
+                format!("struct {}", s)
+            }
+        }
         CType::Opaque(s) => {
             // A named Opaque is a pointer-like handle. Render the bare name
             // WITHOUT a trailing `*` — the `CType::Pointer` wrapper appends it
@@ -2258,8 +2356,17 @@ fn c_type_text(t: &CType) -> String {
             // `va_list` is the exception: it is passed BY VALUE in C, so it must
             // render bare (`va_list`, no star) — only `va_list*` (rare) gets a
             // star from the `Pointer` wrapper. Generic, no library names.
+            // A *typedef'd* type name (`typedef struct {...} JQUANT_TBL;`,
+            // `typedef struct X X;`) is already the complete C type, so it must
+            // render bare (`JQUANT_TBL`) even though the same spelling also
+            // appears in KNOWN_RECORDS — spelling `struct JQUANT_TBL` would
+            // name a distinct, incomplete tag type and fail to compile
+            // (libjpeg). Check the typedef set FIRST. Generic, no library names.
             if s == "va_list" || s == "__builtin_va_list" {
                 return "va_list".to_string();
+            }
+            if is_typedef_name(s) {
+                return s.to_string();
             }
             let is_record = KNOWN_RECORDS.with(|r| {
                 r.borrow()
@@ -2285,6 +2392,14 @@ fn c_type_text(t: &CType) -> String {
         // `struct jpeg_error_mgr`, not a bare `jpeg_error_mgr` that fails to
         // compile. Generic.
         CType::Other(s) => {
+            // A typedef'd type name is already the complete C type, so it must
+            // render bare (`JQUANT_TBL`) even though the same spelling also
+            // appears in KNOWN_RECORDS — spelling `struct JQUANT_TBL` would name
+            // a distinct, incomplete tag type and fail to compile (libjpeg).
+            // Check the typedef set FIRST. Generic, no library names.
+            if is_typedef_name(s) {
+                return s.clone();
+            }
             if is_complete_record(s) || is_stdlib_struct_tag(s) {
                 format!("struct {}", s)
             } else {
@@ -2328,6 +2443,13 @@ fn c_struct_spelling(st: &CStruct) -> String {
 /// Driven purely by the AST-extracted record set (`KNOWN_RECORDS`); generic and
 /// library-agnostic.
 fn opaque_or_struct_ptr(name: &str) -> String {
+    // A typedef'd type name is already the complete C type, so a pointer to it
+    // must spell `JQUANT_TBL*`, NOT `struct JQUANT_TBL*` (which names a distinct,
+    // incomplete tag type and fails to compile, e.g. libjpeg). Check the typedef
+    // set FIRST. Generic, no library names.
+    if is_typedef_name(name) {
+        return format!("{}*", name);
+    }
     let is_record = KNOWN_RECORDS.with(|r| {
         r.borrow()
             .as_ref()
@@ -2464,6 +2586,12 @@ fn gen_adapter_c_source(
     // Cleared at the end of this pass (see below).
     let known_records: BTreeSet<String> = api.structs.iter().map(|st| st.name.clone()).collect();
     KNOWN_RECORDS.with(|r| *r.borrow_mut() = Some(known_records));
+    // Publish the typedef names so `Opaque(name)` / `Other(name)` / out-param
+    // returns for a typedef'd record (`JQUANT_TBL`, `CURLMsg`, ...) render bare
+    // (`JQUANT_TBL*`) instead of `struct JQUANT_TBL*` (which fails to compile).
+    // Cleared at the end of this pass alongside KNOWN_RECORDS.
+    let typedef_names: BTreeSet<String> = api.typedef_names.iter().cloned().collect();
+    TYPEDEF_NAMES.with(|t| *t.borrow_mut() = Some(typedef_names));
     let mut s = String::new();
     s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors + variadic). DO NOT EDIT. */\n");
     s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n");
@@ -2804,7 +2932,13 @@ fn gen_adapter_c_source(
         // must be referenced as `struct Name` (not `Name*`, which is the opaque-
         // handle rendering used elsewhere). Scalars/pointers use c_type_text.
         let c_ty = match &g.ty {
-            CType::Struct(s) => format!("struct {}", s),
+            CType::Struct(s) => {
+            if is_typedef_name(s) {
+                s.to_string()
+            } else {
+                format!("struct {}", s)
+            }
+        }
             CType::Other(s) => s.clone(),
             // `char*` (C string) is a `void*` at the ABI boundary — safe to
             // treat as a bare pointer for get/set.
@@ -2896,6 +3030,7 @@ fn gen_adapter_c_source(
     // Drop the published record names so a later adapter pass for a different
     // library does not inherit this library's struct set.
     KNOWN_RECORDS.with(|r| *r.borrow_mut() = None);
+    TYPEDEF_NAMES.with(|t| *t.borrow_mut() = None);
     // De-duplicate generated shim blocks. Charger may emit the same adapter
     // symbol twice (e.g. a variadic function that also matches a struct-by-value
     // path, or a symbol surfaced from two transitively-included headers).
@@ -6707,6 +6842,7 @@ mod adapter_dedup_tests {
             globals: Vec::new(),
             kind: ApiKind::C,
             handle_types: BTreeSet::new(),
+            typedef_names: BTreeSet::new(),
         }
     }
 
