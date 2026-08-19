@@ -1,0 +1,36 @@
+// Regression smoke — curl.
+// Strict subset of the proven curl native-execution gate (curl_slice.lime).
+// Goal: detect ABI/adapter regressions in Charger for this library on every change.
+// No library-specific code; symbols matched by name against the store manifest.
+
+// curl_version() -> const char*.
+extern fn curl_version() -> String "curl_version"
+
+// curl_global_init(long flags) -> int.
+extern fn curl_global_init(Int: flags) -> Int "curl_global_init"
+
+// curl_global_cleanup() -> void.
+extern fn curl_global_cleanup() -> Unit "curl_global_cleanup"
+
+// curl_easy_init() -> CURL* (opaque handle).
+extern fn curl_easy_init() -> Opaque(CURL) "curl_easy_init"
+
+// curl_easy_cleanup(CURL*) -> void.
+extern fn curl_easy_cleanup(Opaque(CURL): handle) -> Unit "curl_easy_cleanup"
+
+// curl_easy_strerror(int code) -> const char*.
+extern fn curl_easy_strerror(Int: code) -> String "curl_easy_strerror"
+
+fn main():
+    let v = curl_version()
+    print(v)
+    print("\n")
+    let rc = curl_global_init(3)
+    print(rc)
+    print("\n")
+    let easy = curl_easy_init()
+    curl_easy_cleanup(easy)
+    let msg = curl_easy_strerror(0)
+    print(msg)
+    print("\n")
+    curl_global_cleanup()

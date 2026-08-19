@@ -1,0 +1,12 @@
+// Regression smoke — libpng.
+// Strict subset of the proven libpng native-execution gate (libpng_slice.lime).
+// Goal: detect ABI/adapter regressions in Charger for this library on every change.
+// No library-specific code; symbols matched by name against the store manifest.
+
+// png_access_version_number() -> unsigned long (packed 1.2.3 -> 10203).
+extern fn png_access_version_number() -> Int "png_access_version_number"
+
+fn main():
+    let n = png_access_version_number()
+    print(n)
+    print("\n")

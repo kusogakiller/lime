@@ -1,0 +1,18 @@
+// Regression smoke — SQLite.
+// Strict subset of the proven SQLite native-execution gate (sqlite_slice.lime).
+// Goal: detect ABI/adapter regressions in Charger for this library on every change.
+// No library-specific code; symbols matched by name against the store manifest.
+
+// sqlite3_libversion_number() -> int (3.45.1 -> 3045001).
+extern fn sqlite3_libversion_number() -> Int "sqlite3_libversion_number"
+
+// sqlite3_threadsafe() -> int (1 when compiled thread-safe).
+extern fn sqlite3_threadsafe() -> Int "sqlite3_threadsafe"
+
+fn main():
+    let n = sqlite3_libversion_number()
+    print(n)
+    print("\n")
+    let ts = sqlite3_threadsafe()
+    print(ts)
+    print("\n")

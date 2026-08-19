@@ -5234,7 +5234,13 @@ fn collect_sources(
                     // rejects legacy C (`register` storage class) under
                     // -std=c++17. Generic: name-based skip, no library names.
                     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if matches!(name, "fuzz" | "test" | "tests" | "benchmark" | "benchmarks" | "examples" | "example" | "demo" | "tools" | "utils") {
+                    // Skip non-library subtrees when deciding the library
+                    // language. A `fuzz/*.cc` or `contrib/iostream/*.cpp` must
+                    // not force a pure-C library (libjpeg-turbo, zlib) to be
+                    // compiled as C++ — doing so rejects legacy C (`register`
+                    // storage class) under -std=c++17. Generic: name-based skip,
+                    // no library names.
+                    if matches!(name, "fuzz" | "test" | "tests" | "benchmark" | "benchmarks" | "examples" | "example" | "demo" | "tools" | "utils" | "contrib" | "third_party" | "thirdparty" | "3rdparty") {
                         continue;
                     }
                     stack.push(p);

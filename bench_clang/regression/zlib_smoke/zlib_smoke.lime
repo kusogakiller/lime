@@ -1,0 +1,19 @@
+// Regression smoke — zlib.
+// Strict subset of the proven zlib native-execution gate (zlib_slice.lime).
+// Goal: detect ABI/adapter regressions in Charger for this library on every change.
+// No library-specific code; symbols matched by name against the store manifest.
+
+// zlibVersion() -> const char*.
+extern fn zlibVersion() -> String "zlibVersion"
+
+// crc32(unsigned long crc, const Bytef* buf, uInt len) -> unsigned long.
+extern fn crc32(Int: crc, String: buf, Int: len) -> Int "crc32"
+
+fn main():
+    let v = zlibVersion()
+    print(v)
+    print("\n")
+    // Known CRC32 test vector: crc32("123456789") == 0xCBF43926 == 3421789422.
+    let c = crc32(0, "123456789", 9)
+    print(c)
+    print("\n")

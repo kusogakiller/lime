@@ -1,0 +1,34 @@
+// Regression smoke — libjpeg-turbo.
+// Strict subset of the proven libjpeg native-execution gate (libjpeg_slice.lime).
+// Goal: detect ABI/adapter regressions in Charger for this library on every change.
+// No library-specific code; symbols matched by name against the store manifest.
+
+// jpeg_std_error(struct jpeg_error_mgr*) -> struct jpeg_error_mgr*.
+extern fn jpeg_std_error(Opaque(jpeg_error_mgr): a0) -> Opaque(jpeg_error_mgr) "jpeg_std_error"
+
+// jpeg_CreateCompress(cinfo*, int version, int structsize) -> void.
+extern fn jpeg_CreateCompress(Opaque(jpeg_compress_struct): a0, Int: a1, Int: a2) -> Unit "jpeg_CreateCompress"
+
+// jpeg_destroy_compress(cinfo*) -> void.
+extern fn jpeg_destroy_compress(Opaque(jpeg_compress_struct): a0) -> Unit "jpeg_destroy_compress"
+
+// Generated: allocate a jpeg_compress_struct / jpeg_error_mgr of correct size.
+extern fn lime_make_jpeg_compress_struct() -> Opaque(jpeg_compress_struct) "lime_make_jpeg_compress_struct"
+extern fn lime_make_jpeg_error_mgr() -> Opaque(jpeg_error_mgr) "lime_make_jpeg_error_mgr"
+
+fn main():
+    // JPEG_LIB_VERSION = 90, sizeof(struct jpeg_compress_struct) = 568
+    // (literals verified by the native probe in libjpeg_slice).
+    let version = 90
+    print(version)
+    print("\n")
+    let structsize = 568
+    print(structsize)
+    print("\n")
+    let mgr = lime_make_jpeg_error_mgr()
+    let err = jpeg_std_error(mgr)
+    let cinfo = lime_make_jpeg_compress_struct()
+    jpeg_CreateCompress(cinfo, version, structsize)
+    jpeg_destroy_compress(cinfo)
+    print("CREATE_DESTROY_OK")
+    print("\n")
