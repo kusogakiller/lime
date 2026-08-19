@@ -1,0 +1,1046 @@
+{
+  "id": "0x29204395a90",
+  "kind": "TranslationUnitDecl",
+  "loc": {},
+  "range": {
+    "begin": {},
+    "end": {}
+  },
+  "inner": [
+    {
+      "id": "0x292043962d0",
+      "kind": "RecordDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "_GUID",
+      "tagUsed": "struct",
+      "inner": [
+        {
+          "id": "0x29204396350",
+          "kind": "TypeVisibilityAttr",
+          "range": {
+            "begin": {},
+            "end": {}
+          },
+          "implicit": true
+        }
+      ]
+    },
+    {
+      "id": "0x292043964e8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__int128_t",
+      "type": {
+        "qualType": "__int128"
+      },
+      "inner": [
+        {
+          "id": "0x29204396060",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x29204396558",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__uint128_t",
+      "type": {
+        "qualType": "unsigned __int128"
+      },
+      "inner": [
+        {
+          "id": "0x29204396080",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned __int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x292043968a8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__NSConstantString",
+      "type": {
+        "qualType": "struct __NSConstantString_tag"
+      },
+      "inner": [
+        {
+          "id": "0x29204396860",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "struct __NSConstantString_tag"
+          },
+          "decl": {
+            "id": "0x292043965b0",
+            "kind": "RecordDecl",
+            "name": "__NSConstantString_tag"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x29204396930",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "size_t",
+      "type": {
+        "desugaredQualType": "unsigned long long",
+        "qualType": "__size_t"
+      },
+      "inner": [
+        {
+          "id": "0x29204396900",
+          "kind": "PredefinedSugarType",
+          "type": {
+            "qualType": "__size_t"
+          },
+          "inner": [
+            {
+              "id": "0x29204395c80",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "unsigned long long"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x29204396408",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_ms_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x292043963c0",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x29204395b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x29204396478",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x292043963c0",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x29204395b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x292043969a0",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 698,
+        "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\__stddef_ptrdiff_t.h",
+        "line": 18,
+        "col": 26,
+        "tokLen": 9,
+        "includedFrom": {
+          "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+        }
+      },
+      "range": {
+        "begin": {
+          "offset": 673,
+          "col": 1,
+          "tokLen": 7,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        },
+        "end": {
+          "offset": 698,
+          "col": 26,
+          "tokLen": 9,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        }
+      },
+      "name": "ptrdiff_t",
+      "type": {
+        "qualType": "long long"
+      },
+      "inner": [
+        {
+          "id": "0x29204395be0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "long long"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x29204396a10",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 692,
+        "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\__stddef_size_t.h",
+        "line": 18,
+        "col": 23,
+        "tokLen": 6,
+        "includedFrom": {
+          "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+        }
+      },
+      "range": {
+        "begin": {
+          "offset": 670,
+          "col": 1,
+          "tokLen": 7,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        },
+        "end": {
+          "offset": 692,
+          "col": 23,
+          "tokLen": 6,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        }
+      },
+      "isReferenced": true,
+      "previousDecl": "0x29204396930",
+      "name": "size_t",
+      "type": {
+        "qualType": "unsigned long long"
+      },
+      "inner": [
+        {
+          "id": "0x29204395c80",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned long long"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2920441ea88",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 828,
+        "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\__stddef_wchar_t.h",
+        "line": 24,
+        "col": 24,
+        "tokLen": 7,
+        "includedFrom": {
+          "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+        }
+      },
+      "range": {
+        "begin": {
+          "offset": 805,
+          "col": 1,
+          "tokLen": 7,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        },
+        "end": {
+          "offset": 828,
+          "col": 24,
+          "tokLen": 7,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        }
+      },
+      "name": "wchar_t",
+      "type": {
+        "qualType": "unsigned short"
+      },
+      "inner": [
+        {
+          "id": "0x29204395c20",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned short"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2920441eaf8",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 482,
+        "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\__stddef_max_align_t.h",
+        "line": 14,
+        "col": 16,
+        "tokLen": 11,
+        "includedFrom": {
+          "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+        }
+      },
+      "range": {
+        "begin": {
+          "offset": 467,
+          "col": 1,
+          "tokLen": 7,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        },
+        "end": {
+          "offset": 482,
+          "col": 16,
+          "tokLen": 11,
+          "includedFrom": {
+            "file": "C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\lib\\clang\\22\\include\\stddef.h"
+          }
+        }
+      },
+      "name": "max_align_t",
+      "type": {
+        "qualType": "double"
+      },
+      "inner": [
+        {
+          "id": "0x29204395cc0",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "double"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2920441eb50",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 43,
+        "file": "bench_clang/charger/testlibs/_probe/abi_probe.h",
+        "line": 4,
+        "col": 8,
+        "tokLen": 8
+      },
+      "range": {
+        "begin": {
+          "offset": 36,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 105,
+          "line": 8,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "Bitfield",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x2920441ec30",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 62,
+            "line": 5,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 58,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 66,
+              "col": 13,
+              "tokLen": 1
+            }
+          },
+          "name": "a",
+          "type": {
+            "qualType": "int"
+          },
+          "isBitfield": true,
+          "inner": [
+            {
+              "id": "0x2920441ec10",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 66,
+                  "col": 13,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 66,
+                  "col": 13,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "3",
+              "inner": [
+                {
+                  "id": "0x2920441ebd0",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 66,
+                      "col": 13,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 66,
+                      "col": 13,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "3"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "0x2920441ece8",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 82,
+            "line": 6,
+            "col": 14,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 73,
+              "col": 5,
+              "tokLen": 8
+            },
+            "end": {
+              "offset": 86,
+              "col": 18,
+              "tokLen": 1
+            }
+          },
+          "name": "b",
+          "type": {
+            "qualType": "unsigned int"
+          },
+          "isBitfield": true,
+          "inner": [
+            {
+              "id": "0x2920441ecc8",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 86,
+                  "col": 18,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 86,
+                  "col": 18,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "5",
+              "inner": [
+                {
+                  "id": "0x2920441ec88",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 86,
+                      "col": 18,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 86,
+                      "col": 18,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "5"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "0x2920441ed58",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 97,
+            "line": 7,
+            "col": 9,
+            "tokLen": 6
+          },
+          "range": {
+            "begin": {
+              "offset": 93,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 97,
+              "col": 9,
+              "tokLen": 6
+            }
+          },
+          "name": "normal",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2920441edb0",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 144,
+        "line": 11,
+        "col": 8,
+        "tokLen": 6
+      },
+      "range": {
+        "begin": {
+          "offset": 137,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 186,
+          "line": 14,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "Buffer",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x2920441ee78",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 164,
+            "line": 12,
+            "col": 12,
+            "tokLen": 3
+          },
+          "range": {
+            "begin": {
+              "offset": 157,
+              "col": 5,
+              "tokLen": 6
+            },
+            "end": {
+              "offset": 164,
+              "col": 12,
+              "tokLen": 3
+            }
+          },
+          "name": "len",
+          "type": {
+            "desugaredQualType": "unsigned long long",
+            "qualType": "size_t",
+            "typeAliasDeclId": "0x29204396a10"
+          }
+        },
+        {
+          "id": "0x2920441ef20",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 178,
+            "line": 13,
+            "col": 10,
+            "tokLen": 4
+          },
+          "range": {
+            "begin": {
+              "offset": 173,
+              "col": 5,
+              "tokLen": 4
+            },
+            "end": {
+              "offset": 183,
+              "col": 15,
+              "tokLen": 1
+            }
+          },
+          "name": "data",
+          "type": {
+            "qualType": "char[]"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2920441efa0",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 232,
+        "line": 18,
+        "col": 8,
+        "tokLen": 6
+      },
+      "range": {
+        "begin": {
+          "offset": 225,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 264,
+          "line": 21,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "Packed",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x2920441f020",
+          "kind": "MaxFieldAlignmentAttr",
+          "range": {
+            "begin": {},
+            "end": {}
+          },
+          "implicit": true
+        },
+        {
+          "id": "0x2920441f098",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 250,
+            "line": 19,
+            "col": 10,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 245,
+              "col": 5,
+              "tokLen": 4
+            },
+            "end": {
+              "offset": 250,
+              "col": 10,
+              "tokLen": 1
+            }
+          },
+          "name": "a",
+          "type": {
+            "qualType": "char"
+          }
+        },
+        {
+          "id": "0x2920441f108",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 261,
+            "line": 20,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 257,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 261,
+              "col": 9,
+              "tokLen": 1
+            }
+          },
+          "name": "b",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x2920441f190",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 315,
+        "line": 25,
+        "col": 8,
+        "tokLen": 9
+      },
+      "range": {
+        "begin": {
+          "offset": 308,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 392,
+          "line": 31,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "AnonUnion",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x2920441f228",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 335,
+            "line": 26,
+            "col": 9,
+            "tokLen": 4
+          },
+          "range": {
+            "begin": {
+              "offset": 331,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 335,
+              "col": 9,
+              "tokLen": 4
+            }
+          },
+          "name": "kind",
+          "type": {
+            "qualType": "int"
+          }
+        },
+        {
+          "id": "0x2920441f280",
+          "kind": "RecordDecl",
+          "loc": {
+            "offset": 345,
+            "line": 27,
+            "col": 5,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 345,
+              "col": 5,
+              "tokLen": 5
+            },
+            "end": {
+              "offset": 389,
+              "line": 30,
+              "col": 5,
+              "tokLen": 1
+            }
+          },
+          "tagUsed": "union",
+          "completeDefinition": true,
+          "inner": [
+            {
+              "id": "0x2920441f318",
+              "kind": "FieldDecl",
+              "loc": {
+                "offset": 365,
+                "line": 28,
+                "col": 13,
+                "tokLen": 1
+              },
+              "range": {
+                "begin": {
+                  "offset": 361,
+                  "col": 9,
+                  "tokLen": 3
+                },
+                "end": {
+                  "offset": 365,
+                  "col": 13,
+                  "tokLen": 1
+                }
+              },
+              "name": "i",
+              "type": {
+                "qualType": "int"
+              }
+            },
+            {
+              "id": "0x2920441f388",
+              "kind": "FieldDecl",
+              "loc": {
+                "offset": 382,
+                "line": 29,
+                "col": 15,
+                "tokLen": 1
+              },
+              "range": {
+                "begin": {
+                  "offset": 376,
+                  "col": 9,
+                  "tokLen": 5
+                },
+                "end": {
+                  "offset": 382,
+                  "col": 15,
+                  "tokLen": 1
+                }
+              },
+              "name": "f",
+              "type": {
+                "qualType": "float"
+              }
+            }
+          ]
+        },
+        {
+          "id": "0x2920441f468",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 345,
+            "line": 27,
+            "col": 5,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 345,
+              "col": 5,
+              "tokLen": 5
+            },
+            "end": {
+              "offset": 345,
+              "col": 5,
+              "tokLen": 5
+            }
+          },
+          "isImplicit": true,
+          "type": {
+            "qualType": "union AnonUnion::(anonymous at bench_clang/charger/testlibs/_probe/abi_probe.h:27:5)"
+          }
+        },
+        {
+          "id": "0x2920441f4d0",
+          "kind": "IndirectFieldDecl",
+          "loc": {
+            "offset": 365,
+            "line": 28,
+            "col": 13,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 365,
+              "col": 13,
+              "tokLen": 1
+            },
+            "end": {
+              "offset": 365,
+              "col": 13,
+              "tokLen": 1
+            }
+          },
+          "isImplicit": true,
+          "name": "i"
+        },
+        {
+          "id": "0x2920441f528",
+          "kind": "IndirectFieldDecl",
+          "loc": {
+            "offset": 382,
+            "line": 29,
+            "col": 15,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 382,
+              "col": 15,
+              "tokLen": 1
+            },
+            "end": {
+              "offset": 382,
+              "col": 15,
+              "tokLen": 1
+            }
+          },
+          "isImplicit": true,
+          "name": "f"
+        }
+      ]
+    },
+    {
+      "id": "0x2920441f570",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 440,
+        "line": 34,
+        "col": 8,
+        "tokLen": 13
+      },
+      "range": {
+        "begin": {
+          "offset": 433,
+          "col": 1,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 504,
+          "line": 37,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "name": "CallbackTable",
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x2920441f790",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 466,
+            "line": 35,
+            "col": 11,
+            "tokLen": 4
+          },
+          "range": {
+            "begin": {
+              "offset": 460,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 477,
+              "col": 22,
+              "tokLen": 1
+            }
+          },
+          "name": "open",
+          "type": {
+            "qualType": "int (*)(void *)"
+          }
+        },
+        {
+          "id": "0x2920441f978",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 491,
+            "line": 36,
+            "col": 12,
+            "tokLen": 5
+          },
+          "range": {
+            "begin": {
+              "offset": 484,
+              "col": 5,
+              "tokLen": 4
+            },
+            "end": {
+              "offset": 501,
+              "col": 22,
+              "tokLen": 1
+            }
+          },
+          "name": "close",
+          "type": {
+            "qualType": "void (*)(int)"
+          }
+        }
+      ]
+    }
+  ]
+}

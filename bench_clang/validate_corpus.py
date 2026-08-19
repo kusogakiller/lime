@@ -56,6 +56,16 @@ CORE_SLICES = {
     # Guards the float-return promotion (f32 -> double) and the adapter-shim
     # symbol resolution that previously crashed these calls.
     "varfloat": "1517.52121",
+    # Iteration 9: generic C ABI edge-case hardening. Each fixture exercises one
+    # clang-AST-driven ABI edge the bridge must handle generically (no library-
+    # specific code, no C++): bitfield members, flexible array member, packed
+    # struct (#pragma pack), anonymous union member, and a function-pointer
+    # callback table. Layout is independently verified by `verify-abi`.
+    "libbitfield": "527",
+    "libflexarray": "10",
+    "libpacked": "210",
+    "libanonrecord": "2055",
+    "libcallbacktable": "25",
 }
 
 LLVM_BIN = os.environ.get("LIME_LLVM_BIN", "")

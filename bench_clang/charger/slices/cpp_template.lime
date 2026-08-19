@@ -1,0 +1,21 @@
+// C++ vertical slice #6: template instantiation. The concrete instantiation
+// `Stack<long long>` is surfaced by Charger as an opaque handle (the `<...>`
+// is sanitized to `Stack_long_long_`). Lime manipulates it without knowing it
+// is a template.
+extern fn make_stack() -> Opaque(Stack_long_long_) "?make_stack@@YAPEAV?$Stack@_J@@XZ"
+extern fn stack_push(Opaque(Stack_long_long_): s, Int: v) -> Unit "?stack_push@@YAXPEAV?$Stack@_J@@_J@Z"
+extern fn stack_pop(Opaque(Stack_long_long_): s) -> Int "?stack_pop@@YA_JPEAV?$Stack@_J@@@Z"
+extern fn stack_size(Opaque(Stack_long_long_): s) -> Int "?stack_size@@YAHPEAV?$Stack@_J@@@Z"
+extern fn stack_free(Opaque(Stack_long_long_): s) -> Unit "?stack_free@@YAXPEAV?$Stack@_J@@@Z"
+
+fn main():
+    let s = make_stack()
+    stack_push(s, 10)
+    stack_push(s, 20)
+    let sz = stack_size(s)
+    print(sz)          # expect 2
+    print("\n")
+    let a = stack_pop(s)
+    print(a)           # expect 20
+    print("\n")
+    stack_free(s)

@@ -1,0 +1,12 @@
+// Iteration 9 regression: anonymous union member (`struct { int kind; union { int i; float f; }; }`).
+// clang emits the union body inline (unnamed RecordDecl) plus an implicit field
+// `union Parent::(anonymous at ...)`. Charger must flatten the union's members
+// into the parent struct (widest member) and surface them as opaque accessors.
+extern fn lime_make_AnonUnion() -> Opaque(AnonUnion) "lime_make_AnonUnion"
+extern fn anon_demo(Opaque(AnonUnion): a0) -> Int "anon_demo"
+
+fn main():
+    let v = lime_make_AnonUnion()
+    let r = anon_demo(v)          // C sets kind=2, i=55 -> 2*1000 + 55 = 2055
+    print(r)
+    print("\n")

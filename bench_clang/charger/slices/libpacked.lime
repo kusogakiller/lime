@@ -1,0 +1,12 @@
+// Iteration 9 regression: packed struct (`#pragma pack(push,1) struct { char a; int b; }`).
+// Charger must detect the packed layout (clang emits `MaxFieldAlignmentAttr`) and
+// surface the struct so the C-side `packed_demo` reads members back through the
+// packed (size 5, align 1) layout. Layout is verified by verify-abi.
+extern fn lime_make_Packed() -> Opaque(Packed) "lime_make_Packed"
+extern fn packed_demo(Opaque(Packed): a0) -> Int "packed_demo"
+
+fn main():
+    let v = lime_make_Packed()
+    let r = packed_demo(v)       // C sets a=10, b=200 -> 10 + 200 = 210
+    print(r)
+    print("\n")

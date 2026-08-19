@@ -1,0 +1,503 @@
+{
+  "id": "0x16dff9d5a90",
+  "kind": "TranslationUnitDecl",
+  "loc": {},
+  "range": {
+    "begin": {},
+    "end": {}
+  },
+  "inner": [
+    {
+      "id": "0x16dff9d62d0",
+      "kind": "RecordDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "_GUID",
+      "tagUsed": "struct",
+      "inner": [
+        {
+          "id": "0x16dff9d6350",
+          "kind": "TypeVisibilityAttr",
+          "range": {
+            "begin": {},
+            "end": {}
+          },
+          "implicit": true
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d64e8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__int128_t",
+      "type": {
+        "qualType": "__int128"
+      },
+      "inner": [
+        {
+          "id": "0x16dff9d6060",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "__int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d6558",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__uint128_t",
+      "type": {
+        "qualType": "unsigned __int128"
+      },
+      "inner": [
+        {
+          "id": "0x16dff9d6080",
+          "kind": "BuiltinType",
+          "type": {
+            "qualType": "unsigned __int128"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d68a8",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__NSConstantString",
+      "type": {
+        "qualType": "struct __NSConstantString_tag"
+      },
+      "inner": [
+        {
+          "id": "0x16dff9d6860",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "struct __NSConstantString_tag"
+          },
+          "decl": {
+            "id": "0x16dff9d65b0",
+            "kind": "RecordDecl",
+            "name": "__NSConstantString_tag"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d6930",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "size_t",
+      "type": {
+        "desugaredQualType": "unsigned long long",
+        "qualType": "__size_t"
+      },
+      "inner": [
+        {
+          "id": "0x16dff9d6900",
+          "kind": "PredefinedSugarType",
+          "type": {
+            "qualType": "__size_t"
+          },
+          "inner": [
+            {
+              "id": "0x16dff9d5c80",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "unsigned long long"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d6408",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_ms_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x16dff9d63c0",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x16dff9d5b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d6478",
+      "kind": "TypedefDecl",
+      "loc": {},
+      "range": {
+        "begin": {},
+        "end": {}
+      },
+      "isImplicit": true,
+      "name": "__builtin_va_list",
+      "type": {
+        "qualType": "char *"
+      },
+      "inner": [
+        {
+          "id": "0x16dff9d63c0",
+          "kind": "PointerType",
+          "type": {
+            "qualType": "char *"
+          },
+          "inner": [
+            {
+              "id": "0x16dff9d5b40",
+              "kind": "BuiltinType",
+              "type": {
+                "qualType": "char"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0x16dff9d6988",
+      "kind": "RecordDecl",
+      "loc": {
+        "offset": 374,
+        "file": "bench_clang/charger/testlibs/libbitfield/libbitfield.h",
+        "line": 8,
+        "col": 9,
+        "tokLen": 6
+      },
+      "range": {
+        "begin": {
+          "offset": 374,
+          "col": 9,
+          "tokLen": 6
+        },
+        "end": {
+          "offset": 536,
+          "line": 12,
+          "col": 1,
+          "tokLen": 1
+        }
+      },
+      "tagUsed": "struct",
+      "completeDefinition": true,
+      "inner": [
+        {
+          "id": "0x16dffa4d888",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 391,
+            "line": 9,
+            "col": 9,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 387,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 395,
+              "col": 13,
+              "tokLen": 1
+            }
+          },
+          "name": "a",
+          "type": {
+            "qualType": "int"
+          },
+          "isBitfield": true,
+          "inner": [
+            {
+              "id": "0x16dff9d6a48",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 395,
+                  "col": 13,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 395,
+                  "col": 13,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "3",
+              "inner": [
+                {
+                  "id": "0x16dff9d6a08",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 395,
+                      "col": 13,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 395,
+                      "col": 13,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "3"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "0x16dffa4d940",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 440,
+            "line": 10,
+            "col": 14,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 431,
+              "col": 5,
+              "tokLen": 8
+            },
+            "end": {
+              "offset": 444,
+              "col": 18,
+              "tokLen": 1
+            }
+          },
+          "name": "b",
+          "type": {
+            "qualType": "unsigned int"
+          },
+          "isBitfield": true,
+          "inner": [
+            {
+              "id": "0x16dffa4d920",
+              "kind": "ConstantExpr",
+              "range": {
+                "begin": {
+                  "offset": 444,
+                  "col": 18,
+                  "tokLen": 1
+                },
+                "end": {
+                  "offset": 444,
+                  "col": 18,
+                  "tokLen": 1
+                }
+              },
+              "type": {
+                "qualType": "int"
+              },
+              "valueCategory": "prvalue",
+              "value": "5",
+              "inner": [
+                {
+                  "id": "0x16dffa4d8e0",
+                  "kind": "IntegerLiteral",
+                  "range": {
+                    "begin": {
+                      "offset": 444,
+                      "col": 18,
+                      "tokLen": 1
+                    },
+                    "end": {
+                      "offset": 444,
+                      "col": 18,
+                      "tokLen": 1
+                    }
+                  },
+                  "type": {
+                    "qualType": "int"
+                  },
+                  "valueCategory": "prvalue",
+                  "value": "5"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "0x16dffa4d9b0",
+          "kind": "FieldDecl",
+          "loc": {
+            "offset": 481,
+            "line": 11,
+            "col": 9,
+            "tokLen": 6
+          },
+          "range": {
+            "begin": {
+              "offset": 477,
+              "col": 5,
+              "tokLen": 3
+            },
+            "end": {
+              "offset": 481,
+              "col": 9,
+              "tokLen": 6
+            }
+          },
+          "name": "normal",
+          "type": {
+            "qualType": "int"
+          }
+        }
+      ]
+    },
+    {
+      "id": "0x16dffa4da98",
+      "kind": "TypedefDecl",
+      "loc": {
+        "offset": 538,
+        "line": 12,
+        "col": 3,
+        "tokLen": 8
+      },
+      "range": {
+        "begin": {
+          "offset": 366,
+          "line": 8,
+          "col": 1,
+          "tokLen": 7
+        },
+        "end": {
+          "offset": 538,
+          "line": 12,
+          "col": 3,
+          "tokLen": 8
+        }
+      },
+      "isReferenced": true,
+      "name": "Bitfield",
+      "type": {
+        "qualType": "struct Bitfield"
+      },
+      "inner": [
+        {
+          "id": "0x16dffa4da50",
+          "kind": "RecordType",
+          "type": {
+            "qualType": "struct Bitfield"
+          },
+          "decl": {
+            "id": "0x16dff9d6988",
+            "kind": "RecordDecl",
+            "name": ""
+          },
+          "isTagOwned": true
+        }
+      ]
+    },
+    {
+      "id": "0x16dffa4dcf8",
+      "kind": "FunctionDecl",
+      "loc": {
+        "offset": 706,
+        "line": 16,
+        "col": 5,
+        "tokLen": 7
+      },
+      "range": {
+        "begin": {
+          "offset": 702,
+          "col": 1,
+          "tokLen": 3
+        },
+        "end": {
+          "offset": 725,
+          "col": 24,
+          "tokLen": 1
+        }
+      },
+      "name": "bf_demo",
+      "mangledName": "bf_demo",
+      "type": {
+        "qualType": "int (Bitfield *)"
+      },
+      "inner": [
+        {
+          "id": "0x16dffa4dbe0",
+          "kind": "ParmVarDecl",
+          "loc": {
+            "offset": 724,
+            "col": 23,
+            "tokLen": 1
+          },
+          "range": {
+            "begin": {
+              "offset": 714,
+              "col": 13,
+              "tokLen": 8
+            },
+            "end": {
+              "offset": 724,
+              "col": 23,
+              "tokLen": 1
+            }
+          },
+          "name": "v",
+          "type": {
+            "qualType": "Bitfield *"
+          }
+        }
+      ]
+    }
+  ]
+}

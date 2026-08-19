@@ -1,0 +1,13 @@
+// Iteration 9 regression: bitfield struct (C `int a:3; unsigned b:5; int normal;`).
+// Charger must detect the bitfield members (clang emits `isBitfield`, not
+// `bitWidth`), surface the struct as an opaque handle, and lay it out so the
+// C-side `bf_demo` reads the members back through the real ABI. No Lime
+// language/ABI change — the bitfield storage is owned by C.
+extern fn lime_make_Bitfield() -> Opaque(Bitfield) "lime_make_Bitfield"
+extern fn bf_demo(Opaque(Bitfield): a0) -> Int "bf_demo"
+
+fn main():
+    let v = lime_make_Bitfield()
+    let r = bf_demo(v)          // C sets a=2, b=7, normal=5 -> 5*100 + 2*10 + 7 = 527
+    print(r)
+    print("\n")

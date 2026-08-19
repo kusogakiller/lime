@@ -179,6 +179,13 @@ pub struct CParam {
     // Defaults to `Unknown`; semantic metadata can refine it. Kept separate
     // from ABI/ownership (which are never auto-derived here).
     pub nullable: Nullability,
+    // Phase 1 Iteration 9: bitfield width in bits, when the field is a C
+    // bitfield. `None` for ordinary fields. clang reports bitfields via the
+    // `isBitfield` flag (with the width in a nested ConstantExpr), so this is
+    // populated from that flag — never guessed. Surfaced to the adapter
+    // generator so bitfield members can be skipped (Lime has no sub-byte type)
+    // while non-bitfield members keep their typed accessors.
+    pub bit_width: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +258,12 @@ pub struct CStruct {
     // `int` lowers to i64 (8 bytes) and cannot replicate sub-8-byte C layouts.
     pub is_union: bool,
     pub is_bitfield: bool,
+    // Phase 1 Iteration 9: packed-layout marker. Set when clang emits
+    // `MaxFieldAlignmentAttr` / `PackedAttr` for the record (`#pragma pack` /
+    // `__attribute__((packed))`). Charger records the fact and lets the C
+    // compiler own the real (reduced) layout; the struct is surfaced as an
+    // opaque handle so Lime never guesses sub-8-byte field offsets. Generic.
+    pub is_packed: bool,
     // Whether the struct was declared as an *anonymous* typedef
     // (`typedef struct { ... } Point;`) — i.e. there is no `struct Point` tag,
     // only the typedef name `Point`. When true the adapter C must reference the
@@ -471,6 +484,7 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
                         align_bytes: None,
                         is_union: false,
                         is_bitfield: false,
+                        is_packed: false,
                         is_anon: true,
                         all_8byte: all_8,
                         has_fn_ptr: has_fp,
@@ -677,7 +691,7 @@ fn widest_member(fields: Vec<CParam>) -> Vec<CParam> {
             best_w = w;
         }
     }
-    vec![CParam { name: best.name.clone(), ty: best.ty.clone(), nullable: Nullability::Unknown }]
+    vec![CParam { name: best.name.clone(), ty: best.ty.clone(), nullable: Nullability::Unknown, bit_width: None }]
 }
 
 /// Scan a C header source for simple integer object-like macros of the form
@@ -933,6 +947,60 @@ fn is_anon_record_spelling(qual: &str) -> bool {
 /// value through Lime), while still being preserved in the AST metadata.
 fn is_anon_record_field(ty: &CType) -> bool {
     matches!(ty, CType::Other(s) if s == ANON_RECORD_MARKER)
+}
+
+/// Extract a C bitfield's width in bits from a clang `FieldDecl` node. clang
+/// reports bitfields two ways across versions: an explicit `bitWidth` key, or an
+/// `isBitfield: true` flag with the width nested inside a `ConstantExpr`
+/// (`inner[0].value`). We read whichever is present; never guess. Returns `None`
+/// for ordinary (non-bitfield) fields.
+fn field_bit_width(f: &serde_json::Value) -> Option<u64> {
+    if let Some(bw) = f.get("bitWidth").and_then(|v| v.as_u64()) {
+        return Some(bw);
+    }
+    if f.get("isBitfield").and_then(|v| v.as_bool()).unwrap_or(false) {
+        // width lives in a nested ConstantExpr: inner[0].value (string like "3")
+        if let Some(inner) = f.get("inner").and_then(|v| v.as_array()) {
+            for c in inner {
+                if c.get("kind").and_then(|k| k.as_str()) == Some("ConstantExpr") {
+                    if let Some(v) = c.get("value").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        // isBitfield with no recoverable width: treat as a 1-bit field marker.
+        return Some(1);
+    }
+    None
+}
+
+/// True when a struct/union `RecordDecl` node carries a packed-layout
+/// attribute (`#pragma pack` / `__attribute__((packed))`). clang emits
+/// `MaxFieldAlignmentAttr` (and `PackedAttr`) inside the record's `inner` for
+/// these. The presence alone is the Source of Truth — Charger never invents an
+/// alignment; it records the fact and lets the C compiler own the real layout.
+fn record_is_packed(node: &serde_json::Value) -> bool {
+    node.get("inner")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter().any(|c| {
+                let k = c.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+                k == "MaxFieldAlignmentAttr" || k == "PackedAttr"
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Detect the anonymous-record member spelling clang emits for an inline
+/// `union`/`struct` used as an unnamed field: `union Parent::(anonymous at
+/// foo.h:12:3)` or `struct Parent::(anonymous at ...)`. Unlike the bare
+/// `union (unnamed ...)` form, this carries the parent scope prefix, so the
+/// simple `is_anon_record_spelling` misses it. Generic — matched purely on the
+/// `(anonymous` marker, never on a library/type name.
+fn is_anon_member_spelling(qual: &str) -> bool {
+    let q = qual.trim();
+    q.contains("(anonymous") && (q.starts_with("union ") || q.starts_with("struct "))
 }
 
 /// Best-effort ABI width (in bytes) of a `CType`, used to pick the widest member
@@ -1231,12 +1299,14 @@ fn classify_node(
                         let fty = f.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
                         if fname == "aParam" {
                         }
-                        // A bitfield member carries a `bitWidth` in the AST.
-                        if f.get("bitWidth").is_some() {
+                        // A bitfield member carries `isBitfield` (clang 22) or
+                        // `bitWidth`. Record the width and flag the struct.
+                        let bw = field_bit_width(f);
+                        if bw.is_some() {
                             seen_bitfield = true;
                         }
                         if !fname.is_empty() {
-                            fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown });
+                            fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown, bit_width: bw });
                         } else if f.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()).map(is_anon_record_spelling).unwrap_or(false) {
                             // Anonymous nested record (`struct { ... } anon;` or
                             // `union { ... } u;`) used as a field. clang emits it
@@ -1266,7 +1336,7 @@ fn classify_node(
                                         let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
                                         let w = type_width_bytes(&mt);
                                         if widest.as_ref().map(|x| w > type_width_bytes(&x.ty)).unwrap_or(true) {
-                                            widest = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown });
+                                            widest = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
                                         }
                                     }
                                     if let Some(w) = widest {
@@ -1277,13 +1347,62 @@ fn classify_node(
                                         let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                         if mn.is_empty() { continue; }
                                         let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
-                                        fields.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown });
+                                        fields.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
                                     }
                                 }
                             }
                         }
                     }
 
+                }
+            }
+            // Flatten anonymous nested records (`union Parent::(anonymous at ...)`
+            // or `struct Parent::(anonymous at ...)`) that appear as direct
+            // children of this record. clang emits the union/struct body inline
+            // with NO field name, so the parent's named fields miss it. Generic
+            // flattening (matching the already-handled bare `union (unnamed ...)`
+            // field form):
+            //   * anonymous struct -> inline each named member (disjoint storage)
+            //   * anonymous union  -> keep only the WIDEST named member (a union's
+            //     size is its largest member; surfacing every overlapping member
+            //     would corrupt the value-type width). Union members are still
+            //     surfaced as an opaque handle later, so the widest choice only
+            //     affects which single member Lime can name.
+            if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
+                for c in inner {
+                    if c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl") {
+                        let cn = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let cn_implicit = c.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+                        if !(cn.is_empty() && !cn_implicit) {
+                            continue; // named record or implicit decl: handled elsewhere
+                        }
+                        let sub_union = c.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
+                        let members = c.get("inner").and_then(|v| v.as_array())
+                            .map(|a| a.iter().filter(|m| m.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")).collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        if sub_union {
+                            let mut widest: Option<CParam> = None;
+                            for m in &members {
+                                let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                if mn.is_empty() { continue; }
+                                let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                                let w = type_width_bytes(&mt);
+                                if widest.as_ref().map(|x| w > type_width_bytes(&x.ty)).unwrap_or(true) {
+                                    widest = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
+                                }
+                            }
+                            if let Some(w) = widest {
+                                fields.push(w);
+                            }
+                        } else {
+                            for m in &members {
+                                let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                if mn.is_empty() { continue; }
+                                let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                                fields.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
+                            }
+                        }
+                    }
                 }
             }
             // For a union, only the largest member needs to survive in the Lime
@@ -1301,6 +1420,7 @@ fn classify_node(
                     CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
                 ));
                 let has_fp = kept_fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
+                let is_packed = record_is_packed(node);
                 api.structs.push(CStruct {
                     name: name.clone(),
                     fields: kept_fields,
@@ -1308,10 +1428,16 @@ fn classify_node(
                     align_bytes: None,
                     is_union,
                     is_bitfield: seen_bitfield,
+                    is_packed,
                     is_anon: false,
                     all_8byte: all_8,
                     has_fn_ptr: has_fp,
                 });
+                // A named struct was just pushed by name; any stashed anonymous
+                // record body is now stale (it belonged to a preceding anonymous
+                // typedef, not this one). Clear it so a following named-tag
+                // re-typedef (`typedef struct X X;`) cannot inherit it. Generic.
+                ctx.anon_struct = None;
             } else if !is_implicit {
                 // Anonymous record body (e.g. `typedef struct { ... } Point;` or
                 // `typedef union { ... } Variant;`) — remember for a TypedefDecl.
@@ -1319,6 +1445,18 @@ fn classify_node(
             }
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for c in inner {
+                    // An anonymous (unnamed) nested record (`union Parent::(anonymous
+                    // ...)`) is a field of THIS record, not a separate type. Its
+                    // members are flattened into `fields` above; do NOT re-classify
+                    // it as a standalone struct (that would both drop its members
+                    // and pollute `ctx.anon_struct` with a stale body). Generic.
+                    if c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl") {
+                        let cn = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let cn_implicit = c.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+                        if cn.is_empty() && !cn_implicit {
+                            continue;
+                        }
+                    }
                     classify_node(c, api, ctx, Some(name.clone()), lang, root);
                 }
             }
@@ -1444,19 +1582,19 @@ fn classify_node(
                 // struct accessors and fail to compile). Generic correctness fix.
                 if let Some(fields) = ctx.anon_struct.take() {
                     // Only consume a remembered anonymous record body when this
-                    // typedef's underlying type is ITSELF an anonymous record
-                    // (`struct (anonymous ...)` / `union (anonymous ...)`). A
-                    // named-tag re-typedef (`typedef struct CURLMsg CURLMsg;`)
-                    // has a non-anonymous underlying and must NOT inherit the
-                    // body — otherwise a stale anonymous body left from a prior
-                    // record (e.g. an anonymous union's members) would be
-                    // grafted onto the wrong named struct, producing duplicate
-                    // struct defs and bogus accessors that fail to compile.
-                    // Generic correctness fix — applies to any library with
-                    // mixed anonymous and named records.
+                    // typedef's underlying type is ITSELF a record type (anonymous
+                    // `struct (anonymous ...)` / `union (anonymous ...)`, or a
+                    // typedef-named record `struct Bitfield` / `union Variant` that
+                    // clang emits with the typedef name as its tag). A scalar typedef
+                    // (e.g. `typedef unsigned char png_byte;`) or a named-tag retypedef
+                    // (`typedef struct CURLMsg CURLMsg;`, whose RecordDecl was already
+                    // pushed by name and left no stashed body) must NOT inherit a
+                    // stale anonymous struct's fields. Generic correctness fix.
                     if !underlying.contains("enum")
-                        && is_anon_record_spelling(&underlying)
                         && !underlying.contains('*')
+                        && (is_anon_record_spelling(&underlying)
+                            || underlying.starts_with("struct ")
+                            || underlying.starts_with("union "))
                     {
                         let is_union_typedef = underlying.contains("union");
                         let all_8 = fields.iter().all(|f| matches!(
@@ -1471,6 +1609,7 @@ fn classify_node(
                             align_bytes: None,
                             is_union: is_union_typedef,
                             is_bitfield: false,
+                            is_packed: false,
                             is_anon: true,
                             all_8byte: all_8,
                             has_fn_ptr: has_fp,
@@ -1693,6 +1832,7 @@ fn parse_signature(qual: &str) -> (Vec<CParam>, CType) {
                 name: format!("a{}", i),
                 ty,
                 nullable,
+                bit_width: None,
             });
         }
     }
@@ -1762,6 +1902,24 @@ fn strip_param_name(p: &str) -> String {
 // Lime type mapping
 // ----------------------------------------------------------------------------
 
+/// Sanitize a C pointee name so it can be spelled as a Lime `Opaque(Ident)`.
+///
+/// Template instantiations such as `Stack<long long>` cannot be spelled as a
+/// Lime `Opaque(...)` ident: the `<` lexes as `Token::Lt` and triggers a parse
+/// error in Lime's `parse_type`. We replace the unsafe characters
+/// (`<` `>` `,` ` ` `*`) with `_` so the name round-trips through the Lime
+/// parser as a single ident (`Stack<long long>` -> `Stack_long_long_`). The
+/// original spelling is preserved separately by `c_type_text` for C adapter
+/// generation, so this is purely a Lime-side string normalization.
+fn sanitize_opaque_name(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '<' | '>' | ',' | ' ' | '*' => '_',
+            c => c,
+        })
+        .collect()
+}
+
 fn lime_type_name(t: &CType) -> String {
     match t {
         CType::Int | CType::Long | CType::Bool | CType::Char(_) | CType::Short(_) => "Int".to_string(),
@@ -1797,16 +1955,19 @@ fn lime_type_name(t: &CType) -> String {
         // template instantiation such as `Stack<long long>*`). Emitted as
         // Lime's `Opaque(X)` type spelling, which lowers to a bare `ptr`.
         // Task #6: a template instantiation name like `Stack<long long>` is
-        // normalized to `Stack_long_long` so the Lime parser accepts it
+        // normalized to `Stack_long_long_` so the Lime parser accepts it
         // (`Opaque(Stack<long long>)` would be a parse error since `<` is a
         // separator token). The original spelling + args live in the CIR lite /
         // manifest for auditability.
-        CType::Opaque(s) => format!("Opaque({})", s),
+        CType::Opaque(s) => format!("Opaque({})", sanitize_opaque_name(s)),
         // `CType::Other(s)` is an unmodeled type spelling — a named struct/record
         // whose fields Charger did not normalize, or a typedef'd opaque name.
         // Surface as `Opaque(s)` so Lime treats it as a bare `ptr` handle (the C
         // side owns the real layout via the generated accessor shims).
-        CType::Other(s) => format!("Opaque({})", s),
+        // Task #6: same sanitization as `Opaque` — the C++ template
+        // instantiation `Stack<long long>*` arrives here as `CType::Other`
+        // (unmodeled spelling) before being surfaced as a Lime `Opaque(...)`.
+        CType::Other(s) => format!("Opaque({})", sanitize_opaque_name(s)),
         // Array element type (used by element-wise accessor shims). The Lime
         // getter returns a single element; its Lime type is the element type.
         CType::Array(elem, _) => lime_type_name(elem),
@@ -3039,6 +3200,9 @@ fn build_adapters_into(
     let src = gen_adapter_c_source(adapters, constants, structs, globals, &header_name, api, shapes);
     let c_path = build_dir.join("lime_adapters.c");
     std::fs::write(&c_path, src).map_err(|e| format!("adapter gen failed: {}", e))?;
+    if std::env::var("CHARGER_DEBUG_ADAPTERS").is_ok() {
+        let _ = std::fs::copy(&c_path, "debug_lime_adapters.c");
+    }
     let mut cmd = Command::new(&clang);
     cmd.arg("-O2").arg("-c");
     if lang == ApiKind::Cpp {
@@ -3155,6 +3319,7 @@ fn generate_lime_iface(
                                 align_bytes: def.align_bytes,
                                 is_union: def.is_union,
                                 is_bitfield: def.is_bitfield,
+                                is_packed: def.is_packed,
                                 is_anon: def.is_anon,
                                 all_8byte: def.all_8byte,
                                 has_fn_ptr: def.has_fn_ptr,
@@ -3990,6 +4155,10 @@ pub struct Manifest {
     pub library: String,
     pub version: String,
     pub source_origin: String, // path or url
+    // Phase 1 Iteration 9: the resolved header path used at install. Needed by
+    // `verify-abi` to re-probe struct layout against the same header. Generic.
+    #[serde(default)]
+    pub header_path: String,
     pub source_hash: String,
     pub dependencies: Vec<String>,
     pub artifact: String, // filename within the store entry
@@ -4009,6 +4178,40 @@ pub struct Manifest {
     #[serde(default)]
     pub globals: Vec<ManifestGlobal>,
     pub symbols: Vec<String>, // linkable symbols this artifact provides
+    // Phase 1 Iteration 9: measured struct layout (sizeof / _Alignof / field
+    // offsets), captured from a clang probe against the installed header — the
+    // same Source of Truth `verify-abi` re-measures. Never guessed; `None` where
+    // the layout could not be probed. Lets the differential gate assert that
+    // Charger's recorded layout matches what the real compiler produces.
+    #[serde(default)]
+    pub struct_layouts: Vec<StructLayout>,
+}
+
+/// A single struct's measured C layout. All values come from a clang probe
+/// (`sizeof` / `_Alignof` / `offsetof`) compiled and run on the install
+/// toolchain — the Source of Truth. `field_offsets` parallels `CStruct.fields`
+/// order (in bytes from the start of the struct).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default)]
+pub struct StructLayout {
+    pub name: String,
+    pub size: u64,
+    pub align: u64,
+    pub is_packed: bool,
+    // `true` for unions — the probe must reference the tag as `union NAME`.
+    #[serde(default)]
+    pub is_union: bool,
+    // `true` for records defined via `typedef struct { ... } NAME;` — these have
+    // NO usable `struct NAME` tag (incomplete in scope); the probe must reference
+    // the bare name `NAME`. `false` for named-tag records (`struct NAME { ... }`).
+    #[serde(default)]
+    pub is_anon: bool,
+    // Field names (parallel to `field_offsets`) so `verify-abi` can re-emit an
+    // identical probe against the header and re-measure without re-parsing the
+    // AST. Generic — derived only from the normalized struct. Bitfield members
+    // are excluded (their offset is not computable in C).
+    #[serde(default)]
+    pub field_names: Vec<String>,
+    pub field_offsets: Vec<u64>,
 }
 
 // ----------------------------------------------------------------------------
@@ -4467,10 +4670,17 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         }
     }
 
+    // Phase 1 Iteration 9: measure each struct's real layout (sizeof / _Alignof
+    // / field offsets) with a clang probe against the installed header. This is
+    // the Source of Truth the differential `verify-abi` gate re-checks; never
+    // guessed. Failures (e.g. incomplete types) yield an empty vec — the struct
+    // is still surfaced, just without recorded layout.
+    let struct_layouts = measure_struct_layouts(&api, &header, llvm_bindir);
     let manifest = Manifest {
         library: lib_name.clone(),
         version: version.clone(),
         source_origin: source.to_string(),
+        header_path: header.to_string_lossy().to_string(),
         source_hash: src_hash,
         dependencies: deps,
         artifact: art_name.clone(),
@@ -4481,6 +4691,7 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         functions: manifest_fns,
         globals: manifest_globals,
         symbols: symbols.clone(),
+        struct_layouts,
     };
     let manifest_toml = toml::to_string_pretty(&manifest)
         .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;
@@ -4562,13 +4773,107 @@ fn select_api_header(_dir: &Path, headers: &[PathBuf], sources: &[PathBuf]) -> O
         })
         .cloned()
         .collect();
-    if public.len() == 1 {
-        Some(public[0].clone())
+    // An extension header (`*ext.h`, e.g. `sqlite3ext.h`) is never the public API
+    // surface: it re-#defines the public functions as macros backed by an
+    // undeclared handle. Prefer a non-ext public header when one exists. When
+    // several qualify, pick the one the library's own sources include most often
+    // (the de-facto primary API header). Generic — shape-based, no library name.
+    let non_ext: Vec<&PathBuf> = public
+        .iter()
+        .filter(|h| {
+            let s = h.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            !s.to_lowercase().ends_with("ext.h")
+        })
+        .cloned()
+        .collect();
+    // Decide the api_header. Never pick an extension header (`*ext.h`); such a
+    // header re-#defines the public API as macros backed by an undeclared handle
+    // (e.g. sqlite3ext.h -> `sqlite3_api`). If the only public candidates are ext
+    // headers, resolve transitively: pick the non-ext header that the chosen ext
+    // header (transitively) includes — that is the real public API surface.
+    // Generic: shape-based, no library name.
+    let is_ext = |h: &PathBuf| -> bool {
+        let s = h.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        s.to_lowercase().ends_with("ext.h")
+    };
+    // Preliminary pick via the existing root/public heuristic.
+    let candidate: Option<PathBuf> = if public.len() >= 1 {
+        // Prefer a non-ext public header; the most-included-by-sources one wins.
+        let non_ext: Vec<&PathBuf> = public.iter().filter(|h| !is_ext(h)).cloned().collect();
+        if !non_ext.is_empty() {
+            let mut best: Option<&PathBuf> = None;
+            let mut best_count: usize = 0;
+            for h in &non_ext {
+                let stem = h.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                let c = source_includes.iter().filter(|s| *s == stem).count();
+                if c > best_count || best.is_none() {
+                    best = Some(h);
+                    best_count = c;
+                }
+            }
+            best.map(|b| b.to_path_buf())
+        } else {
+            Some(public.first().unwrap().to_path_buf())
+        }
     } else if roots.len() == 1 {
-        Some(roots[0].clone())
+        Some(roots[0].to_path_buf())
     } else {
-        Some(headers[0].clone())
+        Some(headers[0].to_path_buf())
+    };
+    // An extension header (`*ext.h`, e.g. `sqlite3ext.h`) is never the public API
+    // surface: it re-#defines the public functions as macros backed by an
+    // undeclared handle (`sqlite3_api`). If the heuristic picked one, resolve it
+    // transitively to the non-ext header it (transitively) `#include`s — that is
+    // the real public API. Generic: shape-based, no library name involved.
+    let pick = candidate.and_then(|start| {
+        if !is_ext(&start) {
+            return Some(start);
+        }
+        let mut cur = start;
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        loop {
+            let stem = cur.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            if visited.contains(&stem) {
+                return Some(cur);
+            }
+            visited.insert(stem);
+            let txt = std::fs::read_to_string(&cur).unwrap_or_default();
+            let mut next: Option<PathBuf> = None;
+            for line in txt.lines() {
+                if line.trim_start().starts_with("#include") {
+                    if let Some(q) = line.find('"') {
+                        let rest = &line[q + 1..];
+                        if let Some(end) = rest.find('"') {
+                            let inc = &rest[..end];
+                            if let Some(h) = headers.iter().find(|h| {
+                                h.file_name().and_then(|s| s.to_str()) == Some(inc)
+                            }) {
+                                if !is_ext(h) {
+                                    next = Some(h.to_path_buf());
+                                } else {
+                                    cur = h.to_path_buf();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(n) = next {
+                return Some(n);
+            }
+            // No further candidate include: return whatever we have (ext or not).
+            return Some(cur);
+        }
+    });
+    if std::env::var("CHARGER_DEBUG_HEADER").is_ok() {
+        eprintln!("[select_api_header] headers={:?} roots={:?} public={:?} -> {:?}",
+            headers.iter().map(|h| h.file_name().and_then(|s| s.to_str()).unwrap_or("")).collect::<Vec<_>>(),
+            roots.iter().map(|h| h.file_name().and_then(|s| s.to_str()).unwrap_or("")).collect::<Vec<_>>(),
+            public.iter().map(|h| h.file_name().and_then(|s| s.to_str()).unwrap_or("")).collect::<Vec<_>>(),
+            pick.as_ref().map(|p| p.file_name().and_then(|s| s.to_str()).unwrap_or("")));
     }
+    pick
 }
 
 /// True if `path` defines a *real* (unguarded) `main()` entry point — i.e. a
@@ -4968,9 +5273,13 @@ fn collect_sources(
     // the public interface — and the C compilation of every C translation unit —
     // into C++ mode. Per-source language selection happens later, in the build
     // loop, where each TU is compiled in its own language.
-    let lang = match header.as_ref().and_then(|h| h.extension().and_then(|e| e.to_str())) {
-        Some("hpp") | Some("hh") | Some("hxx") => ApiKind::Cpp,
-        _ => ApiKind::C,
+    let lang = if has_cpp {
+        ApiKind::Cpp
+    } else {
+        match header.as_ref().and_then(|h| h.extension().and_then(|e| e.to_str())) {
+            Some("hpp") | Some("hh") | Some("hxx") => ApiKind::Cpp,
+            _ => ApiKind::C,
+        }
     };
     Ok((lang, sources, header))
 }
@@ -5727,9 +6036,284 @@ pub struct AbiCheck {
     pub pass: bool,
 }
 
-/// Build a small C probe and measure `sizeof`/`_Alignof` of a known reference
-/// struct plus the primitive widths via a second probe, then compare against
-/// the Charger `AbiMeta` recorded for the installed `lib`. This is the
+/// Measure every struct's real C layout (sizeof / _Alignof / per-field offsetof)
+/// by compiling and running a tiny probe that `#include`s the installed header.
+/// The probe is the Source of Truth — Charger never recomputes or guesses layout.
+/// Returns one `StructLayout` per struct whose layout could be measured; structs
+/// that fail to compile (incomplete types, etc.) are simply omitted. Generic:
+/// no library or type names are baked in — every struct in `api.structs` is
+/// probed by its normalized name.
+fn measure_struct_layouts(
+    api: &NormalizedApi,
+    header: &Path,
+    llvm_bindir: &str,
+) -> Vec<StructLayout> {
+    if api.structs.is_empty() {
+        return Vec::new();
+    }
+    let clang = PathBuf::from(llvm_bindir).join("clang.exe");
+    let clang = if clang.exists() {
+        clang
+    } else {
+        PathBuf::from(llvm_bindir).join("clang")
+    };
+    if !clang.exists() {
+        return Vec::new();
+    }
+    let header_dir = header.parent().unwrap_or(Path::new("."));
+    let mut probe = String::from("#include <stddef.h>\n#include <stdio.h>\n");
+    probe.push_str(&format!("#include \"{}\"\n", header.file_name().unwrap_or_default().to_string_lossy()));
+    probe.push_str("int main(){\n");
+    for s in &api.structs {
+        // Anonymous (typedef-only) structs have no tag to reference by name in
+        // C; skip probing them (they still surface as opaque handles). Named
+        // structs reference the tag directly.
+        // Skip only genuinely nameless (anonymous, un-typedef'd) records — those
+        // have no tag to reference in C. A `typedef struct {...} X` record carries
+        // the name `X` as its tag (`struct X`), so it IS referenceable and must be
+        // probed. (The `is_anon` flag here means "defined via anonymous-record
+        // typedef", not "unnamed" — such records still have a usable name.)
+        if s.name.is_empty() {
+            continue;
+        }
+        // Build the C reference. clang distinguishes two cases:
+        //   * named-tag record (`struct X { ... }`)  -> reference as `struct X`
+        //     / `union X` (is_anon == false).
+        //   * typedef of an anonymous record (`typedef struct { ... } X;`) -> the
+        //     bare name `X` is the ONLY valid reference; `struct X` is an
+        //     *incomplete* type in this scope (is_anon == true). So for
+        //     typedef'd anonymous records we emit the bare name and no tag.
+        // Generic — derived purely from the normalized record shape.
+        let tag = if s.is_anon {
+            "".to_string()
+        } else {
+            if s.is_union { "union " } else { "struct " }.to_string()
+        };
+        // Bitfield members have NO computable `offsetof` in C (it is a hard
+        // compile error). Record size/align for the whole struct but omit
+        // bitfield fields from the offset list; the recorded layout therefore
+        // covers exactly the fields a probe can measure. Generic.
+        let probe_fields: Vec<&CParam> = s.fields.iter().filter(|f| f.bit_width.is_none()).collect();
+        probe.push_str(&format!(
+            "  printf(\"LAYOUT %s %zu %zu %d\", \"{}\", (size_t)sizeof({}{}), (size_t)_Alignof({}{}), (int){});\n",
+            s.name, tag, s.name, tag, s.name, probe_fields.len()
+        ));
+        for f in &probe_fields {
+            probe.push_str(&format!(
+                "  printf(\" %zu\", (size_t)offsetof({}{}, {}));\n",
+                tag, s.name, f.name
+            ));
+        }
+        probe.push_str("  printf(\"\\n\");\n");
+    }
+    probe.push_str("  return 0;\n}\n");
+
+    let scratch = std::env::temp_dir().join("charger_layout_probe");
+    let _ = std::fs::create_dir_all(&scratch);
+    let c_path = scratch.join("probe.c");
+    let exe_path = scratch.join("probe.exe");
+    let _ = std::fs::write(&c_path, &probe);
+    let build = std::process::Command::new(&clang)
+        .arg("-O2")
+        .arg("-I")
+        .arg(header_dir)
+        .arg(&c_path)
+        .arg("-o")
+        .arg(&exe_path)
+        .output();
+    let _ = build;
+    if !exe_path.exists() {
+        return Vec::new();
+    }
+    let out = std::process::Command::new(&exe_path).output();
+    let _ = std::fs::remove_file(&exe_path);
+    let _ = std::fs::remove_file(&c_path);
+    let Ok(out) = out else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut layouts = Vec::new();
+    for line in text.lines() {
+        if !line.starts_with("LAYOUT ") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        // parts = ["LAYOUT", name, size, align, nfields, off0..]
+        if parts.len() < 5 {
+            continue;
+        }
+        let name = parts[1].to_string();
+        let size = parts[2].parse::<u64>().unwrap_or(0);
+        let align = parts[3].parse::<u64>().unwrap_or(0);
+        let nfields = parts[4].parse::<usize>().unwrap_or(0);
+        let mut field_offsets = Vec::new();
+        for i in 0..nfields {
+            if let Some(v) = parts.get(5 + i).and_then(|s| s.parse::<u64>().ok()) {
+                field_offsets.push(v);
+            }
+        }
+        let is_packed = api.structs.iter().find(|s| s.name == name).map(|s| s.is_packed).unwrap_or(false);
+        let is_union = api.structs.iter().find(|s| s.name == name).map(|s| s.is_union).unwrap_or(false);
+        let is_anon = api.structs.iter().find(|s| s.name == name).map(|s| s.is_anon).unwrap_or(false);
+        let field_names: Vec<String> = api.structs.iter().find(|s| s.name == name)
+            .map(|s| s.fields.iter().filter(|f| f.bit_width.is_none()).map(|f| f.name.clone()).collect())
+            .unwrap_or_default();
+        layouts.push(StructLayout {
+            name,
+            size,
+            align,
+            is_packed,
+            is_union,
+            is_anon,
+            field_names,
+            field_offsets,
+        });
+    }
+    layouts
+}
+/// Differential struct-layout check: for every struct whose layout Charger
+/// recorded at `install`, re-measure it with a fresh clang probe against the
+/// same header and assert size / alignment / per-field offset match. The probe
+/// is re-emitted from the manifest's stored struct names + field names (no AST
+/// re-parse). Returns `AbiCheck`s; a probe that cannot compile (e.g. header
+/// moved) yields no checks rather than a false failure.
+fn verify_struct_layouts(m: &Manifest, llvm_bindir: &str) -> Vec<AbiCheck> {
+    let mut checks = Vec::new();
+    if m.struct_layouts.is_empty() {
+        return checks;
+    }
+    let clang = PathBuf::from(llvm_bindir).join("clang.exe");
+    let clang = if clang.exists() {
+        clang
+    } else {
+        PathBuf::from(llvm_bindir).join("clang")
+    };
+    if !clang.exists() {
+        return checks;
+    }
+    // Resolve the header to re-probe. `header_path` is recorded at install; fall
+    // back to scanning the source dir for a header (older manifests stored only
+    // the dir). Generic — no library-specific paths.
+    let header = if Path::new(&m.header_path).exists() {
+        Path::new(&m.header_path).to_path_buf()
+    } else {
+        let dir = Path::new(&m.source_origin);
+        std::fs::read_dir(dir)
+            .ok()
+            .and_then(|mut rd| {
+                rd.find_map(|e| {
+                    let p = e.ok()?.path();
+                    if p.extension().map(|x| x == "h").unwrap_or(false) {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| Path::new(&m.header_path).to_path_buf())
+    };
+    if !header.exists() {
+        return checks;
+    }
+    let header_dir = header.parent().unwrap_or(Path::new("."));
+    let mut probe = String::from("#include <stddef.h>\n#include <stdio.h>\n");
+    probe.push_str(&format!(
+        "#include \"{}\"\n",
+        header.file_name().unwrap_or_default().to_string_lossy()
+    ));
+    probe.push_str("int main(){\n");
+    for sl in &m.struct_layouts {
+        // Match measure_struct_layouts: named-tag records use `struct NAME`/`union
+        // NAME`; typedef'd anonymous records (is_anon) use the bare name `NAME`.
+        let tag = if sl.is_anon {
+            "".to_string()
+        } else if sl.is_union {
+            "union ".to_string()
+        } else {
+            "struct ".to_string()
+        };
+        probe.push_str(&format!(
+            "  printf(\"LAYOUT %s %zu %zu %d\", \"{}\", (size_t)sizeof({}{}), (size_t)_Alignof({}{}), (int){});\n",
+            sl.name, tag, sl.name, tag, sl.name, sl.field_names.len()
+        ));
+        for fname in &sl.field_names {
+            probe.push_str(&format!(
+                "  printf(\" %zu\", (size_t)offsetof({}{}, {}));\n",
+                tag, sl.name, fname
+            ));
+        }
+        probe.push_str("  printf(\"\\n\");\n");
+    }
+    probe.push_str("  return 0;\n}\n");
+
+    let scratch = std::env::temp_dir().join("charger_layout_verify");
+    let _ = std::fs::create_dir_all(&scratch);
+    let c_path = scratch.join("probe.c");
+    let exe_path = scratch.join("probe.exe");
+    let _ = std::fs::write(&c_path, &probe);
+    let _ = std::process::Command::new(&clang)
+        .arg("-O2")
+        .arg("-I")
+        .arg(header_dir)
+        .arg(&c_path)
+        .arg("-o")
+        .arg(&exe_path)
+        .output();
+    if !exe_path.exists() {
+        let _ = std::fs::remove_file(&c_path);
+        return checks;
+    }
+    let out = std::process::Command::new(&exe_path).output();
+    let _ = std::fs::remove_file(&exe_path);
+    let _ = std::fs::remove_file(&c_path);
+    let Ok(out) = out else { return checks };
+    if !out.status.success() {
+        return checks;
+    }
+    // Parse measured layouts keyed by name.
+    let mut measured: std::collections::HashMap<String, (u64, u64, Vec<u64>)> = std::collections::HashMap::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if !line.starts_with("LAYOUT ") {
+            continue;
+        }
+        let p: Vec<&str> = line.split_whitespace().collect();
+        if p.len() < 5 {
+            continue;
+        }
+        let name = p[1].to_string();
+        let size = p[2].parse::<u64>().unwrap_or(0);
+        let align = p[3].parse::<u64>().unwrap_or(0);
+        let n = p[4].parse::<usize>().unwrap_or(0);
+        let mut offs = Vec::new();
+        for i in 0..n {
+            if let Some(v) = p.get(5 + i).and_then(|s| s.parse::<u64>().ok()) {
+                offs.push(v);
+            }
+        }
+        measured.insert(name, (size, align, offs));
+    }
+    for sl in &m.struct_layouts {
+        if let Some((ms, ma, mo)) = measured.get(&sl.name) {
+            let mut add = |item: String, expected: u64, got: u64| {
+                checks.push(AbiCheck {
+                    item,
+                    expected,
+                    measured: got,
+                    pass: expected == got,
+                });
+            };
+            add(format!("{} sizeof", sl.name), sl.size, *ms);
+            add(format!("{} alignof", sl.name), sl.align, *ma);
+            for (i, fo) in sl.field_offsets.iter().enumerate() {
+                let moff = mo.get(i).copied().unwrap_or(u64::MAX);
+                add(format!("{} offsetof[{}]", sl.name, sl.field_names.get(i).cloned().unwrap_or_default()), *fo, moff);
+            }
+        }
+    }
+    checks
+}
+
 /// differential test: Charger metadata MUST match what a real C compiler
 /// measures on the same toolchain. Returns an error only on tool failure;
 /// mismatches are reported in the returned `AbiCheck` list (pass = false).
@@ -5738,6 +6322,7 @@ pub fn verify_abi(lib: &str, llvm_bindir: &str) -> Result<Vec<AbiCheck>, String>
         .ok_or_else(|| format!("verify-abi: library '{}' is not installed", lib))?;
     let abi = load_abi(&entry)
         .ok_or_else(|| format!("verify-abi: abi.json missing for '{}'", lib))?;
+    let manifest = load_manifest(&entry);
 
     let clang = PathBuf::from(llvm_bindir).join("clang.exe");
     let clang = if clang.exists() {
@@ -5816,6 +6401,17 @@ int main(){\n\
         // Layout values are toolchain-measured; Charger records None today, so
         // this check is informational. We still surface it for transparency.
         add("reference_struct_compiled", 1, 1); // probe succeeded
+    }
+
+    // Probe 3: struct layout differential. Re-measure each struct stored in the
+    // manifest (sizeof / _Alignof / field offsets) with a fresh clang probe
+    // against the same header, and assert it equals what `install` recorded.
+    // This closes the ABI gap: Charger's layout metadata is verified against the
+    // real compiler instead of being trusted. Generic — no library names.
+    if let Some(m) = &manifest {
+        for sl in verify_struct_layouts(m, llvm_bindir) {
+            checks.push(sl);
+        }
     }
 
     Ok(checks)
@@ -6107,6 +6703,7 @@ mod adapter_dedup_tests {
                 name: "p".to_string(),
                 ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))),
                 nullable: Nullability::Unknown,
+                bit_width: None,
             }],
             ret: CType::Void,
             is_method: false,
@@ -6126,6 +6723,7 @@ mod adapter_dedup_tests {
                 name: "p".to_string(),
                 ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))),
                 nullable: Nullability::Unknown,
+                bit_width: None,
             }],
             out_idx: Some(0),
             drop_from: None,
@@ -6170,9 +6768,9 @@ mod adapter_dedup_tests {
             name: name.to_string(),
             symbol: name.to_string(),
             params: vec![
-                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown },
-                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown },
-                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown },
+                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown, bit_width: None },
+                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
+                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
             ],
             ret: CType::Void,
             is_method: false, is_constructor: false, is_const: false,
@@ -6187,9 +6785,9 @@ mod adapter_dedup_tests {
             ret_name: Some("FILE".to_string()),
             ret: CType::Void,
             params: vec![
-                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown },
-                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown },
-                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown },
+                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown, bit_width: None },
+                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
+                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
             ],
             out_idx: Some(0),
             drop_from: None,

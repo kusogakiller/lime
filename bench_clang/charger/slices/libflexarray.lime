@@ -1,0 +1,20 @@
+// Iteration 9 regression: flexible array member (`struct Buffer { size_t len; char data[]; }`).
+// Charger must NOT generate an invalid fixed-size accessor and must preserve the
+// struct layout (the FAM carries no size in sizeof). The driver allocates via
+// `lime_make_Buffer_flex`, fills data[] through element accessors, and reads the
+// FAM back via `flex_sum`. Generic C only.
+extern fn lime_make_Buffer_flex(Int: a0) -> Opaque(Buffer) "lime_make_Buffer_flex"
+extern fn lime_set_Buffer_len(Opaque(Buffer): a0, Int: a1) "lime_set_Buffer_len"
+extern fn lime_set_Buffer_data_i(Opaque(Buffer): a0, Int: a1, Int: a2) "lime_set_Buffer_data_i"
+extern fn flex_sum(Opaque(Buffer): a0) -> Int "flex_sum"
+
+fn main():
+    let b = lime_make_Buffer_flex(4)
+    lime_set_Buffer_len(b, 4)
+    lime_set_Buffer_data_i(b, 0, 1)
+    lime_set_Buffer_data_i(b, 1, 2)
+    lime_set_Buffer_data_i(b, 2, 3)
+    lime_set_Buffer_data_i(b, 3, 4)
+    let s = flex_sum(b)          // 1 + 2 + 3 + 4 = 10
+    print(s)
+    print("\n")
