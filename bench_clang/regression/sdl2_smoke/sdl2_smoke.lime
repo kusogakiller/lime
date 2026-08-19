@@ -1,0 +1,30 @@
+// Regression smoke — SDL2.
+// Strict subset of the proven SDL2 native-execution gate.
+// Goal: detect ABI/adapter regressions in Charger for this library on every change.
+// No library-specific code; symbols matched by name against the store manifest.
+//
+// SDL_Init(0) initializes no subsystems (works headless, no display needed),
+// then we read the platform string and the last-error buffer, then SDL_Quit().
+// Confirmed against the SDL2 2.30.9 clang AST:
+//   SDL_Init(Uint32)->int, SDL_Quit(void)->void,
+//   SDL_GetError(void)->const char*, SDL_GetPlatform(void)->const char*.
+
+extern fn SDL_Init(Int: flags) -> Int "SDL_Init"
+extern fn SDL_Quit() -> Unit "SDL_Quit"
+extern fn SDL_GetError() -> String "SDL_GetError"
+extern fn SDL_GetPlatform() -> String "SDL_GetPlatform"
+
+fn main():
+    // 0 = no subsystems (headless-safe). Returns 0 on success.
+    let rc = SDL_Init(0)
+    print(rc)
+    print("\n")
+    // Platform string round-trips from C (e.g. "Windows" on this target).
+    let plat = SDL_GetPlatform()
+    print(plat)
+    print("\n")
+    // Error buffer is empty after a clean init.
+    let err = SDL_GetError()
+    print(err)
+    print("\n")
+    SDL_Quit()

@@ -2230,6 +2230,12 @@ fn c_field_c_type(t: &CType, structs: &[CStruct]) -> String {
     let is_complete = |name: &str| -> bool {
         structs.iter().any(|st| st.name == name && !st.fields.is_empty())
     };
+    let is_union_name = |name: &str| -> bool {
+        structs.iter().any(|st| st.name == name && st.is_union)
+    };
+    let record_tag = |name: &str| -> &'static str {
+        if is_union_name(name) { "union" } else { "struct" }
+    };
     match t {
         // `char*` / `const char*` -> a real C string pointer.
         CType::String => "char*".to_string(),
@@ -2243,7 +2249,7 @@ fn c_field_c_type(t: &CType, structs: &[CStruct]) -> String {
             // opaque handle -> `void*`.
             if let CType::Struct(s) | CType::Other(s) | CType::Opaque(s) = inner.as_ref() {
                 if is_record(s) {
-                    return format!("struct {}*", s);
+                    return format!("{} {}*", record_tag(s), s);
                 }
                 return "void*".to_string();
             }
@@ -2262,7 +2268,7 @@ fn c_field_c_type(t: &CType, structs: &[CStruct]) -> String {
             // (e.g. `uInt`) renders verbatim and compiles via the header.
             if is_record(s) {
                 if is_complete(s) {
-                    format!("struct {}*", s)
+                    format!("{} {}*", record_tag(s), s)
                 } else {
                     "void*".to_string()
                 }
@@ -2429,6 +2435,12 @@ fn c_type_text(t: &CType) -> String {
 fn c_struct_spelling(st: &CStruct) -> String {
     if st.is_anon {
         st.name.clone()
+    } else if st.is_union {
+        // A C union (`typedef union SDL_Event`) must be spelled `union <name>` in
+        // generated C accessors; emitting `struct <name>` makes the tag type
+        // mismatch the real definition and fails to compile. Generic: driven by
+        // the record's `is_union` flag from the clang AST.
+        format!("union {}", st.name)
     } else {
         format!("struct {}", st.name)
     }
@@ -4632,8 +4644,29 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // we compile per-source and collect the object paths.
     let mut obj_paths: Vec<PathBuf> = Vec::new();
     for s in &compiled_sources {
+        // Generic: object filenames MUST be unique across the ENTIRE source
+        // tree, not just per-directory. Multi-directory C libraries (SDL2,
+        // FFmpeg, ...) ship same-named .c files in different backends
+        // (e.g. src/timer/windows/SDL_systimer.c and
+        // src/timer/dummy/SDL_systimer.c). Naming objects by stem only makes
+        // them collide in the archive; llvm-ar then keeps the FIRST member and
+        // the linker silently binds the wrong/empty backend (undefined
+        // symbols). Derive the object name from the source path relative to the
+        // corpus root so every TU gets a distinct archive member. Generic —
+        // no library-specific names.
         let stem = s.file_stem().and_then(|x| x.to_str()).unwrap_or("src").to_string();
-        let obj_path = build_dir.join(format!("{}.obj", sanitize_name(&stem)));
+        let rel = s
+            .strip_prefix(&src_path)
+            .unwrap_or(s)
+            .with_extension("");
+        let rel_str = rel.to_string_lossy().into_owned();
+        let path_stem = rel_str.replace(['/', '\\'], "_").replace(['.', ' '], "_");
+        let obj_name = if path_stem.is_empty() {
+            sanitize_name(&stem)
+        } else {
+            format!("{}.obj", sanitize_name(&path_stem))
+        };
+        let obj_path = build_dir.join(obj_name);
         // Phase 1 Iteration 8: compile each translation unit in its OWN language.
         // One C++ file anywhere in the tree must NOT force the entire library
         // into C++ mode (that would break every C TU — e.g. libjpeg-turbo mixes
@@ -5192,21 +5225,36 @@ fn is_main_definition(line: &str) -> bool {
     false
 }
 
+/// Inactive-platform backend directory names. Real-world C libraries (SDL2,
+/// FFmpeg, libjpeg-turbo, ...) ship every OS backend's translation units in
+/// their source tree; only the host platform's backends actually compile on a
+/// given target. Compiling an inactive backend (e.g. SDL2's `src/video/qnx`,
+/// which `#include <screen/screen.h>`) fails with a missing system header and
+/// aborts the whole native build. These names are OS/platform identifiers, NOT
+/// library names — skipping them is generic. The active host backends
+/// (`windows`, `win32`, `direct3d*`, `directsound`, `dummy`, `generic`, ...) are
+/// deliberately NOT in this list so they remain compiled.
+const INACTIVE_PLATFORMS: &[&str] = &[
+    "qnx", "raspberrypi", "rpi", "wayland", "x11", "xorg", "kmsdrm", "vivante",
+    "alsa", "pulseaudio", "jack", "pipewire", "oss", "sndio", "coreaudio",
+    "directfb", "nacl", "android", "macosx", "apple", "cygwin", "riscos", "os2",
+    "amiga", "dreamcast", "pandora", "symbian", "ps2", "ps3", "ps4", "ps5",
+    "vita", "wiiu", "switch", "n3ds", "stadia", "tvos", "visionos", "wingdk",
+    "xbox", "windowsce", "dlopen", "pthread", "unix", "linux", "freebsd",
+    "netbsd", "openbsd", "solaris", "hpux", "irix", "aix", "stdcpp", "gdk",
+    "mac", "darwin", "libusb", "main",
+];
+
 fn collect_sources(
     path: &Path,
     config: &ChargerConfig,
 ) -> Result<(ApiKind, Vec<PathBuf>, Option<PathBuf>), String> {
     let mut sources = Vec::new();
     let mut header = None;
-    let mut has_cpp = false;
     if path.is_file() {
         match path.extension().and_then(|e| e.to_str()) {
             Some("h") | Some("hpp") | Some("hh") => header = Some(path.to_path_buf()),
             Some("c") => sources.push(path.to_path_buf()),
-            Some("cpp") | Some("cc") | Some("cxx") => {
-                has_cpp = true;
-                sources.push(path.to_path_buf())
-            }
             _ => return Err("unsupported source file".to_string()),
         }
     } else {
@@ -5239,8 +5287,26 @@ fn collect_sources(
                     // not force a pure-C library (libjpeg-turbo, zlib) to be
                     // compiled as C++ — doing so rejects legacy C (`register`
                     // storage class) under -std=c++17. Generic: name-based skip,
-                    // no library names.
-                    if matches!(name, "fuzz" | "test" | "tests" | "benchmark" | "benchmarks" | "examples" | "example" | "demo" | "tools" | "utils" | "contrib" | "third_party" | "thirdparty" | "3rdparty") {
+                    // no library names. Matching is case-insensitive so
+                    // `Demos`/`Examples` (e.g. SDL2's Xcode-iOS/Demos) are skipped
+                    // just like `demo`/`examples`. Generic directory-name skip.
+                    let lower = name.to_ascii_lowercase();
+                    if matches!(lower.as_str(),
+                        "fuzz" | "test" | "tests" | "benchmark" | "benchmarks"
+                        | "examples" | "example" | "demo" | "demos" | "docs" | "doc"
+                        | "tools" | "utils" | "contrib" | "third_party" | "thirdparty"
+                        | "3rdparty" | "cmake" | "cmake-build" | "build-scripts"
+                        | "visualtest" | "testautomation" | "automated"
+                        | "xcode-ios" | "xcode-macos" | "xcode-tvos" | "xcode-visionos"
+                        | "android-project" | "ios" | "emscripten" | "ngage" | "haiku"
+                        | "pandora" | "n3ds" | "psp" | "vita" | "wiiu" | "switch"
+                        | "raspberrypi" | "riscos" | "os2" | "ps2" | "windowsce"
+                        | "winrt" | "wingdk" | "xbox" | "ngage" | "symbian"
+                        | "pkgconfig" | "visualc" | "visualc-arm64" | "visualc-armuwp"
+                        | "visualc-windows-phone" | "visualc-windows-store"
+                        | "watcom" | "mpw" | "macosx" | "apple" | "amiga" | "dreamcast"
+                        | "ps3" | "ps4" | "ps5" | "stadia" | "tvos" | "visionos"
+                    ) || INACTIVE_PLATFORMS.contains(&lower.as_str()) {
                         continue;
                     }
                     stack.push(p);
@@ -5249,10 +5315,14 @@ fn collect_sources(
                 match p.extension().and_then(|e| e.to_str()) {
                     Some("h") | Some("hpp") | Some("hh") => headers.push(p),
                     Some("c") => sources.push(p),
-                    Some("cpp") | Some("cc") | Some("cxx") => {
-                        has_cpp = true;
-                        sources.push(p)
-                    }
+                    // C-only design: C++ translation units are platform backends
+                    // (WinRT/Xbox/GDK/Haiku/N-Gage/...) that conflict with the
+                    // active C backend and require non-host SDKs. The public ABI
+                    // is C (decided by the API header extension), so C++ TUs are
+                    // never needed to build or link the C interface. Skip them
+                    // rather than letting a stray .cpp flip the whole tree to
+                    // C++ or pull in a missing-platform header. Generic.
+                    Some("cpp") | Some("cc") | Some("cxx") => {}
                     _ => {}
                 }
             }
@@ -5436,18 +5506,16 @@ fn collect_sources(
     }
     // The library's public API language is determined by the API HEADER's
     // extension, not by the presence of any C++ file anywhere in the tree.
-    // Real-world C libraries frequently ship C++ harnesses/fuzzers alongside the
-    // C sources (libjpeg-turbo, curl, OpenSSL, FFmpeg, ...); those must NOT force
-    // the public interface — and the C compilation of every C translation unit —
-    // into C++ mode. Per-source language selection happens later, in the build
-    // loop, where each TU is compiled in its own language.
-    let lang = if has_cpp {
-        ApiKind::Cpp
-    } else {
-        match header.as_ref().and_then(|h| h.extension().and_then(|e| e.to_str())) {
-            Some("hpp") | Some("hh") | Some("hxx") => ApiKind::Cpp,
-            _ => ApiKind::C,
-        }
+    // Real-world C libraries frequently ship C++ harnesses/fuzzers/platform
+    // backends alongside the C sources (libjpeg-turbo, curl, SDL2, OpenSSL,
+    // FFmpeg, ...); those must NOT force the public interface — and the C
+    // compilation of every C translation unit — into C++ mode. Per-source
+    // language selection happens later, in the build loop, where each TU is
+    // compiled in its own language. Generic: derived purely from the API
+    // header's file extension, no library names.
+    let lang = match header.as_ref().and_then(|h| h.extension().and_then(|e| e.to_str())) {
+        Some("hpp") | Some("hh") | Some("hxx") => ApiKind::Cpp,
+        _ => ApiKind::C,
     };
     Ok((lang, sources, header))
 }

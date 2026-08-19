@@ -3965,6 +3965,24 @@ pub fn compile_pipeline(
                                      .arg("/defaultlib:Ws2_32")
                                      .arg("/defaultlib:Mswsock")
                                      .arg("/defaultlib:Kernel32")
+                                     // Common Windows system import libraries that
+                                     // real-world native libraries (SDL2, GDI-based
+                                     // libs, COM-using libs, multimedia, ...) require
+                                     // at link time. Adding them unconditionally is
+                                     // generic and harmless: an unused /defaultlib is
+                                     // simply ignored by the linker. Mirrors the
+                                     // existing Shell32/Advapi32/Ws2_32 entries.
+                                     .arg("/defaultlib:User32")
+                                     .arg("/defaultlib:Ole32")
+                                     .arg("/defaultlib:Oleaut32")
+                                     .arg("/defaultlib:Uuid")
+                                     .arg("/defaultlib:Gdi32")
+                                     .arg("/defaultlib:Winmm")
+                                     .arg("/defaultlib:Setupapi")
+                                     .arg("/defaultlib:Version")
+                                     .arg("/defaultlib:Imm32")
+                                     .arg("/defaultlib:Dinput8")
+                                     .arg("/defaultlib:Dxguid")
                                      // Charger: inject prepared native artifacts (.lib).
                                      .args(&charger_artifacts)
                                      .status();

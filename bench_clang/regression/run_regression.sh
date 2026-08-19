@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_regression.sh — permanent 5-library Charger regression gate.
+# run_regression.sh — permanent Charger regression gate (6 libraries).
 #
 # For each major C library it:
 #   1) re-installs the library via `charger install` (catches AST-extraction,
@@ -16,22 +16,32 @@ cd "$(dirname "$0")/../.." || exit 1
 export PATH="$PATH:/c/Users/szzxl/Downloads/clang+llvm-22.1.8-x86_64-pc-windows-msvc/clang+llvm-22.1.8-x86_64-pc-windows-msvc/bin"
 export LIME_LLVM_BIN="C:\\Users\\szzxl\\Downloads\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\clang+llvm-22.1.8-x86_64-pc-windows-msvc\\bin"
 
-# library corpus source dir  ->  smoke slice (relative to bench_clang/realworld/corpus or regression)
-LIBS="zlib:realworld/corpus/zlib:regression/zlib_smoke/zlib_smoke
-libpng:realworld/corpus/libpng:regression/png_smoke/png_smoke
-sqlite:realworld/corpus/sqlite:regression/sqlite_smoke/sqlite_smoke
-libjpeg:realworld/corpus/libjpeg:regression/jpeg_smoke/jpeg_smoke
-curl:realworld/corpus/curl:regression/curl_smoke/curl_smoke"
+# Format:  lib : corpus-path : smoke-slice(.lime)
+# corpus-path is relative to repo root (bench_clang/...) OR an absolute Windows
+# path (used when the corpus source lives outside the repo, e.g. SDL2 which is
+# kept in Downloads to avoid bloating the git tree). No library-specific logic.
+LIBS="zlib:bench_clang/realworld/corpus/zlib:bench_clang/regression/zlib_smoke/zlib_smoke
+libpng:bench_clang/realworld/corpus/libpng:bench_clang/regression/png_smoke/png_smoke
+sqlite:bench_clang/realworld/corpus/sqlite:bench_clang/regression/sqlite_smoke/sqlite_smoke
+libjpeg:bench_clang/realworld/corpus/libjpeg:bench_clang/regression/jpeg_smoke/jpeg_smoke
+curl:bench_clang/realworld/corpus/curl:bench_clang/regression/curl_smoke/curl_smoke
+sdl2:C:/Users/szzxl/Downloads/lime_corpus_src/SDL2-2.30.9:bench_clang/regression/sdl2_smoke/sdl2_smoke"
 
 PASS=0
 FAIL=0
 for row in $LIBS; do
   lib="${row%%:*}"
   rest="${row#*:}"
-  corpus="bench_clang/${rest%%:*}"
-  smoke="bench_clang/${rest##*:}.lime"
+  corpus="${rest%%:*}"
+  smoke="${rest##*:}.lime"
+  # Absolute corpus path (starts with a drive letter or /) is used verbatim;
+  # otherwise it is relative to the repo root.
+  case "$corpus" in
+    [A-Za-z]:*|/*) corpus_path="$corpus" ;;
+    *) corpus_path="bench_clang/${corpus}" ;;
+  esac
   # 1) re-install (regression in AST/adapter surfaces as install failure)
-  if ! ./target/release/lime.exe charger install "$corpus" >/dev/null 2>&1; then
+  if ! ./target/release/lime.exe charger install "$corpus_path" >/dev/null 2>&1; then
     echo "FAIL  $lib (charger install)"; FAIL=$((FAIL+1)); continue
   fi
   # 2) build smoke slice
