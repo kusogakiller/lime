@@ -22,7 +22,9 @@ extern fn sqlite3_libversion_number() -> Int "sqlite3_libversion_number"
 // sqlite3_threadsafe() -> int (thread-safety mode).
 extern fn sqlite3_threadsafe() -> Int "sqlite3_threadsafe"
 
-// sqlite3_open(const char* filename, sqlite3** ppDb) -> int (out-param handle).
+// sqlite3_open(const char* filename, sqlite3** ppDb) -> int.
+// Charger bridges the out-param (sqlite3**) into a Lime return value via the
+// generated lime_out_sqlite3_open shim, so the handle round-trips directly.
 extern fn sqlite3_open(String: filename) -> Opaque(sqlite3) "lime_out_sqlite3_open"
 
 // sqlite3_close(sqlite3*) -> int.
@@ -50,9 +52,10 @@ fn main():
     print(ts)
     print("\n")
 
-    // 4) Open an in-memory database (out-param handle round-trips to Lime),
-    //    then close it. Proves the out-param→return adapter works and the
-    //    prepared library (including the rtree double* struct) links + runs.
+    // 4) Open an in-memory database (out-param handle round-trips to Lime
+    //    via the generated lime_out_sqlite3_open shim), then close it. Proves
+    //    the out-param→return adapter works and the prepared library (including
+    //    the rtree double* struct) links + runs.
     let db = sqlite3_open(":memory:")
     let rc = sqlite3_close(db)
     print(rc)

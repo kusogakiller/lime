@@ -2091,11 +2091,28 @@ fn is_out_param(t: &CType) -> Option<String> {
     // generate a shim that takes `T**` and passes `&local`, mismatching a real
     // `T*` parameter (e.g. `fprintf(FILE*)`). Generic: matches only the
     // double-indirection shape, no library names.
+    //
+    // NOTE: since #2, a single level of indirection to a named opaque record
+    // (`struct X*`) is normalized to `CType::Opaque(name)` rather than
+    // `Pointer(Opaque(name))`. Consequently a true C double-pointer out-param
+    // `X**` is parsed as `Pointer(Opaque(name))` (the inner `X*` collapses to
+    // `Opaque(name)`). Both shapes (`Pointer(Pointer(Opaque))` and
+    // `Pointer(Opaque)`) are therefore accepted as out-params so the adapter
+    // generation stays correct under the #2 normalization.
     if let CType::Pointer(inner) = t {
-        if let CType::Pointer(inner2) = inner.as_ref() {
-            if let CType::Opaque(name) = inner2.as_ref() {
-                return Some(name.clone());
+        match inner.as_ref() {
+            CType::Pointer(inner2) => {
+                if let CType::Opaque(name) = inner2.as_ref() {
+                    return Some(name.clone());
+                }
+                // A named record reached through two indirections whose inner
+                // pointee is an un-modeled/other type (`Other("sqlite3")`) is
+                // still a handle out-param (`sqlite3**`); surface it by name.
+                if let CType::Other(name) = inner2.as_ref() {
+                    return Some(name.clone());
+                }
             }
+            _ => {}
         }
     }
     None
@@ -5075,6 +5092,16 @@ fn collect_sources(
             {
                 let p = entry.map_err(|e| e.to_string())?.path();
                 if p.is_dir() {
+                    // Skip non-library subtrees (fuzzers, test/benchmark
+                    // harnesses, examples) when deciding the library's
+                    // language. A `fuzz/*.cc` must not force a pure-C library
+                    // (e.g. libjpeg-turbo) to be compiled as C++ — doing so
+                    // rejects legacy C (`register` storage class) under
+                    // -std=c++17. Generic: name-based skip, no library names.
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if matches!(name, "fuzz" | "test" | "tests" | "benchmark" | "benchmarks" | "examples" | "example" | "demo" | "tools" | "utils") {
+                        continue;
+                    }
                     stack.push(p);
                     continue;
                 }
