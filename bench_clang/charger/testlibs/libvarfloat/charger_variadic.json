@@ -1,0 +1,7 @@
+{
+  "vf_sumf": "Double",
+  "vf_sumd": "Double",
+  "vf_mixed8": ["Int", "Double", "Long", "Double", "Int", "Double", "Long", "Double"],
+  "vf_sixf": "Double",
+  "vf_sixd": "Double"
+}

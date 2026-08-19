@@ -50,6 +50,12 @@ CORE_SLICES = {
     "semantic": "obj-424242535",
     "variant": "42102435",
     "variadic": "10600000000007177078603015",
+    # Iteration 8.5: MSVC x64 variadic float/double ABI regression. Covers
+    # float-return (vf_sumf/vf_sixf) and double-return (vf_sumd/vf_sixd)
+    # variadic shims, including the 6-arg register->stack spill (vf_six*).
+    # Guards the float-return promotion (f32 -> double) and the adapter-shim
+    # symbol resolution that previously crashed these calls.
+    "varfloat": "1517.52121",
 }
 
 LLVM_BIN = os.environ.get("LIME_LLVM_BIN", "")

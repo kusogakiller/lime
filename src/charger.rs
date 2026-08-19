@@ -2782,8 +2782,21 @@ fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &Variad
             .enumerate()
             .map(|(i, p)| format!("{} a{}", c_type_text(&p.ty), i))
             .collect();
-        let ret_c = c_type_text(&f.ret);
         let real = &f.symbol;
+        // Variadic return-type promotion (mirrors the argument promotion rule):
+        // C variadics promote `float` *arguments* to `double`, but a function
+        // that *returns* `float` still returns an f32 in XMM0. Lime's `Float`
+        // is f64, so the Lime caller reads the full 64 bits and the high 32
+        // (garbage) corrupt the result. Promote the shim's return to `double`
+        // and cast the real f32 result up — symmetric with the arg rule and
+        // keeps Lime's f64 model untouched. Generic: derived from the C type.
+        let (ret_c, ret_cast): (String, String) = match &f.ret {
+            CType::Float => ("double".to_string(), "(double)".to_string()),
+            other => {
+                let t = c_type_text(other);
+                (t.clone(), format!("({})", t))
+            }
+        };
 
         // Determine the variadic slot list for each call arity (0..=MAX).
         let entry = resolve_plan(shapes, &f.symbol);
@@ -2804,12 +2817,12 @@ fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &Variad
             };
             let call_str = call_args.join(", ");
             s.push_str(&format!(
-                "{} lime_{}_v{}({}) {{ return ({}){}({}); }}\n",
+                "{} lime_{}_v{}({}) {{ return {}{}({}); }}\n",
                 ret_c,
                 sanitize_name(&f.symbol),
                 arity,
                 param_str,
-                ret_c,
+                ret_cast,
                 real,
                 call_str
             ));
@@ -4405,6 +4418,22 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     for a in &adapters {
         if !symbols.contains(&a.symbol) {
             symbols.push(a.symbol.clone());
+        }
+    }
+    // Phase 1 Iteration 8.5: variadic shims (`lime_<sym>_v<N>`) are emitted into
+    // the artifact by `emit_variadic_c_adapters` but were NOT previously in this
+    // symbol list, so a Lime `extern fn` referencing one (e.g. `lime_vf_sumf_v5`)
+    // failed to resolve its artifact at link time -> undefined symbol -> crash.
+    // Record every shaped-variadic shim symbol so the linker can find the .lib.
+    // Generic: derived purely from the function symbol + arity, no library names.
+    for f in &api.functions {
+        if f.variadic && shapes.map.contains_key(&f.symbol) {
+            for arity in 0..=MAX_VARIADIC_ARITY {
+                let v = format!("lime_{}_v{}", sanitize_name(&f.symbol), arity);
+                if !symbols.contains(&v) {
+                    symbols.push(v);
+                }
+            }
         }
     }
 

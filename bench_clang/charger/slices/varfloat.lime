@@ -1,0 +1,18 @@
+// Iteration 8.5 variadic float/double ABI driver. Calls the Charger-generated
+// fixed-arity adapters; the C compiler performs all variadic ABI work.
+// Symbols mirror .lime-charger/store/libvarfloat/.../lime-iface.lime.
+
+extern fn vf_sumf(Int: a0, Float: a1, Float: a2, Float: a3, Float: a4, Float: a5) -> Float "lime_vf_sumf_v5"
+extern fn vf_sumd(Int: a0, Float: a1, Float: a2, Float: a3, Float: a4, Float: a5) -> Float "lime_vf_sumd_v5"
+extern fn vf_sixf(Int: a0, Float: a1, Float: a2, Float: a3, Float: a4, Float: a5, Float: a6) -> Float "lime_vf_sixf_v6"
+extern fn vf_sixd(Int: a0, Float: a1, Float: a2, Float: a3, Float: a4, Float: a5, Float: a6) -> Float "lime_vf_sixd_v6"
+
+fn main():
+    // 5 floats: SSE registers XMM0..XMM3 + one stack slot (spill past 4).
+    print(vf_sumf(5, 1.0, 2.0, 3.0, 4.0, 5.0))      // 15.0
+    // 5 doubles: same spill test, double width.
+    print(vf_sumd(5, 1.5, 2.5, 3.5, 4.5, 5.5))      // 17.5
+    // 6 floats: XMM0..XMM3 + 2 stack slots.
+    print(vf_sixf(6, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)) // 21.0
+    // 6 doubles.
+    print(vf_sixd(6, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)) // 21.0
