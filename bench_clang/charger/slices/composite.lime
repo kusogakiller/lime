@@ -1,0 +1,18 @@
+// #7 dependency-graph slice (C-only): a single Lime program consumes two
+// separately prepared Charger libraries (libptr + libc_common). Charger must
+// resolve both native artifacts and record the dependency edges in the manifest.
+extern fn make_counter() -> Opaque(Counter) "make_counter"
+extern fn counter_inc(Opaque(Counter): c) "counter_inc"
+extern fn counter_get(Opaque(Counter): c) -> Int "counter_get"
+extern fn common_add(Int: a0, Int: a1) -> Int "common_add"
+
+fn main():
+    let c = make_counter()
+    counter_inc(c)
+    counter_inc(c)
+    let g = counter_get(c)       # 2
+    let s = common_add(g, 40)    # 42
+    print(g)                     # expect 2
+    print("\n")
+    print(s)                     # expect 42
+    print("\n")
