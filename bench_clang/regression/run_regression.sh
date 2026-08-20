@@ -30,15 +30,21 @@ sdl2:C:/Users/szzxl/Downloads/lime_corpus_src/SDL2-2.30.9:bench_clang/regression
 PASS=0
 FAIL=0
 for row in $LIBS; do
+  # Parse with field separators that may also appear INSIDE a value:
+  # the corpus path for an absolute Windows location is `C:/...`, whose
+  # drive-letter `:` collides with the `:` delimiter. So take `lib` from the
+  # LEFT (first `:`), `smoke` from the RIGHT (last `:`), and `corpus` as the
+  # middle slice. This keeps the drive-letter `:` inside an absolute path
+  # intact (e.g. `C:/Users/.../SDL2-2.30.9`).
   lib="${row%%:*}"
-  rest="${row#*:}"
-  corpus="${rest%%:*}"
-  smoke="${rest##*:}.lime"
+  smoke="${row##*:}.lime"
+  corpus="${row#*:}"
+  corpus="${corpus%:*}"
   # Absolute corpus path (starts with a drive letter or /) is used verbatim;
   # otherwise it is relative to the repo root.
   case "$corpus" in
     [A-Za-z]:*|/*) corpus_path="$corpus" ;;
-    *) corpus_path="bench_clang/${corpus}" ;;
+    *) corpus_path="$corpus" ;;
   esac
   # 1) re-install (regression in AST/adapter surfaces as install failure)
   if ! ./target/release/lime.exe charger install "$corpus_path" >/dev/null 2>&1; then
