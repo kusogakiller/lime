@@ -832,6 +832,13 @@ fn parse_c_type(qual: &str) -> CType {
         if let Some(ft) = parse_c_function_ptr(q) {
             return ft;
         }
+        // Not a real function pointer — `parse_c_function_ptr` declined it
+        // (e.g. pointer-to-array `int (*)[4]`, or a spelling it could not
+        // bracket-match). C decays every array parameter to a pointer, and a
+        // bare fn-pointer value is ABI-compatible with a scalar pointer, so
+        // surface as a generic scalar pointer (`void *` on the Lime side).
+        // Generic — no library-specific logic.
+        return CType::Pointer(Box::new(CType::Opaque("void".to_string())));
     }
     // C string types (`char *`, `const char *`) are Lime `String`. This must be
     // checked BEFORE the generic pointer strip below (which would otherwise turn

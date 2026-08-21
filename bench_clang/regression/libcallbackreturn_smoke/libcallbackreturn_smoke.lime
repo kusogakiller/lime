@@ -1,0 +1,52 @@
+// libcallbackreturn smoke — prove typedef callback return-value ABI (Phase 1).
+// C typedefs:
+//   int  (*callback_int_t)(int)        -> Lime returns Int, C uses it
+//   const char* (*callback_str_t)(int) -> Lime returns String, C measures length
+//   void (*callback_ud_t)(int)         -> Lime runs, C also returns userdata
+//
+// Lime fn syntax only allows `fn name(params):` (no `-> Type`); the body's
+// `return <expr>` is codegen'd into the C function-pointer return slot, so the
+// non-void C return value is carried correctly end-to-end.
+
+extern fn register_callback(Callback: a0) -> Unit "register_callback"
+extern fn trigger_callback(Int: a0) -> Int "trigger_callback"
+extern fn register_str_callback(Callback: a0) -> Unit "register_str_callback"
+extern fn trigger_str_callback(Int: a0) -> Int "trigger_str_callback"
+extern fn register_ud_callback(Callback: a0, Opaque(ScalarPtr): a1) -> Unit "register_ud_callback"
+extern fn trigger_ud_callback(Int: a0) -> Int "trigger_ud_callback"
+
+// int-returning callback: returns x*2; C computes input + cb(input)
+fn on_cb(Int: x):
+    return x * 2
+
+// string-returning callback: returns a literal; C measures its length
+fn on_str(Int: x):
+    return "HELLO"
+
+// void callback with userdata tail: C passes userdata back as the return value
+fn on_ud(Int: x):
+    return
+
+fn main():
+    // 1) int return
+    register_callback(on_cb)
+    let r = trigger_callback(21)
+    print("RET_INT:")
+    print(r)
+    print("\n")   // expect 63 (21 + 42)
+
+    // 2) string return (length of "HELLO" = 5)
+    register_str_callback(on_str)
+    let s = trigger_str_callback(7)
+    print("RET_STR:")
+    print(s)
+    print("\n")   // expect 5
+
+    // 3) userdata tail (register with a sentinel pointer; C returns it as int)
+    register_ud_callback(on_ud, 99)
+    let u = trigger_ud_callback(3)
+    print("RET_UD:")
+    print(u)
+    print("\n")   // expect 99
+
+    return

@@ -48,10 +48,30 @@ Last updated: Iteration 13 (2026-08-21).
                                           Opaque(cb_t) -> inttoptr codegen bug)
 - typedef fn-pointer, const arg            GREEN (Iteration 14: void(*)(const char*))
 - typedef fn-pointer, void* arg            GREEN (Iteration 14: void(*)(void*))
-- typedef fn-pointer, non-void return      UNCONFIRMED (cb_ret_t = int(*)(int,void*);
-                                          CType::Function(ret=Int) is produced
-                                          correctly, but Lime callback syntax for
-                                          a non-Unit return is not yet exercised)
+- typedef fn-pointer, non-void return      GREEN (Iteration 16: libcallbackreturn
+                                          proves `typedef int (*)(int)` return
+                                          value is carried end-to-end — Lime
+                                          `fn on_cb(Int:x): return x*2` -> C sees
+                                          the int return; native exec RET:63 =
+                                          21 + 21*2. Also string-returning
+                                          `typedef const char* (*)(int)` GREEN:
+                                          Lime returns "HELLO", C measures len=5)
+- typedef fn-pointer, userdata tail         GREEN (Iteration 16: libcallbackreturn
+                                          `typedef void (*)(int)` + void* userdata
+                                          tail; C returns userdata as int, RET:99)
+- multi-dimensional / pointer-to-array arg  GREEN (Iteration 16: `int (*)[4]` was
+                                          previously surfaced as Opaque(int_(_))
+                                          (unpassable from Lime); now normalized to
+                                          Opaque(void) (= void*, decayed pointer,
+                                          ABI-correct). Generic fix in parse_c_type.
+- enum underlying width (e.g. : unsigned char) GREEN (surfaced as Int; ABI passes
+                                          the value in a register like int — no
+                                          width loss for typical enum values)
+- const-qualified pointer arg              GREEN (const int* -> Opaque(ScalarPtr),
+                                          qualifier dropped, ABI-correct)
+- volatile-qualified pointer arg           GREEN (volatile int* -> Opaque(volatile_int)
+                                          = pointer-shaped, ABI-correct)
+- integer type alias (typedef int X)       GREEN (X -> Int, ABI-correct)
 
 ## Out parameters / ownership
 - create-style T** (sqlite3_open)          GREEN
@@ -107,12 +127,16 @@ Verification: SDL2 smoke links cleanly (`0|Windows||`, exit 0), and the full
 permanent gate now reports PASS=8 FAIL=0.
 
 ## Known open issues (NOT counted as GREEN)
-- **typedef fn-pointer non-void return callback**: `cb_ret_t = int (*)(int, void*)`
-  normalizes correctly to `CType::Function([Int, Opaque], Int)` and surfaces as
-  `Callback`, but a Lime callback *definition* with a non-Unit return has not
-  been exercised (Lime's `fn ... -> Ret` syntax is unresolved). Void-returning
-  typedef callbacks (`cb_t`, `cb_const_t`, `cb_ptr_t`, `cb_userdata_t`) are
-  fully GREEN end-to-end (Iteration 14). Out of Iteration 14 scope.
+- **nested anonymous union / struct field access**: structs containing an
+  anonymous union (e.g. `struct { int tag; union { int i; float f; struct {
+  short lo; short hi; } bits; }; }`) are surfaced as an Opaque handle with
+  `lime_*_get/set` shims for the *named* fields only (tag). The anonymous-union
+  members (`i`, `f`, `bits.hi`) are not individually addressable from Lime —
+  this is the existing sub-8-byte-layout / opaque-handle design, not a new
+  regression. Out of Iteration 16 scope (would require full struct-layout
+  synthesis for anonymous records). All other Phase-2 edge cases (multi-dim
+  array, enum width, const/volatile qualifiers, integer type aliases, fn-pointer
+  typedef normalization) are GREEN.
 
 ## Iteration 13 change
 `collect_out_param_adapters` no longer drops a `CType::Function` parameter when
