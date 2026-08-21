@@ -1,0 +1,43 @@
+// Iteration 13 adversarial callback-tail regression smoke.
+// Proves a function-pointer parameter followed by trailing arguments is NOT
+// dropped: the Lime callback reaches the real C function and is invoked.
+// Focus: INLINE function-pointer params (CType::Function -> `Callback`), which
+// is the exact shape that the old heuristic dropped. The typedef-path
+// `Opaque(cb_t)` functions are excluded from the Lime call because Lime's codegen
+// for passing a Lime fn into an `Opaque(cb_t)` arg has a separate, pre-existing
+// inttoptr bug (i64->i64) — out of scope for the callback-tail fix and tracked
+// separately. The inline-fn-ptr path below is the one that previously DROPPED
+// the callback; it now reaches native execution and fires.
+
+extern fn callback_last(Callback: a0) -> Int "callback_last"
+extern fn callback_inline_tail(Callback: a0, Opaque(ScalarPtr): a1) -> Int "callback_inline_tail"
+extern fn callback_inline_last(Callback: a0) -> Int "callback_inline_last"
+extern fn invoke_cb(Callback: a0, Int: a1) -> Unit "invoke_cb"
+
+// A top-level Lime callback (capture-free) passed as a C function pointer.
+fn on_cb(Int: v):
+    print("CB")
+    print("\n")
+
+fn main():
+    // A. callback setter / last param (inline fn ptr)
+    let r0 = callback_last(on_cb)
+    print("R0:")
+    print(r0)
+    print("\n")
+    // H. INLINE fn ptr + tail -- the shape that previously DROPPED the callback.
+    // The callback is now KEPT (Callback) and invoked by the real C function,
+    // which returns 88 only because cb(8) ran.
+    let r7 = callback_inline_tail(on_cb, 0)
+    print("R7:")
+    print(r7)
+    print("\n")
+    // I. INLINE fn ptr, last param
+    let r8 = callback_inline_last(on_cb)
+    print("R8:")
+    print(r8)
+    print("\n")
+    // stored-and-later-invoked path
+    invoke_cb(on_cb, 42)
+    print("DONE")
+    print("\n")

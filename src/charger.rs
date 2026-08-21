@@ -2569,19 +2569,20 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
         // the body that returns the written handle. Generic — derived purely
         // from the type, no library-specific name.
         let out_name = out_idx.and_then(|oi| is_out_param(&f.params[oi].ty));
-        // A `Callback` (CType::Function) parameter is the common "optional
-        // callback + user data + errmsg" idiom ONLY when it is followed by
-        // trailing params (the user-data / errmsg tail) that the C side treats
-        // as optional — drop it and everything after, passing NULL. When the
-        // function-pointer is the LAST parameter (a callback REGISTRATION /
-        // setter such as `av_log_set_callback(void (*cb)(...))`), it is a
-        // REQUIRED callback that the Lime caller must supply; do NOT drop it.
-        // Generic: derived purely from parameter position, no library names.
-        let drop_from = f
-            .params
-            .iter()
-            .position(|p| matches!(p.ty, CType::Function(_, _)))
-            .filter(|&idx| idx + 1 < f.params.len());
+        // A `Callback` (CType::Function) parameter is a function pointer the Lime
+        // caller must be able to supply. Historically Charger dropped a function
+        // pointer AND every argument after it whenever the pointer was NOT the
+        // last parameter (the `sqlite3_exec(sql, cb, data, errmsg)` optional-callback
+        // idiom). That heuristic is wrong in general: `foo(cb, userdata)` or
+        // `foo(cb, value)` REQUIRE the callback, and dropping it silently loses
+        // the API. AST/type information alone cannot distinguish an optional
+        // callback from a required one (both are `fn-ptr + tail`), so the safe
+        // generic default is to KEEP the callback parameter and surface it as
+        // `Callback`. The C side already treats a NULL callback as "no-op" for
+        // the optional idiom, so passing a real Lime callback (or 0 for NULL)
+        // preserves both semantics. Generic: derived purely from parameter type
+        // (CType::Function), no library names, no function-name heuristic.
+        let drop_from: Option<usize> = None;
         // Phase 1 Iteration 7: nonnull parameters (AST auto-extracted facts
         // from _Nonnull / nonnull, never name-inferred).
         let nonnull: Vec<usize> = f
@@ -5340,13 +5341,6 @@ fn select_api_header(_dir: &Path, headers: &[PathBuf], sources: &[PathBuf]) -> O
             return Some(cur);
         }
     });
-    if std::env::var("CHARGER_DEBUG_HEADER").is_ok() {
-        eprintln!("[select_api_header] headers={:?} roots={:?} public={:?} -> {:?}",
-            headers.iter().map(|h| h.file_name().and_then(|s| s.to_str()).unwrap_or("")).collect::<Vec<_>>(),
-            roots.iter().map(|h| h.file_name().and_then(|s| s.to_str()).unwrap_or("")).collect::<Vec<_>>(),
-            public.iter().map(|h| h.file_name().and_then(|s| s.to_str()).unwrap_or("")).collect::<Vec<_>>(),
-            pick.as_ref().map(|p| p.file_name().and_then(|s| s.to_str()).unwrap_or("")));
-    }
     pick
 }
 

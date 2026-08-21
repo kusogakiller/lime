@@ -1,0 +1,7 @@
+[charger]
+# Iteration 13 adversarial callback-tail fixture. Probes whether a function-pointer
+# parameter followed by trailing arguments is wrongly dropped. Generic corpus
+# config; no library name.
+api_header = "libcallbacktail.h"
+build_flags = []
+deps = []
