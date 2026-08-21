@@ -1,0 +1,12 @@
+[charger]
+# FFmpeg libavcodec public API umbrella header. Minimal slice: avcodec_version()
+# only (libavcodec/version.c). The header tree (libavcodec/*.h + libavutil/*.h)
+# exposes AVCodecContext as a complete struct definition (152 fields) but all
+# public functions take/return AVCodecContext* (opaque pointer handles in Lime).
+api_header = "libavcodec/avcodec.h"
+# Corpus root on the include path so `compat/va_copy.h` and the libavutil/
+# libavcodec subdirs resolve. `-idirafter libavutil` ensures `<time.h>` resolves
+# to the system header (not FFmpeg's local libavutil/time.h, which lacks
+# strftime) — generic include-order handling, no library name. Corpus config.
+build_flags = ["-I.", "-idirafter", "libavutil"]
+deps = []

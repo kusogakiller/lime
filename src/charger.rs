@@ -862,14 +862,40 @@ fn parse_c_type(qual: &str) -> CType {
     if let Some(bracket) = q_noptr.find('[') {
         if q_noptr.ends_with(']') {
             let elem = q_noptr[..bracket].trim();
-            let size_part = &q_noptr[bracket + 1..q_noptr.len() - 1];
             let elem_ty = parse_c_type(elem);
-            let size = if size_part.trim().is_empty() {
-                None // flexible array member `T[]`
-            } else {
-                size_part.trim().parse::<usize>().ok()
-            };
-            return CType::Array(Box::new(elem_ty), size);
+            // Parse the bracket list `[A][B]...` after the element type. A
+            // multi-dimensional fixed array `T[A][B]` is `Array(Array(T,B),A)`;
+            // the previous single-bracket logic took `A][B` as the size and
+            // mis-detected it as a flexible array member. Scan each `[..]`
+            // group, recording None for `[]` (flexible) and the integer for
+            // `[N]`. Dimensions are outer->inner; fold from the innermost.
+            let rest = &q_noptr[bracket..];
+            let mut dims: Vec<Option<usize>> = Vec::new();
+            let bytes = rest.as_bytes();
+            let mut i = 0usize;
+            while i < bytes.len() {
+                if bytes[i] == b'[' {
+                    let mut j = i + 1;
+                    while j < bytes.len() && bytes[j] != b']' {
+                        j += 1;
+                    }
+                    let inner = &rest[i + 1..j];
+                    let d = if inner.trim().is_empty() {
+                        None
+                    } else {
+                        inner.trim().parse::<usize>().ok()
+                    };
+                    dims.push(d);
+                    i = j + 1;
+                } else {
+                    i += 1;
+                }
+            }
+            let mut ty = elem_ty;
+            for d in dims.into_iter().rev() {
+                ty = CType::Array(Box::new(ty), d);
+            }
+            return ty;
         }
     }
     // An anonymous inline record (e.g. `union (unnamed at foo.h:12:3)`) has no
@@ -2510,6 +2536,14 @@ struct AdapterSpec {
     params: Vec<CParam>, // original C params (for shim body)
     out_idx: Option<usize>, // index of the out-param, if any
     drop_from: Option<usize>, // drop this param and everything after (NULL callback)
+    // A "take"/"consume" out-param: a void-returning function with a single
+    // `T**` parameter that READS the handle to free/consume it (e.g.
+    // `avcodec_free_context(AVCodecContext**)`), as opposed to a "create"
+    // out-param that WRITES the handle and returns it. For the take case the
+    // Lime caller supplies the handle; the shim passes `&local` to the real
+    // function. Generic: derived purely from (void return + single T**), no
+    // library names.
+    take: bool,
     // Phase 1 Iteration 7: indices of nonnull parameters. When non-empty, the
     // generated shim inserts a null guard at its entry so a NULL passed to a
     // _Nonnull / nonnull parameter is caught at the adapter boundary (the
@@ -2557,6 +2591,13 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
             .filter(|(_, p)| p.nullable == Nullability::NonNull)
             .map(|(i, _)| i)
             .collect();
+        // A void-returning function with a single `T**` out-param READS the
+        // handle to free/consume it (e.g. `avcodec_free_context`) rather than
+        // creating and returning one. Generic: void return + single T** param,
+        // no library names.
+        let take = out_idx.is_some()
+            && f.params.len() == 1
+            && matches!(f.ret, CType::Void);
         let needs_bridge = out_idx.is_some() || drop_from.is_some();
         if !needs_bridge && nonnull.is_empty() {
             continue;
@@ -2564,7 +2605,9 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
         let sym = f.symbol.clone();
         let entry = by_sym.entry(sym.clone()).or_insert_with(|| AdapterSpec {
             lime_name: sanitize_name(&f.name),
-            symbol: if needs_bridge {
+            symbol: if take {
+                format!("lime_take_{}", sanitize_name(&f.name))
+            } else if needs_bridge {
                 format!("lime_out_{}", sanitize_name(&f.name))
             } else {
                 // Include the nonnull indices so two functions with the same name
@@ -2578,6 +2621,7 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
             params: f.params.clone(),
             out_idx,
             drop_from,
+            take,
             nonnull: Vec::new(),
         });
         entry.nonnull.extend(nonnull);
@@ -2773,6 +2817,15 @@ fn gen_adapter_c_source(
                     if is_fn_ptr_array(&f.ty) {
                         continue;
                     }
+                    // Multi-dimensional fixed arrays (`int x[2][2]`) would need
+                    // element-wise accessors that return/assign the inner array
+                    // by value, which is invalid C (arrays are not returnable).
+                    // Skip the scalar shim so the field stays opaque inside the
+                    // C struct — Lime never needs per-element access for these.
+                    // Generic: any struct with a nested-array field benefits.
+                    if matches!(**elem, CType::Array(_, _)) {
+                        continue;
+                    }
                     let c_ty = c_type_text(elem);
                     if size.is_none() {
                         // Flexible array member: emit a sized constructor that
@@ -2899,10 +2952,14 @@ fn gen_adapter_c_source(
         ));
     }
     for a in adapters {
-        // Indices dropped from the Lime-facing signature.
+        // Indices dropped from the Lime-facing signature. A "take" (free/consume)
+        // adapter surfaces its single handle parameter to the Lime caller, so it
+        // is NOT dropped.
         let mut drop: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        if let Some(oi) = a.out_idx {
-            drop.insert(oi);
+        if !a.take {
+            if let Some(oi) = a.out_idx {
+                drop.insert(oi);
+            }
         }
         if let Some(df) = a.drop_from {
             for i in df..a.params.len() {
@@ -2929,7 +2986,12 @@ fn gen_adapter_c_source(
         // Real call arguments.
         let mut call_args: Vec<String> = Vec::new();
         for (i, _p) in a.params.iter().enumerate() {
-            if Some(i) == a.out_idx {
+            if a.take && Some(i) == a.out_idx {
+                // For a take adapter the Lime caller supplies the handle; pass
+                // the address of a local copy so the real free/consume function
+                // receives a valid T**.
+                call_args.push(format!("&a{}", i));
+            } else if Some(i) == a.out_idx {
                 call_args.push(format!("&a{}", i)); // write handle here
             } else if drop.contains(&i) {
                 // Dropped argument (trailing callback + its tail). Pass a typed
@@ -2949,7 +3011,16 @@ fn gen_adapter_c_source(
         // than propagating into the real C call. This is the ONLY place Charger
         // emits C for these semantics; it records nothing and frees nothing.
         let guard = emit_nonnull_guards(&a.nonnull, &a.ret);
-        if let Some(oi) = a.out_idx {
+        if a.take {
+            // "take"/free/consume: the Lime caller supplies the handle; pass the
+            // address of a local copy so the real function receives a valid T**.
+            let name = a.ret_name.as_deref().unwrap_or("void");
+            let body = format!(
+                "void {} ({}) {{\n{}    {}* tmp = ({}*)a0;\n    {}(&tmp);\n}}\n\n",
+                a.symbol, decls.join(", "), guard, name, name, a.real_symbol
+            );
+            s.push_str(&body);
+        } else if let Some(oi) = a.out_idx {
             // The local holding the handle is the POINTEE of the out-param
             // (`T` for an out-param of type `T*`, `struct X*` for `struct X**`).
             // Taking `&local` then yields exactly the pointer type the C function
@@ -3683,8 +3754,10 @@ fn generate_lime_iface(
             // dropped parameters (trailing NULL callback + its args) are
             // omitted from the Lime signature.
             let mut drop: std::collections::HashSet<usize> = std::collections::HashSet::new();
-            if let Some(oi) = ad.out_idx {
-                drop.insert(oi);
+            if !ad.take {
+                if let Some(oi) = ad.out_idx {
+                    drop.insert(oi);
+                }
             }
             if let Some(df) = ad.drop_from {
                 for i in df..f.params.len() {
@@ -3698,7 +3771,10 @@ fn generate_lime_iface(
                 .filter(|(i, _)| !drop.contains(i))
                 .map(|(_, p)| format!("{}: {}", lime_type_name(&p.ty), p.name))
                 .collect();
-            let ret_lime = if ad.ret_name.is_some() {
+            let ret_lime = if ad.take {
+                // A take/free adapter consumes the handle and returns void.
+                "Unit".to_string()
+            } else if ad.ret_name.is_some() {
                 format!("Opaque({})", ad.ret_name.as_ref().unwrap())
             } else {
                 ret_lime.clone()
@@ -4832,12 +4908,17 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         // header, while the library's own angle-bracket includes
         // (`#include <jinclude.h>` in libjpeg-turbo) still resolve via fallback.
         // No library-specific branch.
+        // Generic C-correctness fix: every detected library include dir is
+        // added with `-idirafter` (searched AFTER the system include dirs), not
+        // `-I`. With `-I`, a library subdir is searched before system headers,
+        // so a same-named local header (e.g. FFmpeg's libavutil/time.h) shadows
+        // the real system <time.h>, breaking the build. `-idirafter` places the
+        // library dirs last, so `#include <time.h>` still resolves to the system
+        // header, while the library's own angle-bracket includes
+        // (`#include <jinclude.h>` in libjpeg-turbo) still resolve via fallback.
+        // No library-specific branch.
         for inc in &include_dirs {
-            // Skip the library's own dir here; it is added via `-idirafter` below
-            // so it is not also on the front of the `-I` angle-bracket path.
-            if header.parent() != Some(inc.as_path()) {
-                cmd.arg("-I").arg(inc);
-            }
+            cmd.arg("-idirafter").arg(inc);
         }
         if let Some(hdir) = header.parent() {
             cmd.arg("-idirafter").arg(hdir);
@@ -7311,6 +7392,7 @@ mod adapter_dedup_tests {
             }],
             out_idx: Some(0),
             drop_from: None,
+            take: false,
             nonnull: Vec::new(),
         }];
         let src = gen_adapter_c_source(&adapters, &[], &[], &[], "stdio.h", &api, &shapes());
@@ -7375,6 +7457,7 @@ mod adapter_dedup_tests {
             ],
             out_idx: Some(0),
             drop_from: None,
+            take: false,
             nonnull: Vec::new(),
         };
         let adapters = vec![mk_adapter("fopen_s"), mk_adapter("freopen_s")];

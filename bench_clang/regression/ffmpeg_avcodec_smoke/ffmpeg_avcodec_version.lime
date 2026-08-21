@@ -1,0 +1,12 @@
+// FFmpeg libavcodec Step-1 slice: opaque-struct header parsing + avcodec_version().
+// Proves libavcodec's public header tree (with AVCodecContext defined as a
+// 152-field complete struct) is normalized by Charger and avcodec_version()
+// runs natively. No opaque-pointer deref; just the version int.
+extern fn avcodec_version() -> Int "avcodec_version"
+
+fn main():
+    let v = avcodec_version()
+    // avcodec_version packs LIBAVCODEC_VERSION_INT as (major<<16)|(minor<<8)|micro.
+    print("AVCODEC_VERSION:")
+    print(v)
+    print("\n")

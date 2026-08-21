@@ -1,0 +1,13 @@
+// FFmpeg libavcodec Step-2b: opaque-pointer ALLOC + FREE through the real API.
+// avcodec_alloc_context3(NULL) -> AVCodecContext* (opaque handle)
+// avcodec_free_context(&ctx)        -> frees it (takes the handle, void return)
+// We cannot observe the raw pointer from Lime, but if free() does not crash the
+// allocated pointer was valid and the alloc/free round-trip ABI is correct.
+extern fn avcodec_alloc_context3(Opaque(AVCodec): a0) -> Opaque(AVCodecContext) "avcodec_alloc_context3"
+extern fn avcodec_free_context(Opaque(AVCodecContext): a0) -> Unit "lime_take_avcodec_free_context"
+
+fn main():
+    let ctx = avcodec_alloc_context3(0)
+    avcodec_free_context(ctx)
+    print("FREE_OK")
+    print("\n")

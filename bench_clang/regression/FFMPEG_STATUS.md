@@ -137,3 +137,105 @@ function through the real FFmpeg API. Smoke:
 Add a libavcodec/libavformat slice (opaque AVCodecContext/AVFormatContext) to
 stress Charger's opaque-pointer handling. `run_regression.sh` already has the
 generic `ffmpeg` row; the callback/variadic smoke can be folded in.
+
+---
+
+## Iteration 12 — libavcodec opaque-pointer slice (2026-08-21)
+
+Goal: prove the EXISTING generic Opaque-pointer handling works against a real
+library's opaque context (AVCodecContext), NOT a FFmpeg-specific path.
+
+### Corpus (hand-built)
+`bench_clang/realworld/corpus/ffmpeg_avcodec_version/`
+- libavcodec headers (incl. `avcodec.h` where `AVCodecContext` is a complete
+  152-field struct) + libavutil headers (flat) for the shared types.
+- TUs: libavcodec `version.c`, `options.c`; libavutil `version.c`, `mem.c`,
+  `opt.c`, `channel_layout.c`, `log.c`, `bprint.c`, `time.c`.
+- Stub `config.h` (HAVE_*/SIZEOF + FFMPEG_VERSION) — added
+  `#define HAVE_SNPRINTF 1` / `HAVE_VSNPRINTF 1` so FFmpeg uses the UCRT
+  `snprintf` instead of defining its own (avoids a duplicate `snprintf` symbol
+  across TUs that corrupted the `.lib` symbol table). Generic FFmpeg configure
+  flag, no library hack.
+- `charger.toml`: `api_header = "libavcodec/avcodec.h"`,
+  `build_flags = ["-I.", "-idirafter", "libavutil"]`
+  (`-idirafter libavutil` keeps `<time.h>` resolving to the system header even
+  though the corpus also carries `libavutil/time.h`).
+
+### Step 1 — version + opaque-header parse (GREEN, native execution)
+Smoke: `bench_clang/regression/ffmpeg_avcodec_smoke/ffmpeg_avcodec_version.lime`
+- `avcodec_version()` -> 4070502 == (62<<16)|(28<<8)|102 == libavcodec 62.28.102  ✓
+- exit code 0.
+- Proves: libavcodec's full public-header tree (with `AVCodecContext` defined as
+  a 152-field complete struct) normalizes through clang AST -> CType ->
+  Lime interface -> build/link -> native execution. **The 152-field complete
+  struct definition does NOT cause struct-by-value mis-handling**: function
+  signatures that carry `AVCodecContext*` are normalized to
+  `Opaque(AVCodecContext)` (pointer handle), exactly as the opaque-pointer rule
+  requires.
+
+### Step 2 — AVCodecContext* alloc / AVCodecContext** free (PARTIAL)
+Interface facts (verified from generated `lime-iface.lime` + adapter C):
+- `avcodec_alloc_context3(const AVCodec*) -> Opaque(AVCodecContext)` — correct
+  opaque-pointer return; `avcodec_alloc_context3(NULL)` linked into the `.lib`.
+- `avcodec_free_context(AVCodecContext**) -> ...` — Charger now surfaces this as
+  `extern fn avcodec_free_context(Opaque(AVCodecContext): a0) -> Unit
+  "lime_take_avcodec_free_context"`. The `AVCodecContext**` out-param is treated
+  as a **take/free** idiom (void return + single `T**`): the Lime caller supplies
+  the handle, the adapter passes `&local` to the real function. Generic — derived
+  from (void return + single `T**`), no library name.
+
+Runtime execution of `avcodec_alloc_context3(NULL)` + `avcodec_free_context(&ctx)`
+is **BLOCKED by corpus scope, not by a Charger opaque-pointer bug**:
+- `avcodec_alloc_context3` references `avcodec_default_get_buffer2`,
+  `ff_codec_close`, `av_codec_iterate`, `av_d2q`, `av_parse_*`, `av_dict_*`, etc.
+  — all `U` (undefined) in the minimal `.lib`, so they resolve to NULL and SEGV
+  *inside the real FFmpeg call*. The opaque-pointer plumbing itself is correct;
+  the call reaches real FFmpeg code.
+- Pushing to full runtime would require resolving FFmpeg's entire internal-header
+  tree (`utils.c` pulls in `FF_ALLOCZ_TYPED_ARRAY` from `mem_internal.h`,
+  `codec_internal.h`, ...). That is a large, orthogonal corpus-expansion effort,
+  out of scope for the opaque-pointer ABI proof. Per the "don't boil the ocean"
+  gate, stopped here.
+
+### Generic Charger fixes made this iteration (no FFmpeg-specific branch)
+1. **Multi-dimensional fixed array mis-normalized as FAM** (`parse_c_type`,
+   `src/charger.rs`). `int16_t[2][2]` was parsed as a flexible array member
+   (size_part `"2][2"` failed `usize::parse` -> `None` -> FAM), generating an
+   invalid `lime_make_*_flex(len)` accessor with a non-existent `len` field.
+   Now all bracket groups are scanned and nested `Array` types are built
+   outermost->innermost (`Array(Array(T,B),A)`), so multi-dim fixed arrays are
+   correct. Also, a multi-dimensional array FIELD (element is itself an `Array`)
+   no longer generates a by-value scalar accessor (would return an array, invalid
+   C) — it stays opaque inside the C struct. Generic; protects every struct with
+   a multi-dim fixed-array field (e.g. FFmpeg's `AVPanScan.position[2][2]`).
+2. **void-return single-`T**` out-param = take/free** (`collect_out_param_adapters`
+   + adapter emission, `src/charger.rs`). Previously ANY `T**` param was treated
+   as a create-out-param (bridge drops the arg, returns the handle). Now a
+   void-returning function with a single `T**` param is recognized as a
+   take/consume idiom: the bridge takes the handle as input and returns void.
+   `sqlite3_open` (int return) stays create-out-param — unaffected. Generic:
+   (void return + single `T**`), no library name.
+3. **`-idirafter` for ALL detected library include dirs** (native compile loop,
+   `src/charger.rs`). The prior Iteration-11 fix only `-idirafter`'d the header's
+   OWN parent dir; *detected* subdirs (e.g. `libavutil/` next to
+   `libavcodec/avcodec.h`) still got plain `-I`, shadowing `<time.h>`. Now every
+   detected include dir uses `-idirafter` (searched after system), so any
+   multi-subdir library resolves system headers correctly. Generic.
+
+### Verification after changes (all GREEN)
+- `cargo build --release` ✓
+- `cargo test --workspace` ✓ — only the baseline 3 closure-interpreter failures
+  (`capture_multiple_values`, `nested_closure_capture`, `higher_order_native_interp`);
+  no new failures from the changes.
+- `bench_clang/validate_corpus.py` ✓ ALL CHECKS PASSED (17 corpora).
+- `bench_clang/regression/run_regression.sh` ✓ PASS=*** FAIL=0 (the 8-library
+  native gate: zlib, libpng, sqlite, libjpeg, curl, sdl2, ffmpeg, libcallbackarg).
+
+### Status
+- **Step 1 (version + opaque-header parse): NATIVE EXECUTION GREEN.**
+- **Opaque-pointer normalization: PROVEN** — `AVCodecContext*` -> `Opaque`,
+  `AVCodecContext**` -> take-adapter, both verified at AST/CType/interface/
+  adapter/manifest stages.
+- **Step 2b full alloc+free runtime: BLOCKED by corpus scope** (missing libavutil/
+  libavcodec internal TUs), documented honestly — NOT a Charger opaque bug.
+- 3 generic Charger bugs fixed (multi-dim-array FAM, take-out-param, idirafter-all).
