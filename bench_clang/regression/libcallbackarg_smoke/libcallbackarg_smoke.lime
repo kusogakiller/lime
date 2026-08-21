@@ -1,0 +1,20 @@
+// Synthetic callback-ARGUMENT smoke (generic Lime-fn -> C fn-pointer path).
+// reg_cb stores a Lime callback; trigger() invokes it; we prove the callback
+// ran by having it print a marker. No library-specific code.
+// `Callback` param type -> Lime parser converts to raw C fn pointer; Lime
+// passes the Lime fn's address directly.
+
+extern fn reg_cb(Callback: a0) -> Unit "reg_cb"
+extern fn trigger(Int: a0) -> Int "trigger"
+
+// Top-level Lime fn: Lime passes its raw address as a C function pointer.
+fn mycb(Int: x):
+    print("CALLBACK_RAN")
+    print("\n")
+
+fn main():
+    reg_cb(mycb)
+    let r = trigger(42)
+    print("TRIGGER_RET:")
+    print(r)
+    print("\n")

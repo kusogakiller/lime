@@ -26,7 +26,8 @@ sqlite:bench_clang/realworld/corpus/sqlite:bench_clang/regression/sqlite_smoke/s
 libjpeg:bench_clang/realworld/corpus/libjpeg:bench_clang/regression/jpeg_smoke/jpeg_smoke
 curl:bench_clang/realworld/corpus/curl:bench_clang/regression/curl_smoke/curl_smoke
 sdl2:C:/Users/szzxl/Downloads/lime_corpus_src/SDL2-2.30.9:bench_clang/regression/sdl2_smoke/sdl2_smoke
-ffmpeg:bench_clang/realworld/corpus/ffmpeg_avutil_version:bench_clang/regression/ffmpeg_smoke/ffmpeg_smoke"
+ffmpeg:bench_clang/realworld/corpus/ffmpeg_avutil_version:bench_clang/regression/ffmpeg_smoke/ffmpeg_smoke
+libcallbackarg:bench_clang/realworld/corpus/libcallbackarg:bench_clang/regression/libcallbackarg_smoke/libcallbackarg_smoke"
 
 PASS=0
 FAIL=0

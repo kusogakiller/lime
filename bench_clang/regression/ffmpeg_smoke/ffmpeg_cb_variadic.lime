@@ -1,0 +1,23 @@
+// FFmpeg libavutil callback + variadic smoke (Iteration 11, Step 4).
+// Registers a Lime callback via av_log_set_callback, then calls av_log()
+// (variadic) which invokes the callback. Proves the callback + variadic path
+// through the real FFmpeg API. No opaque structs; the callback receives
+// (ctx, level, fmt, va_list) and we only assert it RAN via a side marker.
+
+extern fn av_log_set_callback(Callback: a0) -> Unit "av_log_set_callback"
+// av_log(void* avcl, int level, const char* fmt, ...) at variadic arity 1 (int).
+extern fn av_log(Int: a0, Int: a1, String: a2, Int: a3) -> Unit "lime_av_log_v1"
+
+// Lime callback FFmpeg will call. Signature mirrors
+// void (*)(void* avcl, int level, const char* fmt, va_list vl).
+// We cannot consume va_list in Lime, so we just mark that it ran.
+fn my_log_cb(Opaque(ScalarPtr): avcl, Int: level, String: fmt, Opaque(va_list): vl):
+    print("FFMPEG_CB_RAN")
+    print("\n")
+
+fn main():
+    av_log_set_callback(my_log_cb)
+    // av_log(NULL, 0, "value=%d\n", 7) -> fires my_log_cb.
+    av_log(0, 0, "value=%d\n", 7)
+    print("DONE")
+    print("\n")

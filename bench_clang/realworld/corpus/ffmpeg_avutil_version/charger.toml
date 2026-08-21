@@ -4,5 +4,7 @@
 # corpus root also contains a stub config.h (generated-content stand-in); it must
 # NOT be used as the API entry point. Corpus config — not charger logic.
 api_header = "libavutil/avutil.h"
-build_flags = []
+# The corpus root (.) is on the include path so FFmpeg's `compat/va_copy.h`
+# resolves when building log.c / bprint.c. Corpus config — not charger logic.
+build_flags = ["-I."]
 deps = []

@@ -1,0 +1,7 @@
+[charger]
+# Synthetic callback-ARGUMENT fixture (function-pointer parameter, not a
+# callback-table struct field). Exercises the generic Lime-fn -> C function
+# pointer argument path. No library-specific logic.
+api_header = "libcallbackarg.h"
+build_flags = []
+deps = []

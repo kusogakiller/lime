@@ -2535,10 +2535,19 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
         // the body that returns the written handle. Generic — derived purely
         // from the type, no library-specific name.
         let out_name = out_idx.and_then(|oi| is_out_param(&f.params[oi].ty));
-        // A `Callback` (CType::Function) trailing parameter is the common
-        // "optional callback + user data + errmsg" idiom; drop it and the
-        // params after it, passing NULL.
-        let drop_from = f.params.iter().position(|p| matches!(p.ty, CType::Function(_, _)));
+        // A `Callback` (CType::Function) parameter is the common "optional
+        // callback + user data + errmsg" idiom ONLY when it is followed by
+        // trailing params (the user-data / errmsg tail) that the C side treats
+        // as optional — drop it and everything after, passing NULL. When the
+        // function-pointer is the LAST parameter (a callback REGISTRATION /
+        // setter such as `av_log_set_callback(void (*cb)(...))`), it is a
+        // REQUIRED callback that the Lime caller must supply; do NOT drop it.
+        // Generic: derived purely from parameter position, no library names.
+        let drop_from = f
+            .params
+            .iter()
+            .position(|p| matches!(p.ty, CType::Function(_, _)))
+            .filter(|&idx| idx + 1 < f.params.len());
         // Phase 1 Iteration 7: nonnull parameters (AST auto-extracted facts
         // from _Nonnull / nonnull, never name-inferred).
         let nonnull: Vec<usize> = f
