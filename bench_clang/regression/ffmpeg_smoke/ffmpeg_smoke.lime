@@ -1,0 +1,13 @@
+// Minimal FFmpeg libavutil native-execution smoke (Iteration 11).
+// Vertical slice: call the version API and print results.
+// No opaque structs, no callbacks — just two trivially-callable functions.
+extern fn avutil_version() -> Int "avutil_version"
+extern fn av_version_info() -> String "av_version_info"
+
+fn main():
+    let v = avutil_version()
+    print(v)
+    print("\n")
+    let s = av_version_info()
+    print(s)
+    print("\n")

@@ -4814,11 +4814,24 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         for f in &build_flags {
             cmd.arg(f);
         }
+        // Generic C-correctness fix: the library's OWN header directory is added
+        // with `-idirafter` (searched AFTER the system include dirs), not `-I`.
+        // With `-I`, the library dir is searched before the system headers, so a
+        // same-named local header (e.g. FFmpeg's libavutil/time.h) shadows the
+        // real system <time.h>, breaking the build. `-idirafter` places the
+        // library dir last, so `#include <time.h>` still resolves to the system
+        // header, while the library's own angle-bracket includes
+        // (`#include <jinclude.h>` in libjpeg-turbo) still resolve via fallback.
+        // No library-specific branch.
         for inc in &include_dirs {
-            cmd.arg("-I").arg(inc);
+            // Skip the library's own dir here; it is added via `-idirafter` below
+            // so it is not also on the front of the `-I` angle-bracket path.
+            if header.parent() != Some(inc.as_path()) {
+                cmd.arg("-I").arg(inc);
+            }
         }
         if let Some(hdir) = header.parent() {
-            cmd.arg("-I").arg(hdir);
+            cmd.arg("-idirafter").arg(hdir);
         }
         cmd.arg(s).arg("-o").arg(&obj_path);
         let status = cmd

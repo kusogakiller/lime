@@ -1,0 +1,8 @@
+[charger]
+# FFmpeg libavutil public API umbrella header. The minimal smoke slice uses only
+# the version API (avutil_version / av_version_info / avutil_license). The
+# corpus root also contains a stub config.h (generated-content stand-in); it must
+# NOT be used as the API entry point. Corpus config — not charger logic.
+api_header = "libavutil/avutil.h"
+build_flags = []
+deps = []
