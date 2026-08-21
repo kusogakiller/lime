@@ -71,12 +71,40 @@ Last updated: Iteration 13 (2026-08-21).
 - artifact cache hit / source invalidation GREEN
 - duplicate source filename stem collision GREEN
 - unique per-TU object names               GREEN
+- duplicate-symbol (multiple platform backends) GREEN (Iteration 15: SDL2 —
+  see below; root cause was Charger's generic source collector compiling BOTH
+  the `src/thread/generic/` and `src/thread/windows/` mutex/sem/thread/tls
+  implementations, each defining SDL_CreateMutex etc. Fixed in corpus config,
+  not charger.rs — see Real-world libraries note)
 
-## Real-world libraries (permanent gate: PASS=7 FAIL=1)
-zlib, libpng, sqlite, libjpeg, curl, FFmpeg, libcallbackarg — GREEN.
-SDL2 — FAIL (pre-existing duplicate-symbol SDL_UnlockMutex/SDL_CreateMutex link
-collision in the SDL2-2.30.9 corpus; reproduced identically with the Charger
-change stashed, so NOT caused by any Charger iteration). Tracked separately.
+## Real-world libraries (permanent gate: PASS=8 FAIL=0)
+zlib, libpng, sqlite, libjpeg, curl, FFmpeg, libcallbackarg, SDL2 — all GREEN.
+
+### SDL2 duplicate-symbol recovery (Iteration 15)
+Root cause (proven, not a Charger logic bug): SDL2 ships mutually-exclusive
+per-platform backend translation units under `src/<subsystem>/<platform>/`.
+For the Windows host build, SDL2's own CMake selects ONLY
+`src/thread/windows/{SDL_sysmutex,SDL_syssem,SDL_systhread,SDL_systls}.c` (plus
+`windows/SDL_syscond_cv.c` and `generic/SDL_syscond.c`, the latter guarded by
+`SDL_THREAD_GENERIC_COND_SUFFIX` so it does NOT define `SDL_CreateCond`).
+Charger's generic `collect_sources` recurses the whole tree and compiled BOTH
+`generic/SDL_sysmutex.c` and `windows/SDL_sysmutex.c`, each defining
+`SDL_CreateMutex`/`SDL_DestroyMutex`/`SDL_LockMutex`/`SDL_TryLockMutex`/
+`SDL_UnlockMutex` -> lld-link `duplicate symbol` at the smoke link step.
+
+Fix (corpus configuration ONLY — charger.rs untouched, no library-specific
+code, no C++):
+- Created a Windows-only corpus copy `SDL2-2.30.9-win` (alongside the intact
+  original `SDL2-2.30.9`) with the four generic thread TUs that the Windows
+  build does NOT use removed: `src/thread/generic/{SDL_sysmutex,SDL_syssem,
+  SDL_systhread,SDL_systls}.c`. `generic/SDL_syscond.c` is KEPT (Windows build
+  uses it). This mirrors exactly what SDL2's CMake feeds the Windows compiler.
+- Pointed `run_regression.sh`'s `sdl2` row at `SDL2-2.30.9-win`.
+- Removed the stale `SDL2-2.30.9` store so the smoke link no longer pulls in
+  the old (duplicate-containing) `.lib` alongside the new one.
+
+Verification: SDL2 smoke links cleanly (`0|Windows||`, exit 0), and the full
+permanent gate now reports PASS=8 FAIL=0.
 
 ## Known open issues (NOT counted as GREEN)
 - **typedef fn-pointer non-void return callback**: `cb_ret_t = int (*)(int, void*)`
