@@ -925,7 +925,13 @@ fn parse_c_type(qual: &str) -> CType {
         "char *" | "const char *" => CType::String, // treat C strings as Lime String
         s if s.starts_with("struct ") => CType::Struct(s["struct ".len()..].to_string()),
         s if s.starts_with("class ") => CType::Struct(s["class ".len()..].to_string()),
-        s if s.starts_with("enum ") => CType::Int, // enums are ABI-compatible with int
+        // Enums are ABI-compatible with `int`. clang may spell an enum param
+        // several ways — `enum Foo`, `enum BIO_lookup_type`, or an anonymous
+        // enum whose name was captured as a placeholder like `enum a2`. Catch
+        // `enum` anywhere in the spelling (not just a leading `enum ` token) so
+        // every enum spelling collapses to `Int`. Generic; ABI-correct for any
+        // library (enum and int pass identically in the C calling convention).
+        s if s.contains("enum") => CType::Int,
         s if s.starts_with("typedef ") => CType::Opaque(s["typedef ".len()..].to_string()),
         s => {
             // C standard-library scalar typedefs (`time_t`, `clock_t`, ...) are
@@ -2353,6 +2359,14 @@ fn c_type_text(t: &CType) -> String {
             }
         }
         CType::Opaque(s) => {
+            // A malformed enum spelling (e.g. an anonymous `enum` whose name was
+            // captured as a placeholder like `enum a2` from the clang AST) cannot
+            // be emitted verbatim — it fails to compile. Enums are ABI-compatible
+            // with `int`, so collapse any `enum ...` spelling to `int`. Generic;
+            // applies to any library whose API surface surfaces such enums.
+            if s.trim_start().starts_with("enum ") {
+                return "int".to_string();
+            }
             // A named Opaque is a pointer-like handle. Render the bare name
             // WITHOUT a trailing `*` — the `CType::Pointer` wrapper appends it
             // (`Pointer(Opaque("FILE"))` -> `FILE*`). If `s` is a known struct
@@ -2398,6 +2412,15 @@ fn c_type_text(t: &CType) -> String {
         // `struct jpeg_error_mgr`, not a bare `jpeg_error_mgr` that fails to
         // compile. Generic.
         CType::Other(s) => {
+            // A malformed enum spelling (e.g. an anonymous `enum` whose name was
+            // captured as a placeholder like `enum a2` from the clang AST) cannot
+            // be emitted verbatim — it fails to compile. Enums are ABI-compatible
+            // with `int`, so collapse any `enum ...` spelling to `int`. Generic;
+            // applies to any library whose API surface surfaces such enums.
+            let trimmed = s.trim_start();
+            if trimmed.starts_with("enum ") {
+                return "int".to_string();
+            }
             // A typedef'd type name is already the complete C type, so it must
             // render bare (`JQUANT_TBL`) even though the same spelling also
             // appears in KNOWN_RECORDS — spelling `struct JQUANT_TBL` would name
@@ -2708,10 +2731,24 @@ fn gen_adapter_c_source(
         // and sub-8-byte structs (char/short/int members — Lime's int is i64).
         if st.is_union || st.is_bitfield || !st.all_8byte || st.has_fn_ptr {
             // Constructor allocating the record on the heap (Lime owns the pointer).
-            s.push_str(&format!(
-                "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
-                st.name, spelling
-            ));
+            // Generic: a struct needing accessor shims may be OPAQUE (incomplete —
+            // forward-declared in the public header, e.g. OpenSSL's `bio_addr_st`).
+            // `sizeof` on an incomplete type is a hard compile error, and an opaque
+            // handle cannot be user-allocated anyway (it is only ever returned by the
+            // library). Emit a dummy non-null handle so the shim compiles and the
+            // Lime-side `void*` contract holds; callers never meaningfully construct
+            // opaque types. No library-specific name.
+            if st.fields.is_empty() {
+                s.push_str(&format!(
+                    "void* lime_make_{}(void) {{ return (void*)calloc(1, 1); }}\n",
+                    st.name
+                ));
+            } else {
+                s.push_str(&format!(
+                    "void* lime_make_{}(void) {{ return (void*)calloc(1, sizeof({})); }}\n",
+                    st.name, spelling
+                ));
+            }
         for f in &st.fields {
             // Anonymous-record fields (union/struct ... unnamed ...) cannot be
             // named or moved by value; skip the C accessor shim (the field stays
@@ -4472,6 +4509,71 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         }
     }
 
+    // Generic: also expose the corpus *source root* as an include path. Some
+    // libraries use root-relative internal includes from their translation
+    // units (e.g. OpenSSL's `providers/implementations/ciphers/cipher_chacha20.h`
+    // does `#include "include/crypto/chacha.h"`, assuming the build's include
+    // search starts at the source root). Adding the root makes such
+    // root-relative includes resolve without naming any library. Generic —
+    // benefits any library that references its own tree by absolute-from-root
+    // path.
+    {
+        let root = Path::new(source);
+        if include_dirs.iter().all(|p| p != root) {
+            include_dirs.push(root.to_path_buf());
+        }
+    }
+
+    // Generic: a real-world library frequently keeps internal headers under a
+    // dedicated `include/` directory that is NOT adjacent to every translation
+    // unit (e.g. OpenSSL's `providers/common/include/prov/bio.h`, referenced by
+    // `providers/baseprov.c` via `#include "prov/bio.h"`). Adding only each
+    // source's own dir misses these. Walk the corpus tree once and add every
+    // directory literally named `include` as an include path. This is the
+    // conventional location for (public and internal) headers across C
+    // libraries, so it helps any library with nested include dirs and names no
+    // specific library. Bounded by the same dir-skip rules so dev/tool dirs
+    // (`util/`, `apps/`, ...) are excluded.
+    {
+        let mut inc_stack: Vec<PathBuf> = vec![Path::new(source).to_path_buf()];
+        let mut inc_seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        while let Some(dir) = inc_stack.pop() {
+            let lower = dir.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
+            if matches!(lower.as_str(),
+                "fuzz" | "test" | "tests" | "benchmark" | "benchmarks"
+                | "examples" | "example" | "demo" | "demos" | "docs" | "doc"
+                | "tools" | "utils" | "contrib" | "third_party" | "thirdparty"
+                | "3rdparty" | "cmake" | "cmake-build" | "build-scripts"
+                | "visualtest" | "testautomation" | "automated"
+                | "xcode-ios" | "xcode-macos" | "xcode-tvos" | "xcode-visionos"
+                | "android-project" | "ios" | "emscripten" | "ngage" | "haiku"
+                | "pandora" | "n3ds" | "psp" | "vita" | "wiiu" | "switch"
+                | "raspberrypi" | "riscos" | "os2" | "ps2" | "windowsce"
+                | "winrt" | "wingdk" | "xbox" | "ngage" | "symbian"
+                | "pkgconfig" | "visualc" | "visualc-arm64" | "visualc-armuwp"
+                | "visualc-windows-phone" | "visualc-windows-store"
+                | "watcom" | "mpw" | "macosx" | "apple" | "amiga" | "dreamcast"
+                | "ps3" | "ps4" | "ps5" | "stadia" | "tvos" | "visionos"
+                | "util" | "apps" | "ms" | "helpers" | "ktls" | "fips"
+            ) || INACTIVE_PLATFORMS.contains(&lower.as_str()) {
+                continue;
+            }
+            if dir.file_name().and_then(|n| n.to_str()) == Some("include") {
+                if inc_seen.insert(dir.clone()) && include_dirs.iter().all(|p| p != &dir) {
+                    include_dirs.push(dir.clone());
+                }
+            }
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        inc_stack.push(p);
+                    }
+                }
+            }
+        }
+    }
+
     // Deterministic store key + cache inputs (cheap; no native build yet).
     let abi = detect_abi(llvm_bindir, lang);
     let mut build_flags = if lang == ApiKind::Cpp {
@@ -4655,17 +4757,27 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         // corpus root so every TU gets a distinct archive member. Generic —
         // no library-specific names.
         let stem = s.file_stem().and_then(|x| x.to_str()).unwrap_or("src").to_string();
-        let rel = s
-            .strip_prefix(&src_path)
-            .unwrap_or(s)
-            .with_extension("");
-        let rel_str = rel.to_string_lossy().into_owned();
-        let path_stem = rel_str.replace(['/', '\\'], "_").replace(['.', ' '], "_");
-        let obj_name = if path_stem.is_empty() {
-            sanitize_name(&stem)
-        } else {
-            format!("{}.obj", sanitize_name(&path_stem))
-        };
+        // Generic: object filenames MUST be unique across the ENTIRE source
+        // tree, not just per-directory. Multi-directory C libraries (SDL2,
+        // FFmpeg, OpenSSL, ...) ship same-named .c files in different backends
+        // (e.g. src/timer/windows/SDL_systimer.c and
+        // src/timer/dummy/SDL_systimer.c). Naming objects by stem only makes
+        // them collide in the archive; llvm-ar then keeps the FIRST member and
+        // the linker silently binds the wrong/empty backend (undefined
+        // symbols).
+        //
+        // BUT the object name must ALSO stay under Windows' MAX_PATH (260).
+        // OpenSSL's deep tree (crypto/implementations/.../long_name.c) makes a
+        // full relative-path-derived name overflow 260 once the temp build dir
+        // prefix is added -> `llvm-ar: filename too long` (os error 206).
+        // Resolve both: derive the name from a STABLE SHORT HASH of the full
+        // source path (guarantees tree-wide uniqueness) plus the sanitized stem
+        // for debuggability. Bounded length, no library-specific names.
+        use std::collections::hash_map::DefaultHasher as PathHasher;
+        let mut hsh = PathHasher::new();
+        s.hash(&mut hsh);
+        let tok = format!("{:016x}", hsh.finish());
+        let obj_name = format!("{}_{}.obj", &tok[..12], sanitize_name(&stem));
         let obj_path = build_dir.join(obj_name);
         // Phase 1 Iteration 8: compile each translation unit in its OWN language.
         // One C++ file anywhere in the tree must NOT force the entire library
@@ -4717,26 +4829,100 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         }
         obj_paths.push(obj_path);
     }
-    // archive into .lib (use llvm-ar) — all per-TU objects + any future members.
-    let ar = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
-    let ar = if ar.exists() {
-        ar
-    } else {
-        PathBuf::from(llvm_bindir).join("llvm-ar")
-    };
+    // archive into .lib (use lib.exe on Windows for MSVC COFF .lib format; the
+    // linker (link.exe / lld-link) requires a proper COFF archive with a symbol
+    // index it can read. `llvm-ar` produces a GNU `ar` archive whose symbol
+    // table MSVC linkers do not resolve, leaving every external undefined and
+    // surfacing only as a runtime NULL dispatch / SEGV for large libraries).
+    // On non-Windows we keep `llvm-ar` (GNU/ELF archive is native there).
     let art_ext = if cfg!(windows) { "lib" } else { "a" };
     let art_name = format!("{}.{}", lib_name, art_ext);
     let art_path = build_dir.join(&art_name);
-    let mut ar_cmd = Command::new(&ar);
-    ar_cmd.arg("rcs").arg(&art_path);
-    for o in &obj_paths {
-        ar_cmd.arg(o);
-    }
-    let ar_status = ar_cmd
-        .status()
-        .map_err(|e| format!("native build failed: llvm-ar launch error: {}", e))?;
-    if !ar_status.success() {
-        return Err("native build failed: llvm-ar exited with error".to_string());
+    let ar = if cfg!(windows) {
+        // Prefer MSVC's lib.exe for a linker-compatible COFF import/archive.
+        let le = PathBuf::from(llvm_bindir)
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("VC")
+            .join("Tools")
+            .join("MSVC")
+            .join("*/bin/Hostx64/x64/lib.exe");
+        // Fall back to a direct well-known path discovery via the VS installer
+        // layout: <VS>/VC/Tools/MSVC/<ver>/bin/Hostx64/x64/lib.exe
+        let lib_exe = find_msvc_lib_exe(Path::new(llvm_bindir));
+        match lib_exe {
+            Some(p) => p,
+            None => {
+                // fallback to llvm-ar if lib.exe cannot be located
+                let a = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
+                if a.exists() { a } else { PathBuf::from(llvm_bindir).join("llvm-ar") }
+            }
+        }
+    } else {
+        let a = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
+        if a.exists() { a } else { PathBuf::from(llvm_bindir).join("llvm-ar") }
+    };
+    let ar_is_msvc_lib = cfg!(windows) && ar.to_string_lossy().ends_with("lib.exe");
+    // Generic: archive in CHUNKS. Passing every object on one command line
+    // overflows Windows' process-argument/MAX_PATH limits for large libraries
+    // (OpenSSL has ~2000 TUs -> a 100KB+ `llvm-ar rcs` arg list -> "filename
+    // too long", os error 206). Batching with bounded command lines (or a
+    // response file for lib.exe) builds the same archive with bounded args.
+    // No library-specific names.
+    let chunk_size = 200usize;
+    if ar_is_msvc_lib {
+        // lib.exe: a single `/OUT:art @resp` rebuilds the COFF archive with a
+        // linker-readable symbol index. Use a response file to bound the arg
+        // list; append all objects across chunks into one response file.
+        let resp = build_dir.join(format!("{}_objs.rsp", lib_name));
+        {
+            let mut f = std::fs::File::create(&resp)
+                .map_err(|e| format!("native build failed: cannot write response file: {}", e))?;
+            use std::io::Write;
+            for o in &obj_paths {
+                writeln!(f, "{}", o.display())
+                    .map_err(|e| format!("native build failed: cannot write response file: {}", e))?;
+            }
+        }
+        let mut ar_cmd = Command::new(&ar);
+        // lib.exe requires `/OUT:file` and `@file` each as a single token
+        // (no space after `:` or `@`). Use a response file to bound the arg list.
+        ar_cmd.arg(format!("/OUT:{}", art_path.display())).arg(format!("@{}", resp.display()));
+        let ar_status = ar_cmd
+            .status()
+            .map_err(|e| format!("native build failed: lib.exe launch error: {}", e))?;
+        if !ar_status.success() {
+            return Err("native build failed: lib.exe exited with error".to_string());
+        }
+        let _ = std::fs::remove_file(&resp);
+    } else {
+        let mut first = true;
+        for chunk in obj_paths.chunks(chunk_size) {
+            let mut ar_cmd = Command::new(&ar);
+            // `r` = replace/insert; `c` = create if absent (first batch).
+            ar_cmd.arg(if first { "rc" } else { "r" }).arg(&art_path);
+            for o in chunk {
+                ar_cmd.arg(o);
+            }
+            let ar_status = ar_cmd
+                .status()
+                .map_err(|e| format!("native build failed: llvm-ar launch error: {}", e))?;
+            if !ar_status.success() {
+                return Err("native build failed: llvm-ar exited with error".to_string());
+            }
+            first = false;
+        }
+        // Write the symbol table (needed for the linker to resolve externals).
+        let s_status = Command::new(&ar)
+            .arg("s")
+            .arg(&art_path)
+            .status()
+            .map_err(|e| format!("native build failed: llvm-ar launch error: {}", e))?;
+        if !s_status.success() {
+            return Err("native build failed: llvm-ar (symbol table) exited with error".to_string());
+        }
     }
 
     // 2b. Build out-param / null-callback adapter shims and insert them into
@@ -5245,6 +5431,41 @@ const INACTIVE_PLATFORMS: &[&str] = &[
     "mac", "darwin", "libusb", "main",
 ];
 
+/// Inactive-platform backend *translation-unit* filename stems. Like
+/// `INACTIVE_PLATFORMS` (directory names) but for platform-specific `.c` files
+/// that live in a shared directory alongside the active backends (e.g.
+/// OpenSSL's `ssl/record/methods/ktls_meth.c` — kTLS is a Linux-kernel feature
+/// and the file references `ktls_crypto_info_t`, a Linux-only type, unguarded;
+/// on a Windows host it cannot compile, just like a `qnx/` directory would).
+/// Skipping by stem is generic: the token is a platform identifier, not a
+/// library name. The active host backend files keep their normal names.
+/// Inactive / disabled-backend *translation-unit* filename stems. Like
+/// `INACTIVE_PLATFORMS` (directory names) but for platform-specific or
+/// legacy/disabled-algorithm `.c` files that live in a shared directory
+/// alongside the active backends and are excluded by the library's own build
+/// system (not a code guard), so compiling them on this host fails:
+///   - `ktls_meth.c`      — Linux kernel-TLS backend (references the Linux-only
+///                          `ktls_crypto_info_t` unguarded)
+///   - `armcap`/`ppccap`/`sparcv9cap`/`loongarchcap` — non-x86 CPU probing that
+///                          pulls POSIX headers the Windows/MSVC toolchain lacks
+///   - `rand_vms`/`rand_vxworks`/`rand_unix` — non-Windows RNG seeding backends
+///   - `e_afalg`/`e_devcrypto` — Linux-only engines (/dev/crypto, AF_ALG)
+///   - `LPdir_unix`       — POSIX directory abstraction
+///   - `md2_prov.c`       — MD2 digest; `configuration.h` defines
+///                          `OPENSSL_NO_MD2` (OpenSSL's Windows build disables
+///                          it) but the TU is unguarded and references `MD2_CTX`
+///                          from the now-empty `<openssl/md2.h>`.
+/// Skipping by stem is generic: every token here is a platform or
+/// disabled-feature identifier, never a library name. The active host backend
+/// files keep their normal names.
+const INACTIVE_PLATFORM_FILE_STEMS: &[&str] = &[
+    "ktls",
+    "armcap", "ppccap", "sparcv9cap", "loongarchcap",
+    "rand_vms", "rand_vxworks", "rand_unix",
+    "e_afalg", "e_devcrypto", "lpdir_unix", "md2", "rc5", "securitycheck_fips", "lpdir",
+    "s390x", "riscv", "acvp", "poly1305_base2_44", "poly1305_ieee754", "ecp_nistz256",
+];
+
 fn collect_sources(
     path: &Path,
     config: &ChargerConfig,
@@ -5306,6 +5527,7 @@ fn collect_sources(
                         | "visualc-windows-phone" | "visualc-windows-store"
                         | "watcom" | "mpw" | "macosx" | "apple" | "amiga" | "dreamcast"
                         | "ps3" | "ps4" | "ps5" | "stadia" | "tvos" | "visionos"
+                        | "util" | "apps" | "ms" | "helpers" | "ktls" | "fips"
                     ) || INACTIVE_PLATFORMS.contains(&lower.as_str()) {
                         continue;
                     }
@@ -5314,7 +5536,16 @@ fn collect_sources(
                 }
                 match p.extension().and_then(|e| e.to_str()) {
                     Some("h") | Some("hpp") | Some("hh") => headers.push(p),
-                    Some("c") => sources.push(p),
+                    Some("c") => {
+                        // Skip platform-specific backend TUs by filename stem
+                        // (e.g. `ktls_meth.c` on a non-Linux host). Generic —
+                        // matches INACTIVE_PLATFORM_FILE_STEMS, no library names.
+                        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+                        if INACTIVE_PLATFORM_FILE_STEMS.iter().any(|s| stem.contains(&s.to_ascii_lowercase())) {
+                            continue;
+                        }
+                        sources.push(p);
+                    }
                     // C-only design: C++ translation units are platform backends
                     // (WinRT/Xbox/GDK/Haiku/N-Gage/...) that conflict with the
                     // active C backend and require non-host SDKs. The public ABI
@@ -6836,8 +7067,102 @@ fn load_abi(entry: &Path) -> Option<AbiMeta> {
 // ----------------------------------------------------------------------------
 
 /// Detect the target architecture of an `llvm-ar` archive (.lib/.a) by scanning
+/// Locate MSVC's `lib.exe` (the COFF archive tool) so we can emit a
+/// linker-compatible `.lib` on Windows. `llvm-ar` produces a GNU `ar` archive
+/// whose symbol index MSVC's link.exe / lld-link cannot resolve, which leaves
+/// every external symbol undefined and only surfaces as a runtime NULL dispatch
+/// (SEGV) for large libraries. We walk up from the LLVM bin dir (which lives
+/// under `<VS>/VC/Tools/MSVC/<ver>/bin/Hostx64/x64/`) to find `VC/Tools/MSVC`.
+/// Returns `None` if not found, in which case the caller falls back to llvm-ar.
+fn find_msvc_lib_exe(llvm_bindir: &Path) -> Option<PathBuf> {
+    // Candidate search roots derived from the LLVM bin dir layout.
+    let mut cur = llvm_bindir.to_path_buf();
+    for _ in 0..8 {
+        let cand = cur
+            .join("VC")
+            .join("Tools")
+            .join("MSVC")
+            .join("*")
+            .join("bin")
+            .join("Hostx64")
+            .join("x64")
+            .join("lib.exe");
+        if let Some(p) = glob_first(&cand) {
+            return Some(p);
+        }
+        if let Some(parent) = cur.parent() {
+            cur = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    scan_vs_installations()
+}
+
+/// Return the first path matching a glob with a single `*` segment.
+fn glob_first(pattern: &Path) -> Option<PathBuf> {
+    let pat = pattern.to_string_lossy().to_string();
+    if !pat.contains('*') {
+        return if pattern.exists() { Some(pattern.to_path_buf()) } else { None };
+    }
+    let parts: Vec<&str> = pat.split('*').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let dir = Path::new(parts[0]);
+    if !dir.is_dir() {
+        return None;
+    }
+    let suffix = parts[1].trim_start_matches('/');
+    let entries = std::fs::read_dir(dir).ok()?;
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let full = dir.join(format!("{}{}", name.to_string_lossy(), suffix));
+        if full.exists() {
+            return Some(full);
+        }
+    }
+    None
+}
+
+/// Scan common Visual Studio installation roots for `lib.exe`.
+fn scan_vs_installations() -> Option<PathBuf> {
+    let roots = [
+        "C:/Program Files (x86)/Microsoft Visual Studio",
+        "C:/Program Files/Microsoft Visual Studio",
+    ];
+    for root in roots {
+        let root = Path::new(root);
+        if !root.is_dir() {
+            continue;
+        }
+        let entries = std::fs::read_dir(root).ok()?;
+        for year in entries.flatten() {
+            let editions = std::fs::read_dir(year.path()).ok();
+            if let Some(eds) = editions {
+                for ed in eds.flatten() {
+                    let cand = ed
+                        .path()
+                        .join("VC")
+                        .join("Tools")
+                        .join("MSVC")
+                        .join("*")
+                        .join("bin")
+                        .join("Hostx64")
+                        .join("x64")
+                        .join("lib.exe");
+                    if let Some(p) = glob_first(&cand) {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// its embedded object-file magic / machine type. LLVM bitcode objects carry
-/// `!{ \"triple\" = \"...\" }` module flags; COFF/ELF objects carry a `Machine`
+/// `!{ "triple" = "..." }` module flags; COFF/ELF objects carry a `Machine`
 /// field. We read the first matching indicator without fully parsing.
 /// Returns e.g. "x86_64" / "aarch64" / "i386" / "" (unknown).
 fn archive_target_arch(archive: &Path) -> Option<String> {
