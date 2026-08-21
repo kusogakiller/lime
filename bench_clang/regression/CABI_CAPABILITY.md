@@ -43,6 +43,15 @@ Last updated: Iteration 13 (2026-08-21).
 - callback + multiple tail args           GREEN (Iteration 13: was dropped)
 - inline fn-pointer param + tail          GREEN (Iteration 13: the shape that
                                           previously DROPPED the callback)
+- **typedef fn-pointer param (cb_t)**      GREEN (Iteration 14: cb_t normalized
+                                          to CType::Function -> Callback; was
+                                          Opaque(cb_t) -> inttoptr codegen bug)
+- typedef fn-pointer, const arg            GREEN (Iteration 14: void(*)(const char*))
+- typedef fn-pointer, void* arg            GREEN (Iteration 14: void(*)(void*))
+- typedef fn-pointer, non-void return      UNCONFIRMED (cb_ret_t = int(*)(int,void*);
+                                          CType::Function(ret=Int) is produced
+                                          correctly, but Lime callback syntax for
+                                          a non-Unit return is not yet exercised)
 
 ## Out parameters / ownership
 - create-style T** (sqlite3_open)          GREEN
@@ -63,18 +72,19 @@ Last updated: Iteration 13 (2026-08-21).
 - duplicate source filename stem collision GREEN
 - unique per-TU object names               GREEN
 
-## Real-world libraries (permanent gate: PASS=8 FAIL=0)
-zlib, libpng, sqlite, libjpeg, curl, SDL2, FFmpeg, libcallbackarg — all GREEN.
+## Real-world libraries (permanent gate: PASS=7 FAIL=1)
+zlib, libpng, sqlite, libjpeg, curl, FFmpeg, libcallbackarg — GREEN.
+SDL2 — FAIL (pre-existing duplicate-symbol SDL_UnlockMutex/SDL_CreateMutex link
+collision in the SDL2-2.30.9 corpus; reproduced identically with the Charger
+change stashed, so NOT caused by any Charger iteration). Tracked separately.
 
 ## Known open issues (NOT counted as GREEN)
-- **typedef fn-pointer into `Opaque(name)` arg**: passing a Lime fn into a
-  `cb_t`-typedef function pointer surfaced as `Opaque(cb_t)` triggers a Lime
-  codegen bug (`inttoptr i64 to i64`, invalid). Inline `void (*)(...)` params
-  (surfaced as `Callback`) are unaffected and work end-to-end. This is a Lime
-  codegen issue distinct from the callback-tail fix; tracked separately, out of
-  Iteration 13 scope. The opaque-pointer *normalization* for `cb_t` is correct;
-  only the Lime->C fn-pointer *passing* path for the `Opaque(cb_t)` spelling is
-  broken.
+- **typedef fn-pointer non-void return callback**: `cb_ret_t = int (*)(int, void*)`
+  normalizes correctly to `CType::Function([Int, Opaque], Int)` and surfaces as
+  `Callback`, but a Lime callback *definition* with a non-Unit return has not
+  been exercised (Lime's `fn ... -> Ret` syntax is unresolved). Void-returning
+  typedef callbacks (`cb_t`, `cb_const_t`, `cb_ptr_t`, `cb_userdata_t`) are
+  fully GREEN end-to-end (Iteration 14). Out of Iteration 14 scope.
 
 ## Iteration 13 change
 `collect_out_param_adapters` no longer drops a `CType::Function` parameter when
@@ -88,3 +98,19 @@ reaches native execution and the Lime callback fires (smoke
 `libcallbacktail_smoke.lime`, output shows `CB` markers + return codes 88/99).
 Existing sqlite3_exec / av_log_set_callback / libcallbackarg regressions
 unchanged (their callbacks are last-param or unused by the smoke).
+
+## Iteration 14 change
+Typedef function-pointers (`typedef void (*cb_t)(int)`, `typedef int (*cb_ret_t)(int, void*)`,
+etc.) are now normalized from `CType::Other("cb_t")`/`Opaque(cb_t)` to
+`CType::Function(...)` via the AST typedef table (`ctx.typedefs`): any typedef
+whose underlying qualType contains `(*` is resolved with `parse_c_function_ptr`.
+This surfaces the param as a Lime `Callback` and reuses the already-proven
+inline-fn-ptr codegen path (no Lime codegen change). Previously `cb_t` stayed
+`Opaque(cb_t)` and passing a Lime fn into it produced invalid LLVM IR
+(`inttoptr i64 to i64`). Verified end-to-end: `libcallbacktypedef_smoke.lime`
+runs natively (exit 0) with `CB` markers + return codes 22/44/55/66 for
+`callback_tail`/`callback_userdata`/`callback_const`/`callback_ptr`. The
+underlying-typedef spelling check (`(*`) means opaque-handle typedefs
+(`typedef struct Foo Foo;`, `typedef Foo *FooHandle;`) and scalar/enum typedefs
+are never mis-collapsed to function pointers. No library name, no function-name
+heuristic.

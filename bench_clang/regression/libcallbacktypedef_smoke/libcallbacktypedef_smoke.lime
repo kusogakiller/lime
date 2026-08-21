@@ -1,0 +1,36 @@
+// Iteration 14 typedef function-pointer regression smoke.
+// Proves a typedef'd function pointer (typedef void (*cb_t)(int), etc.) is
+// normalized to a Lime `Callback` and that the Lime callback actually fires
+// from native C execution. Each C function calls cb with a sentinel and returns
+// a per-function code, so a non-zero return proves the callback ran.
+// (cb_ret_t has a non-void return; Lime's callback syntax for a non-Unit return
+// is out of scope here — the void-returning typedef callbacks below prove the
+// normalization + round-trip. Tracked separately.)
+extern fn callback_tail(Callback: a0, Opaque(ScalarPtr): a1) -> Int "callback_tail"
+extern fn callback_userdata(Callback: a0, Opaque(ScalarPtr): a1) -> Int "callback_userdata"
+extern fn callback_const(Callback: a0, Opaque(ScalarPtr): a1) -> Int "callback_const"
+extern fn callback_ptr(Callback: a0, Opaque(ScalarPtr): a1) -> Int "callback_ptr"
+
+fn on_cb(Int: v):
+    print("CB")
+    print("\n")
+
+fn main():
+    let r0 = callback_tail(on_cb, 0)
+    print("R0:")
+    print(r0)
+    print("\n")
+    let r2 = callback_userdata(on_cb, 0)
+    print("R2:")
+    print(r2)
+    print("\n")
+    let r3 = callback_const(on_cb, 0)
+    print("R3:")
+    print(r3)
+    print("\n")
+    let r4 = callback_ptr(on_cb, 0)
+    print("R4:")
+    print(r4)
+    print("\n")
+    print("DONE")
+    print("\n")

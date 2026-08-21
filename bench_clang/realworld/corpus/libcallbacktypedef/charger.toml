@@ -1,0 +1,5 @@
+[charger]
+# Iteration 14 typedef function-pointer fixture.
+api_header = "libcallbacktypedef.h"
+build_flags = []
+deps = []

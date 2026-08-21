@@ -641,6 +641,52 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
             }
         }
     }
+    // Function-pointer typedefs: a typedef whose underlying type is a function
+    // pointer (the underlying qualType contains `(*`) must be surfaced as
+    // `CType::Function` so the Lime interface emits a `Callback` and the already
+    // proven inline-fn-ptr codegen path (Iteration 13) applies. Without this,
+    // `cb_t` stays `CType::Other("cb_t")` -> `Opaque(cb_t)`, and passing a Lime
+    // fn into it produces invalid LLVM IR (`inttoptr i64 to i64`). Generic:
+    // driven purely by the AST typedef table (`ctx.typedefs`); no library name,
+    // no function-name heuristic. A typedef to a struct/enum/scalar/opaque
+    // handle has an underlying spelling WITHOUT `(*`, so it is left untouched
+    // and never mis-collapses to a function pointer.
+    let fnptr_aliases: std::collections::HashMap<String, CType> = ctx
+        .typedefs
+        .iter()
+        .filter_map(|(n, u)| {
+            if u.contains("(*") {
+                parse_c_function_ptr(u.trim()).map(|ft| (n.clone(), ft))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if !fnptr_aliases.is_empty() {
+        for f in &mut api.functions {
+            for p in &mut f.params {
+                if let CType::Other(n) | CType::Opaque(n) = &p.ty {
+                    if let Some(ft) = fnptr_aliases.get(n) {
+                        p.ty = ft.clone();
+                    }
+                }
+            }
+            if let CType::Other(n) | CType::Opaque(n) = &f.ret {
+                if let Some(ft) = fnptr_aliases.get(n) {
+                    f.ret = ft.clone();
+                }
+            }
+        }
+        for s in &mut api.structs {
+            for f in &mut s.fields {
+                if let CType::Other(n) | CType::Opaque(n) = &f.ty {
+                    if let Some(ft) = fnptr_aliases.get(n) {
+                        f.ty = ft.clone();
+                    }
+                }
+            }
+        }
+    }
     // Record every typedef name so adapter generation can suppress the
     // `struct` keyword for typedef'd types (e.g. libjpeg's `JQUANT_TBL`). A
     // pointer to a typedef'd record must spell `JQUANT_TBL*`, not
@@ -1316,7 +1362,21 @@ fn parse_c_function_ptr(q: &str) -> Option<CType> {
     let ret_part = q[..star].trim();
     // Strip any trailing `*` (pointer-to-function-pointer) and whitespace.
     let ret_part = ret_part.trim_end_matches('*').trim();
-    let ret = parse_c_type(ret_part);
+    // NOTE: we intentionally do NOT recursively `parse_c_type` the return type
+    // or parameter types here. Recursing into `parse_c_type` re-enters
+    // `parse_c_function_ptr` (it calls back for any `(*`-containing spelling),
+    // which can stack-overflow on real headers that typedef function pointers
+    // whose parameter/return types are themselves typedef'd (e.g. zlib's
+    // `voidpf (*alloc_func)(voidpf, uInt, uInt)`). The Lime `Callback` ABI only
+    // needs the function-pointer *shape* — the exact param/ret CTypes are not
+    // consumed by codegen (the Lime fn is passed as `ptr @funcname`). Surface
+    // them as `Opaque(name)` so the shape is preserved without unbounded
+    // recursion. Generic.
+    let ret = if ret_part.is_empty() {
+        CType::Opaque("void".to_string())
+    } else {
+        CType::Opaque(ret_part.to_string())
+    };
     // After `(*`, find the `)` that closes the pointer group, then the `(`
     // that opens the parameter list, then its matching `)`.
     let after_star = &q[star + 2..];
@@ -1331,7 +1391,9 @@ fn parse_c_function_ptr(q: &str) -> Option<CType> {
         for p in split_top_level(inner) {
             let p = p.trim();
             let ty_str = strip_param_name(p);
-            params.push(parse_c_type(ty_str.trim()));
+            // Surface each parameter as an opaque handle; do not recurse into
+            // `parse_c_type` (see note above on stack-overflow avoidance).
+            params.push(CType::Opaque(ty_str.trim().to_string()));
         }
     }
     Some(CType::Function(params, Box::new(ret)))
