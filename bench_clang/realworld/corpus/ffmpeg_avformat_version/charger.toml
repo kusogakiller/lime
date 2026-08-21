@@ -1,0 +1,13 @@
+[charger]
+# FFmpeg libavformat public API umbrella header. Minimal slice: avformat_version()
+# only (libavformat/version.c). The header tree (libavformat/*.h + libavutil/*.h)
+# exposes AVFormatContext as an opaque forward-declared struct that is fully
+# defined later in the header; Charger must normalize AVFormatContext* to
+# CType::Opaque (pointer handle), NOT struct-by-value. Generic corpus config.
+api_header = "libavformat/avformat.h"
+# Corpus root on the include path so `compat/va_copy.h` and the libavutil/
+# libavformat subdirs resolve. `-idirafter libavutil` ensures `<time.h>` resolves
+# to the system header (not FFmpeg's local libavutil/time.h, which lacks strftime).
+# Generic include-order handling, no library name. Corpus config.
+build_flags = ["-I.", "-idirafter", "libavutil"]
+deps = []

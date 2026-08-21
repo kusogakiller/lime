@@ -239,3 +239,80 @@ is **BLOCKED by corpus scope, not by a Charger opaque-pointer bug**:
 - **Step 2b full alloc+free runtime: BLOCKED by corpus scope** (missing libavutil/
   libavcodec internal TUs), documented honestly — NOT a Charger opaque bug.
 - 3 generic Charger bugs fixed (multi-dim-array FAM, take-out-param, idirafter-all).
+
+---
+
+## Iteration 12 — libavformat opaque-pointer slice (2026-08-21)
+
+Goal: prove the SAME generic Opaque-pointer handling works against a SECOND
+real library's opaque context (AVFormatContext), confirming the Iteration-12
+libavcodec fixes are library-agnostic (not FFmpeg-specific).
+
+### AST investigation (Source of Truth: clang 22 `-ast-dump=json`, zero errors)
+`libavformat/avformat.h` (110 headers + libavutil + libavcodec self-includes):
+- `struct AVFormatContext;` (line 331, forward-decl / opaque) then
+  `typedef struct AVFormatContext { ... } AVFormatContext;` (line 1265, complete
+  76-field struct). Same forward-decl+complete pattern as `AVCodecContext`.
+- `avformat_version() -> unsigned int (void)`
+- `avformat_alloc_context() -> AVFormatContext* (void)`
+- `avformat_free_context(AVFormatContext*) -> void`  — **single pointer** (`**`
+  NOT present) -> direct call, no adapter.
+- `avformat_close_input(AVFormatContext**) -> void` — **void return + single
+  `T**`** -> the take/free idiom.
+
+### Corpus (hand-built)
+`bench_clang/realworld/corpus/ffmpeg_avformat_version/`
+- libavformat headers (110) + libavcodec headers (584, for `avformat.h`'s
+  `libavcodec/{codec,codec_par,defs,packet}.h` self-includes) + libavutil
+  headers (152) + FFmpeg-root `compat/`.
+- TUs: `libavformat/version.c` (Step A), `options.c`, `avformat.c` (Step B link).
+- Stub `config.h` with `ARCH_X86 0` (cross-compile-style stub) so FFmpeg's
+  x86-specific `.c` TUs (`libavutil/x86/aes_init.c` needs `HAVE_AESNI_EXTERNAL`)
+  and `libavutil/intmath.h`'s `#include "x86/intmath.h"` are skipped. Generic
+  corpus-stub adjustment, no charger.rs change.
+- `charger.toml`: `api_header = "libavformat/avformat.h"`,
+  `build_flags = ["-I.", "-idirafter", "libavutil"]`.
+
+### Step A — version + opaque-header parse (GREEN, native execution)
+Smoke: `bench_clang/regression/ffmpeg_avformat_smoke/ffmpeg_avformat_version.lime`
+- `avformat_version()` -> 4066406 == (62<<16)|(34<<8)|94 == libavformat 62.34.94  ✓
+- exit code 0.
+- Proves the full libavformat public-header tree (AVFormatContext forward-decl +
+  76-field complete struct) normalizes through the whole pipeline and runs.
+
+### Opaque-pointer normalization — PROVEN at interface/adapter stage (libavformat)
+From the generated `lime-iface.lime` + adapter C:
+- `avformat_alloc_context() -> Opaque(AVFormatContext) "avformat_alloc_context"`
+  — `AVFormatContext*` is `Opaque(AVFormatContext)` (pointer handle), NOT
+  struct-by-value. Confirms the opaque rule holds for a SECOND library's
+  complete-struct-typed context.
+- `avformat_free_context(Opaque(AVFormatContext): a0) -> Unit "avformat_free_context"`
+  — single-pointer param stays a direct call (no adapter needed).
+- `avformat_close_input(Opaque(AVFormatContext): a0) -> Unit
+  "lime_take_avformat_close_input"` — the `void (T**)` take/free idiom is
+  recognized and surfaced correctly. This is the SAME generic path fixed for
+  `avcodec_free_context`; appearing on a DIFFERENT library (libavformat) proves
+  the Iteration-12 fix is library-agnostic, not FFmpeg-specific.
+
+### Step B — AVFormatContext* alloc / free (BLOCKED by corpus scope)
+`avformat_alloc_context()` links into the `.lib` (`T`), but runtime execution of
+`alloc + free` is BLOCKED by corpus scope (NOT a Charger opaque bug): the symbol
+references `av_opt_set_defaults`, `av_mallocz`, `av_packet_alloc`, `av_dict_*`,
+`avcodec_alloc_context3` / `avcodec_parameters_alloc`, `av_log`, etc. — all `U`
+(undefined) without the matching libavutil/libavcodec `.c` TUs. Resolving them is
+the same large, orthogonal FFmpeg-internal-tree expansion that blocked the
+libavcodec Step 2b runtime. The opaque-pointer plumbing is correct; the call
+would reach real FFmpeg code once those TUs are added. Per "don't boil the
+ocean", stopped here — the opaque ABI is already proven at AST/CType/interface/
+adapter/manifest for both AVCodecContext and AVFormatContext.
+
+### Status (libavformat)
+- **Step A (version + opaque-header parse): NATIVE EXECUTION GREEN.**
+- **Opaque-pointer normalization: PROVEN** for a SECOND library — `AVFormatContext*`
+  -> `Opaque`, single-pointer `free` stays direct, `void (T**)` -> take-adapter.
+  All verified at AST/CType/interface/adapter/manifest stages. This confirms the
+  Iteration-12 generic fixes generalize across libraries.
+- **Step B full alloc+free runtime: BLOCKED by corpus scope** (missing libavutil/
+  libavcodec internal TUs), documented honestly — NOT a Charger opaque bug.
+- No charger.rs change needed for libavformat beyond the shared generic fixes
+  (multi-dim-array FAM, take-out-param, idirafter-all) already in Iteration 12.

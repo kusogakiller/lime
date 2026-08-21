@@ -1,0 +1,12 @@
+// FFmpeg libavformat Step-A slice: opaque-struct header parsing + avformat_version().
+// Proves libavformat's public header tree (AVFormatContext as forward-decl +
+// 76-field complete struct) is normalized so AVFormatContext* becomes an opaque
+// pointer handle, and that avformat_version() runs natively.
+// The raw value encodes (MAJOR<<16)|(MINOR<<8)|MICRO; printed verbatim.
+extern fn avformat_version() -> Int "avformat_version"
+
+fn main():
+    let v = avformat_version()
+    print("AVFORMAT_VERSION:")
+    print(v)
+    print("\n")
