@@ -1,0 +1,51 @@
+// Iteration 20: anchor-free smoke.
+// References ONLY generated shim symbols (lime_const_*, lime_make_*, lime_get_*, lime_set_*).
+// No real C function (like take_enum_u8) is referenced.
+// Proves that the manifest now contains generated shim symbols for store selection.
+
+extern fn EU8_A(Int: a0) -> Int "lime_const_EU8_A"
+extern fn EU8_B(Int: a0) -> Int "lime_const_EU8_B"
+extern fn EI16_A(Int: a0) -> Int "lime_const_EI16_A"
+extern fn EI16_B(Int: a0) -> Int "lime_const_EI16_B"
+extern fn EDEF_A(Int: a0) -> Int "lime_const_EDEF_A"
+extern fn EDEF_B(Int: a0) -> Int "lime_const_EDEF_B"
+
+fn main():
+    let a = EU8_A(0)
+    let b = EU8_B(0)
+    let c = EI16_A(0)
+    let d = EI16_B(0)
+    let e = EDEF_A(0)
+    let f = EDEF_B(0)
+    let ok_a = a == 1
+    let ok_b = b == 200
+    let ok_c = c == 300
+    let ok_d = d == 0 - 2
+    let ok_e = e == 70000
+    let ok_f = f == 1
+    if ok_a:
+        if ok_b:
+            if ok_c:
+                if ok_d:
+                    if ok_e:
+                        if ok_f:
+                            print("ANCHOR_FREE_OK")
+                            print("\n")
+                        else:
+                            print("EDEF_B_FAIL")
+                            print("\n")
+                    else:
+                        print("EDEF_A_FAIL")
+                        print("\n")
+                else:
+                    print("EI16_B_FAIL")
+                    print("\n")
+            else:
+                print("EI16_A_FAIL")
+                print("\n")
+        else:
+            print("EU8_B_FAIL")
+            print("\n")
+    else:
+        print("EU8_A_FAIL")
+        print("\n")

@@ -31,7 +31,8 @@ ffmpeg_media_objects:bench_clang/realworld/corpus/ffmpeg_media_objects:bench_cla
 libcallbackarg:bench_clang/realworld/corpus/libcallbackarg:bench_clang/regression/libcallbackarg_smoke/libcallbackarg_smoke
 libcallbackreturn:bench_clang/realworld/corpus/libcallbackreturn:bench_clang/regression/libcallbackreturn_smoke/libcallbackreturn_smoke
 anon_flatten:bench_clang/realworld/corpus/anon_flatten:bench_clang/regression/anon_flatten_smoke/anon_flatten_smoke
-libenumedge:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_smoke"
+libenumedge:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_smoke
+libenumedge_nanchor:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_n-anchor"
 
 PASS=0
 FAIL=0

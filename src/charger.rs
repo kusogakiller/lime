@@ -5389,6 +5389,50 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
             }
         }
     }
+    // Generated shim symbols: `lime_const_*` (enum/macro constants), `lime_make_*`
+    // (struct/union constructors), and `lime_get_*/lime_set_*` (field accessors).
+    // These are emitted into the adapter .c → .lib but were NOT previously
+    // registered in the manifest symbol list, so a Lime `extern fn` referencing
+    // only generated shims (no real C function) failed to select the store at
+    // link time → undefined symbol → crash (measured: Iteration 19 anchor
+    // workaround; Iteration 20 root cause fix).
+    // Mirror the exact emission conditions from gen_adapter_c_source /
+    // emit_field_accessors so only symbols actually present in the .lib are
+    // registered. Generic — no library names, no symbol-name checks.
+    for (name, _) in &api.constants {
+        let sym = format!("lime_const_{}", name);
+        if !symbols.contains(&sym) {
+            symbols.push(sym);
+        }
+    }
+    for s in &api.structs {
+        if s.name.is_empty() { continue; }
+        let sym = format!("lime_make_{}", s.name);
+        if !symbols.contains(&sym) {
+            symbols.push(sym);
+        }
+        for f in &s.fields {
+            if is_anon_record_field(&f.ty) { continue; }
+            if is_union_field(&f.ty) { continue; }
+            if is_fn_ptr_array(&f.ty) { continue; }
+            if matches!(&f.ty, CType::Function(..)) { continue; }
+            match &f.ty {
+                CType::Array(inner, _) => {
+                    if matches!(**inner, CType::Array(_, _)) { continue; }
+                    let g = format!("lime_get_{}_{}_i", s.name, f.name);
+                    let st = format!("lime_set_{}_{}_i", s.name, f.name);
+                    if !symbols.contains(&g) { symbols.push(g); }
+                    if !symbols.contains(&st) { symbols.push(st); }
+                }
+                _ => {
+                    let g = format!("lime_get_{}_{}", s.name, f.name);
+                    let st = format!("lime_set_{}_{}", s.name, f.name);
+                    if !symbols.contains(&g) { symbols.push(g); }
+                    if !symbols.contains(&st) { symbols.push(st); }
+                }
+            }
+        }
+    }
 
     // Phase 1 Iteration 7: persist compact normalized signatures so
     // `verify_semantics` can validate the Semantic Supplement Layer against
