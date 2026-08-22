@@ -1642,12 +1642,35 @@ fn classify_node(
                         if ename.is_empty() || is_reserved_name(&ename) {
                             continue;
                         }
-                        let val = e
-                            .get("inner")
-                            .and_then(|v| v.as_array())
-                            .and_then(|a| a.first())
-                            .and_then(|c| c.get("value").and_then(|v| v.as_str()))
-                            .and_then(|s| s.parse::<i64>().ok());
+                        // clang wraps the enumerator's integer in a
+                        // `ConstantExpr` whose position varies by enum form:
+                        //   * plain enum        -> EnumConstantDecl.inner[0] IS the
+                        //     ConstantExpr (value = "70000").
+                        //   * fixed-underlying enum (`enum E : unsigned char`,
+                        //     C23 / clang extension) -> inner[0] is an
+                        //     ImplicitCastExpr and the ConstantExpr sits one
+                        //     level deeper. Reading only `inner[0].value`
+                        //     silently dropped EVERY constant of such enums
+                        //     (measured, Iteration 19). Walk the subtree to a
+                        //     bounded depth and take the first node carrying a
+                        //     string `value`. Generic — AST shape only.
+                        fn const_expr_value(n: &serde_json::Value, depth: u32) -> Option<i64> {
+                            if depth > 4 {
+                                return None;
+                            }
+                            if let Some(s) = n.get("value").and_then(|v| v.as_str()) {
+                                if let Ok(v) = s.parse::<i64>() {
+                                    return Some(v);
+                                }
+                            }
+                            for c in n.get("inner").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+                                if let Some(v) = const_expr_value(c, depth + 1) {
+                                    return Some(v);
+                                }
+                            }
+                            None
+                        }
+                        let val = e.get("inner").and_then(|_| const_expr_value(e, 0));
                         if let Some(v) = val {
                             api.constants.push((ename, v));
                         }
@@ -3191,13 +3214,16 @@ fn gen_adapter_c_source(
             s.push_str("\n");
         }
     }
-    // Constant shims: `int lime_const_NAME() { return <value>; }` — surfaces a
-    // C integer constant/macro as a zero-arg extern fn callable from Lime
-    // (Lime has no top-level `const`, so this preserves the value without a
-    // language change).
+    // Constant shims: `long long lime_const_NAME(void) { return <value>; }` —
+    // surfaces a C integer constant/macro as a zero-arg extern fn callable from
+    // Lime (Lime has no top-level `const`, so this preserves the value without a
+    // language change). The 64-bit return is required for ABI correctness: the
+    // Lime iface declares `-> Int` (i64), and a 32-bit `int` return leaves the
+    // upper half of RAX undefined for negative values (measured: `-2` read back
+    // as 4294967294, Iteration 19). `long long` sign-extends into all 64 bits.
     for (name, val) in constants {
         s.push_str(&format!(
-            "int lime_const_{}(void) {{ return (int)({}); }}\n\n",
+            "long long lime_const_{}(void) {{ return (long long)({}); }}\n\n",
             name, val
         ));
     }

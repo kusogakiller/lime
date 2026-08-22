@@ -1,0 +1,56 @@
+// Iteration 19 regression: C ABI edge — enum width / enum constants.
+// Proves fixed-underlying-type enum constants surface correctly (they were
+// silently dropped before the EnumDecl ConstantExpr-walk fix), including
+// negative values, and that narrow enums pass/return through Int externs.
+//
+// Note: conditions use let-bound booleans + nested if because Lime's parser
+// currently drops `&&` chains written in indent-block `if` bodies (Lime-side
+// parse limitation, documented Iteration 19 — not a Charger issue).
+
+extern fn take_enum_u8(Int: a0) -> Int "take_enum_u8"
+
+extern fn EDEF_A(Int) -> Int "lime_const_EDEF_A"
+extern fn EU8_A(Int) -> Int "lime_const_EU8_A"
+extern fn EU8_B(Int) -> Int "lime_const_EU8_B"
+extern fn EI16_A(Int) -> Int "lime_const_EI16_A"
+extern fn EI16_B(Int) -> Int "lime_const_EI16_B"
+
+fn main():
+    let anchor = take_enum_u8(1)
+    let a = EU8_A(0)
+    let b = EU8_B(0)
+    let c = EI16_A(0)
+    let d = EI16_B(0)
+    let e = EDEF_A(0)
+    let ok_a = a == 1
+    let ok_b = b == 200
+    let ok_c = c == 300
+    let ok_d = d == 0 - 2
+    let ok_e = e == 70000
+    let ok_anchor = anchor == 1
+    if ok_a:
+        if ok_b:
+            if ok_c:
+                if ok_d:
+                    if ok_e:
+                        if ok_anchor:
+                            print("ENUM_CONST_OK")
+                            print("\n")
+                        else:
+                            print("ANCHOR_FAIL")
+                            print("\n")
+                    else:
+                        print("EDEF_FAIL")
+                        print("\n")
+                else:
+                    print("I16B_FAIL")
+                    print("\n")
+            else:
+                print("I16A_FAIL")
+                print("\n")
+        else:
+            print("U8B_FAIL")
+            print("\n")
+    else:
+        print("U8A_FAIL")
+        print("\n")

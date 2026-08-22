@@ -1,0 +1,11 @@
+[corpus]
+name = "libenumedge"
+version = "0.1.0"
+
+[charger]
+api_header = "probe.h"
+build_flags = []
+sources = ["probe.c"]
+
+[output]
+lime_module = "libenumedge"
