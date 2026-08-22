@@ -1,0 +1,142 @@
+// Iteration 22 regression: C ABI edge — packed struct + bitfield composite.
+// Proves packed-layout records containing bitfields (unsigned + signed) and
+// ordinary trailing fields are surfaced via Opaque handle + C accessor shims,
+// and that bitfield read/write and adjacent-field preservation work end-to-end
+// through Charger's existing generic unpacked/bitfield machinery — no new
+// packed/bitfield-specific code.
+//
+// Uses early-return assertion style: each failed check prints its marker and
+// returns. The final PACKED_BITFIELD_OK is reached only if all checks pass.
+// (Lime string-literal codegen mis-associates a bare "\n" constant when many
+// distinct literals coexist, so each print embeds its newline in one literal.)
+
+extern fn make_pbf(Int: d) -> Opaque(PackedBF) "lime_make_PackedBF"
+extern fn pbf_get_a(Opaque(PackedBF): p) -> Int "lime_get_PackedBF_a"
+extern fn pbf_set_a(Opaque(PackedBF): p, Int: v) "lime_set_PackedBF_a"
+extern fn pbf_get_b(Opaque(PackedBF): p) -> Int "lime_get_PackedBF_b"
+extern fn pbf_set_b(Opaque(PackedBF): p, Int: v) "lime_set_PackedBF_b"
+extern fn pbf_get_c(Opaque(PackedBF): p) -> Int "lime_get_PackedBF_c"
+extern fn pbf_set_c(Opaque(PackedBF): p, Int: v) "lime_set_PackedBF_c"
+extern fn pbf_get_tail(Opaque(PackedBF): p) -> Int "lime_get_PackedBF_tail"
+extern fn pbf_set_tail(Opaque(PackedBF): p, Int: v) "lime_set_PackedBF_tail"
+
+extern fn make_pbfm(Int: d) -> Opaque(PackedBFMix) "lime_make_PackedBFMix"
+extern fn pbfm_get_lead(Opaque(PackedBFMix): p) -> Int "lime_get_PackedBFMix_lead"
+extern fn pbfm_set_lead(Opaque(PackedBFMix): p, Int: v) "lime_set_PackedBFMix_lead"
+extern fn pbfm_get_x(Opaque(PackedBFMix): p) -> Int "lime_get_PackedBFMix_x"
+extern fn pbfm_set_x(Opaque(PackedBFMix): p, Int: v) "lime_set_PackedBFMix_x"
+extern fn pbfm_get_y(Opaque(PackedBFMix): p) -> Int "lime_get_PackedBFMix_y"
+extern fn pbfm_set_y(Opaque(PackedBFMix): p, Int: v) "lime_set_PackedBFMix_y"
+extern fn pbfm_get_z(Opaque(PackedBFMix): p) -> Int "lime_get_PackedBFMix_z"
+extern fn pbfm_set_z(Opaque(PackedBFMix): p, Int: v) "lime_set_PackedBFMix_z"
+extern fn pbfm_get_w(Opaque(PackedBFMix): p) -> Int "lime_get_PackedBFMix_w"
+extern fn pbfm_set_w(Opaque(PackedBFMix): p, Int: v) "lime_set_PackedBFMix_w"
+
+fn main():
+    print("MARK_START\n")
+    // --- PackedBF: bitfields + trailing ordinary field ---
+    let p = make_pbf(0)
+    pbf_set_a(p, 5)
+    pbf_set_b(p, 17)
+    pbf_set_c(p, 99)
+    pbf_set_tail(p, 200)
+    if pbf_get_a(p) == 5:
+        // ok
+    else:
+        print("A_FAIL\n")
+        return
+    if pbf_get_b(p) == 17:
+        // ok
+    else:
+        print("B_FAIL\n")
+        return
+    if pbf_get_c(p) == 99:
+        // ok
+    else:
+        print("C_FAIL\n")
+        return
+    if pbf_get_tail(p) == 200:
+        // ok
+    else:
+        print("T_FAIL\n")
+        return
+    pbf_set_tail(p, 123)
+    if pbf_get_a(p) == 5:
+        // ok
+    else:
+        print("A2_FAIL\n")
+        return
+    if pbf_get_b(p) == 17:
+        // ok
+    else:
+        print("B2_FAIL\n")
+        return
+    if pbf_get_c(p) == 99:
+        // ok
+    else:
+        print("C2_FAIL\n")
+        return
+    if pbf_get_tail(p) == 123:
+        // ok
+    else:
+        print("T2_FAIL\n")
+        return
+    // --- PackedBFMix: signed bitfield + ordinary field after + bitfield after ---
+    let m = make_pbfm(0)
+    pbfm_set_lead(m, 7)
+    pbfm_set_x(m, 0 - 16)
+    pbfm_set_y(m, 800)
+    pbfm_set_z(m, 4242)
+    pbfm_set_w(m, 9)
+    if pbfm_get_lead(m) == 7:
+        // ok
+    else:
+        print("LEAD_FAIL\n")
+        return
+    if pbfm_get_x(m) == 0 - 16:
+        // ok
+    else:
+        print("X_FAIL\n")
+        return
+    if pbfm_get_y(m) == 800:
+        // ok
+    else:
+        print("Y_FAIL\n")
+        return
+    if pbfm_get_z(m) == 4242:
+        // ok
+    else:
+        print("Z_FAIL\n")
+        return
+    if pbfm_get_w(m) == 9:
+        // ok
+    else:
+        print("W_FAIL\n")
+        return
+    pbfm_set_z(m, 12345)
+    if pbfm_get_lead(m) == 7:
+        // ok
+    else:
+        print("LEAD2_FAIL\n")
+        return
+    if pbfm_get_x(m) == 0 - 16:
+        // ok
+    else:
+        print("X2_FAIL\n")
+        return
+    if pbfm_get_y(m) == 800:
+        // ok
+    else:
+        print("Y2_FAIL\n")
+        return
+    if pbfm_get_w(m) == 9:
+        // ok
+    else:
+        print("W2_FAIL\n")
+        return
+    if pbfm_get_z(m) == 12345:
+        // ok
+    else:
+        print("Z2_FAIL\n")
+        return
+    print("PACKED_BITFIELD_OK\n")

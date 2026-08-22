@@ -32,7 +32,8 @@ libcallbackarg:bench_clang/realworld/corpus/libcallbackarg:bench_clang/regressio
 libcallbackreturn:bench_clang/realworld/corpus/libcallbackreturn:bench_clang/regression/libcallbackreturn_smoke/libcallbackreturn_smoke
 anon_flatten:bench_clang/realworld/corpus/anon_flatten:bench_clang/regression/anon_flatten_smoke/anon_flatten_smoke
 libenumedge:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_smoke
-libenumedge_nanchor:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_n-anchor"
+libenumedge_nanchor:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_n-anchor
+libpackedbitfield:bench_clang/realworld/corpus/libpackedbitfield:bench_clang/regression/libpackedbitfield_smoke"
 
 PASS=0
 FAIL=0

@@ -1,0 +1,4 @@
+[charger]
+api_header = "libpackedbitfield.h"
+build_flags = []
+deps = []

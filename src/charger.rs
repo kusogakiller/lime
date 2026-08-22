@@ -2613,6 +2613,27 @@ fn is_pointer_field(t: &CType, _structs: &[CStruct]) -> bool {
 // setters keep the value-record memcpy (e.g. `memcpy(&u->field, v,
 // sizeof(u->field))`), which is correct.
 
+// Width-safe scalar storage type for generated field-accessor shims.
+//
+// Iteration 22 (generic fix, same class as Iteration 19's `lime_const_*`
+// fix): on Win64 an `int`/`short`/`char`/C `_Bool` return leaves bits 32-63 of
+// RAX undefined, so a signed value that occupies the full 32-bit range (e.g. a
+// signed bitfield `int x : 6` holding -16, or any negative `int`/`short` field)
+// is mis-read by the Lime caller. Returning/taking `long long` forces the
+// value into the full 64-bit register, exactly like the `lime_const_*`
+// shims. Bitfields and ordinary integer fields both flow through here, so this
+// one change closes the ambiguity for every scalar integer accessor. It is
+// generic — no struct/field/library name is inspected. Floats, pointers and
+// aggregates keep their concrete types.
+fn c_shim_scalar_ty(t: &CType) -> String {
+    match t {
+        CType::Int | CType::Bool => "long long".to_string(),
+        CType::Long => "long long".to_string(),
+        CType::Char(_) | CType::Short(_) => "long long".to_string(),
+        _ => c_type_text(t),
+    }
+}
+
 fn c_type_text(t: &CType) -> String {
     match t {
         CType::Int => "int".to_string(),
@@ -3152,9 +3173,18 @@ fn gen_adapter_c_source(
                             st.name, f.name, spelling, f.name
                         ));
                     } else {
+                        // Scalar (non-pointer, non-aggregate) field accessor.
+                        // Integer fields (int/long/char/short/bool) are surfaced
+                        // through `long long` so a negative/signed value occupies
+                        // the full 64-bit return register on Win64 (same class of
+                        // fix as Iteration 19's `lime_const_*` shims — the narrow
+                        // C return type otherwise leaves RAX bits 32-63 undefined).
+                        // Floats/doubles keep their concrete type (they use XMM,
+                        // not RAX). Generic — applies to every scalar field.
+                        let shim_ty = c_shim_scalar_ty(&f.ty);
                         s.push_str(&format!(
                             "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
-                            c_ty, st.name, f.name, spelling, c_ty, f.name
+                            shim_ty, st.name, f.name, spelling, shim_ty, f.name
                         ));
                     }
                     // Setter: any pointer field is surfaced as `void*` on the
@@ -3176,9 +3206,17 @@ fn gen_adapter_c_source(
                             st.name, f.name, spelling, f.name, f.name
                         ));
                     } else {
+                        // Scalar (non-pointer, non-aggregate) field setter.
+                        // Integer fields take `long long` on the shim side so
+                        // the Lime caller's full 64-bit value is received (the
+                        // same Win64 RAX-width fix as the getter above / Iteration
+                        // 19 `lime_const_*`). The C assignment truncates to the
+                        // real member width (incl. bitfields) correctly. Floats/
+                        // doubles keep their concrete type. Generic.
+                        let shim_ty = c_shim_scalar_ty(&f.ty);
                         s.push_str(&format!(
                             "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
-                            st.name, f.name, spelling, c_ty, f.name, c_ty
+                            st.name, f.name, spelling, shim_ty, f.name, shim_ty
                         ));
                     }
                 }
