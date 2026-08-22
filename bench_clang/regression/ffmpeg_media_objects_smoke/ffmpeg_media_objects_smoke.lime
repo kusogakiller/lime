@@ -1,0 +1,44 @@
+// Iteration 17 — FFmpeg media-object opaque lifecycle slice (Phase 2D).
+// Proves AVPacket / AVFrame / AVCodecParameters opaque-handle lifecycle
+// (alloc -> null check -> free) through the real FFmpeg API, using only
+// Charger's generic opaque-handle ABI (no library-specific code).
+//
+// Each object is allocated, the returned handle is exercised (a no-op unref
+// round-trip where available), then freed. If free() does not crash, the
+// allocated pointer was valid and the alloc/free round-trip ABI is correct.
+// We cannot observe the raw pointer from Lime, so success is "exit 0 + marker".
+
+// AVPacket
+extern fn av_packet_alloc() -> Opaque(AVPacket) "av_packet_alloc"
+extern fn av_packet_free(Opaque(AVPacket): a0) -> Unit "lime_take_av_packet_free"
+extern fn av_packet_unref(Opaque(AVPacket): a0) -> Unit "av_packet_unref"
+
+// AVFrame
+extern fn av_frame_alloc() -> Opaque(AVFrame) "av_frame_alloc"
+extern fn av_frame_free(Opaque(AVFrame): a0) -> Unit "lime_take_av_frame_free"
+extern fn av_frame_unref(Opaque(AVFrame): a0) -> Unit "av_frame_unref"
+
+// AVCodecParameters
+extern fn avcodec_parameters_alloc() -> Opaque(AVCodecParameters) "avcodec_parameters_alloc"
+extern fn avcodec_parameters_free(Opaque(AVCodecParameters): a0) -> Unit "lime_take_avcodec_parameters_free"
+
+fn main():
+    // AVPacket: alloc -> unref -> free
+    let pkt = av_packet_alloc()
+    av_packet_unref(pkt)
+    av_packet_free(pkt)
+    print("PKT_OK")
+    print("\n")
+
+    // AVFrame: alloc -> unref -> free
+    let frm = av_frame_alloc()
+    av_frame_unref(frm)
+    av_frame_free(frm)
+    print("FRM_OK")
+    print("\n")
+
+    // AVCodecParameters: alloc -> free (no unref in FFmpeg API)
+    let par = avcodec_parameters_alloc()
+    avcodec_parameters_free(par)
+    print("PAR_OK")
+    print("\n")

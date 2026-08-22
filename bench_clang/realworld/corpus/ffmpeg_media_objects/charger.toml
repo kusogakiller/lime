@@ -1,0 +1,16 @@
+[charger]
+# FFmpeg media-object lifecycle slice (Iteration 17).
+# Minimal TU set: only the alloc/free/unref implementations for
+# AVPacket (libavcodec/packet.c), AVFrame (libavutil/frame.c), and
+# AVCodecParameters (libavcodec/codec_par.c). No decoder/encoder/muxer/
+# demuxer TUs — proves the opaque handle lifecycle without the codec pipeline.
+# api_header pulls in the full public ABI surface transitively (so all three
+# object types and their 8 lifecycle APIs are visible) but only the three
+# implementation TUs above are compiled.
+api_header = "libavcodec/avcodec.h"
+# -I. puts the corpus root on the include path so libavcodec/ and libavutil/
+# subdirs resolve. -idirafter libavutil ensures <time.h> resolves to the system
+# header (not FFmpeg's local libavutil/time.h which lacks strftime) — generic
+# include-order handling, no library name. Corpus config.
+build_flags = ["-I.", "-idirafter", "libavutil", "-include", "config.h"]
+deps = []

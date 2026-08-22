@@ -1867,6 +1867,17 @@ fn classify_node(
                 .and_then(|v| v.as_str())
                 .unwrap_or(&name)
                 .to_string();
+            // Function-signature ABI normalization: a pointer to a named record
+            // is an opaque handle at the ABI boundary (generic; preserves the
+            // record's Struct layout/field-accessor representation elsewhere).
+            let params: Vec<CParam> = params
+                .into_iter()
+                .map(|mut p| {
+                    p.ty = fn_sig_normalize(&p.ty);
+                    p
+                })
+                .collect();
+            let ret_ty = fn_sig_normalize(&ret_ty);
             api.functions.push(CFunction {
                 name: name.clone(),
                 symbol,
@@ -1928,6 +1939,41 @@ fn params_and_ret(ftype: &serde_json::Value) -> (Vec<CParam>, CType) {
     // `extract_calling_convention`.
     let cleaned = strip_attributes(&qual);
     parse_signature(&cleaned)
+}
+
+/// Function-signature ABI normalization (generic, no library names).
+///
+/// At the ABI boundary a pointer to a *named* record — whether the record is
+/// surfaced as a complete `Struct(Name)` (with field accessors) or as an
+/// opaque handle — is always passed/returned as a pointer (an address). Lime
+/// cannot model a C record by value, so the function boundary must treat any
+/// `Pointer(Struct(Name))` as an opaque handle `Pointer(Opaque(Name))`, exactly
+/// like a pointer to an incomplete/typedef'd record already is. This is purely
+/// a *signature* rewrite: the record's `Struct(Name)` representation (layout +
+/// field-accessor generation) is left untouched in the struct table, so struct
+/// field semantics are preserved. By-value `Struct(Name)` (no pointer) is
+/// intentionally NOT rewritten — it stays `Struct` so the struct-by-value /
+/// struct-return machinery still engages where a complete record is genuinely
+/// passed by value.
+///
+/// Applied to every function parameter and return type during extraction.
+/// Recursive so `T**` out-params become `Pointer(Pointer(Opaque(Name)))` and
+/// reuse the existing take/free (void + single `T**`) path. Generic — derived
+/// from pointer-to-named-record type shape, never from a record or symbol name.
+fn fn_sig_normalize(ty: &CType) -> CType {
+    match ty {
+        CType::Pointer(inner) => {
+            // A pointer to a named complete record becomes a pointer to an
+            // opaque handle at the ABI boundary.
+            if let CType::Struct(name) = inner.as_ref() {
+                CType::Pointer(Box::new(CType::Opaque(name.clone())))
+            } else {
+                // Recurse so nested pointers to records (T**) are rewritten too.
+                CType::Pointer(Box::new(fn_sig_normalize(inner)))
+            }
+        }
+        other => other.clone(),
+    }
 }
 
 /// Remove `__attribute__(...)` (and `__declspec(...)`) marker groups from a
