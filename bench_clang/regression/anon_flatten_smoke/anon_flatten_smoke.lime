@@ -1,0 +1,92 @@
+// Iteration 18 smoke: generic anonymous record flattening.
+// Proves each flattened anonymous-struct/union member is addressable and
+// round-trips through Charger's generated get/set shims.
+
+extern fn lime_make_DirectAnonStruct() -> Opaque(DirectAnonStruct) "lime_make_DirectAnonStruct"
+extern fn lime_set_DirectAnonStruct_a(Opaque(DirectAnonStruct): a0, Int: a1) -> Unit "lime_set_DirectAnonStruct_a"
+extern fn lime_get_DirectAnonStruct_a(Opaque(DirectAnonStruct): a0) -> Int "lime_get_DirectAnonStruct_a"
+extern fn lime_set_DirectAnonStruct_b(Opaque(DirectAnonStruct): a0, Int: a1) -> Unit "lime_set_DirectAnonStruct_b"
+extern fn lime_get_DirectAnonStruct_b(Opaque(DirectAnonStruct): a0) -> Int "lime_get_DirectAnonStruct_b"
+extern fn lime_set_DirectAnonStruct_c(Opaque(DirectAnonStruct): a0, Int: a1) -> Unit "lime_set_DirectAnonStruct_c"
+extern fn lime_get_DirectAnonStruct_c(Opaque(DirectAnonStruct): a0) -> Int "lime_get_DirectAnonStruct_c"
+extern fn lime_set_DirectAnonStruct_d(Opaque(DirectAnonStruct): a0, Int: a1) -> Unit "lime_set_DirectAnonStruct_d"
+extern fn lime_get_DirectAnonStruct_d(Opaque(DirectAnonStruct): a0) -> Int "lime_get_DirectAnonStruct_d"
+
+extern fn lime_make_NestedAnonUnion() -> Opaque(NestedAnonUnion) "lime_make_NestedAnonUnion"
+extern fn lime_set_NestedAnonUnion_a(Opaque(NestedAnonUnion): a0, Int: a1) -> Unit "lime_set_NestedAnonUnion_a"
+extern fn lime_get_NestedAnonUnion_a(Opaque(NestedAnonUnion): a0) -> Int "lime_get_NestedAnonUnion_a"
+extern fn lime_set_NestedAnonUnion_y(Opaque(NestedAnonUnion): a0, Int: a1) -> Unit "lime_set_NestedAnonUnion_y"
+extern fn lime_get_NestedAnonUnion_y(Opaque(NestedAnonUnion): a0) -> Int "lime_get_NestedAnonUnion_y"
+extern fn lime_set_NestedAnonUnion_f(Opaque(NestedAnonUnion): a0, Int: a1) -> Unit "lime_set_NestedAnonUnion_f"
+extern fn lime_get_NestedAnonUnion_f(Opaque(NestedAnonUnion): a0) -> Int "lime_get_NestedAnonUnion_f"
+
+extern fn lime_make_AnonUnionInAnonStruct() -> Opaque(AnonUnionInAnonStruct) "lime_make_AnonUnionInAnonStruct"
+extern fn lime_set_AnonUnionInAnonStruct_a(Opaque(AnonUnionInAnonStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionInAnonStruct_a"
+extern fn lime_get_AnonUnionInAnonStruct_a(Opaque(AnonUnionInAnonStruct): a0) -> Int "lime_get_AnonUnionInAnonStruct_a"
+extern fn lime_set_AnonUnionInAnonStruct_b(Opaque(AnonUnionInAnonStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionInAnonStruct_b"
+extern fn lime_get_AnonUnionInAnonStruct_b(Opaque(AnonUnionInAnonStruct): a0) -> Int "lime_get_AnonUnionInAnonStruct_b"
+extern fn lime_set_AnonUnionInAnonStruct_q(Opaque(AnonUnionInAnonStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionInAnonStruct_q"
+extern fn lime_get_AnonUnionInAnonStruct_q(Opaque(AnonUnionInAnonStruct): a0) -> Int "lime_get_AnonUnionInAnonStruct_q"
+extern fn lime_set_AnonUnionInAnonStruct_c(Opaque(AnonUnionInAnonStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionInAnonStruct_c"
+extern fn lime_get_AnonUnionInAnonStruct_c(Opaque(AnonUnionInAnonStruct): a0) -> Int "lime_get_AnonUnionInAnonStruct_c"
+
+extern fn lime_make_AnonUnionWidestStruct() -> Opaque(AnonUnionWidestStruct) "lime_make_AnonUnionWidestStruct"
+extern fn lime_set_AnonUnionWidestStruct_a(Opaque(AnonUnionWidestStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionWidestStruct_a"
+extern fn lime_get_AnonUnionWidestStruct_a(Opaque(AnonUnionWidestStruct): a0) -> Int "lime_get_AnonUnionWidestStruct_a"
+extern fn lime_set_AnonUnionWidestStruct_b(Opaque(AnonUnionWidestStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionWidestStruct_b"
+extern fn lime_get_AnonUnionWidestStruct_b(Opaque(AnonUnionWidestStruct): a0) -> Int "lime_get_AnonUnionWidestStruct_b"
+extern fn lime_set_AnonUnionWidestStruct_x(Opaque(AnonUnionWidestStruct): a0, Int: a1) -> Unit "lime_set_AnonUnionWidestStruct_x"
+extern fn lime_get_AnonUnionWidestStruct_x(Opaque(AnonUnionWidestStruct): a0) -> Int "lime_get_AnonUnionWidestStruct_x"
+
+// Link anchor: ensures the prepared artifact (which carries the struct
+// accessor shims) is linked even though this smoke references no real C
+// function from the corpus. Generic — the symbol is declared by Charger.
+extern fn anon_flatten_link_anchor() -> Int "anon_flatten_link_anchor"
+
+fn main():
+    let _anchor = anon_flatten_link_anchor()
+    let das = lime_make_DirectAnonStruct()
+    lime_set_DirectAnonStruct_a(das, 11)
+    lime_set_DirectAnonStruct_b(das, 22)
+    lime_set_DirectAnonStruct_c(das, 33)
+    lime_set_DirectAnonStruct_d(das, 44)
+    if lime_get_DirectAnonStruct_a(das) == 11 && lime_get_DirectAnonStruct_b(das) == 22 && lime_get_DirectAnonStruct_c(das) == 33 && lime_get_DirectAnonStruct_d(das) == 44:
+        print("ANON_STRUCT_OK")
+        print("\n")
+    else:
+        print("ANON_STRUCT_FAIL")
+        print("\n")
+
+    let nau = lime_make_NestedAnonUnion()
+    lime_set_NestedAnonUnion_a(nau, 55)
+    lime_set_NestedAnonUnion_y(nau, 66)
+    lime_set_NestedAnonUnion_f(nau, 77)
+    if lime_get_NestedAnonUnion_a(nau) == 55 && lime_get_NestedAnonUnion_y(nau) == 66 && lime_get_NestedAnonUnion_f(nau) == 77:
+        print("ANON_UNION_OK")
+        print("\n")
+    else:
+        print("ANON_UNION_FAIL")
+        print("\n")
+
+    let auis = lime_make_AnonUnionInAnonStruct()
+    lime_set_AnonUnionInAnonStruct_a(auis, 88)
+    lime_set_AnonUnionInAnonStruct_b(auis, 99)
+    lime_set_AnonUnionInAnonStruct_q(auis, 111)
+    lime_set_AnonUnionInAnonStruct_c(auis, 222)
+    if lime_get_AnonUnionInAnonStruct_a(auis) == 88 && lime_get_AnonUnionInAnonStruct_b(auis) == 99 && lime_get_AnonUnionInAnonStruct_q(auis) == 111 && lime_get_AnonUnionInAnonStruct_c(auis) == 222:
+        print("NESTED_OK")
+        print("\n")
+    else:
+        print("NESTED_FAIL")
+        print("\n")
+
+    let auws = lime_make_AnonUnionWidestStruct()
+    lime_set_AnonUnionWidestStruct_a(auws, 333)
+    lime_set_AnonUnionWidestStruct_x(auws, 444)
+    lime_set_AnonUnionWidestStruct_b(auws, 555)
+    if lime_get_AnonUnionWidestStruct_a(auws) == 333 && lime_get_AnonUnionWidestStruct_x(auws) == 444 && lime_get_AnonUnionWidestStruct_b(auws) == 555:
+        print("WIDEST_NAMED_OK")
+        print("\n")
+    else:
+        print("WIDEST_NAMED_FAIL")
+        print("\n")

@@ -29,7 +29,8 @@ sdl2:C:/Users/szzxl/Downloads/lime_corpus_src/SDL2-2.30.9-win:bench_clang/regres
 ffmpeg:bench_clang/realworld/corpus/ffmpeg_avutil_version:bench_clang/regression/ffmpeg_smoke/ffmpeg_smoke
 ffmpeg_media_objects:bench_clang/realworld/corpus/ffmpeg_media_objects:bench_clang/regression/ffmpeg_media_objects_smoke/ffmpeg_media_objects_smoke
 libcallbackarg:bench_clang/realworld/corpus/libcallbackarg:bench_clang/regression/libcallbackarg_smoke/libcallbackarg_smoke
-libcallbackreturn:bench_clang/realworld/corpus/libcallbackreturn:bench_clang/regression/libcallbackreturn_smoke/libcallbackreturn_smoke"
+libcallbackreturn:bench_clang/realworld/corpus/libcallbackreturn:bench_clang/regression/libcallbackreturn_smoke/libcallbackreturn_smoke
+anon_flatten:bench_clang/realworld/corpus/anon_flatten:bench_clang/regression/anon_flatten_smoke/anon_flatten_smoke"
 
 PASS=0
 FAIL=0

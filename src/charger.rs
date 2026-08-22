@@ -1060,8 +1060,14 @@ pub const ANON_RECORD_MARKER: &str = "__anon_record__";
 /// emitted by clang whenever a record is declared inline without a typedef name.
 fn is_anon_record_spelling(qual: &str) -> bool {
     let q = qual.trim();
-    (q.starts_with("struct (") || q.starts_with("union ("))
-        && (q.contains("(unnamed") || q.contains("(anonymous"))
+    // Anonymous records are spelled `union (anonymous at ...)`,
+    // `struct (unnamed at ...)`, or — when nested inside another anonymous
+    // record — `union Parent::(anonymous struct)::(anonymous at ...)`. Match
+    // any `struct `/`union ` spelling that carries an `(anonymous`/`(unnamed`
+    // marker. Generic — no library/struct names.
+    let starts = q.starts_with("struct ") || q.starts_with("union ");
+    let anon = q.contains("(anonymous") || q.contains("(unnamed");
+    starts && anon
 }
 
 /// True when a field's type is the anonymous-record marker. Such fields must be
@@ -1490,30 +1496,12 @@ fn classify_node(
                             let rec = f.get("inner").and_then(|v| v.as_array())
                                 .and_then(|arr| arr.iter().find(|c| c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl")));
                             if let Some(rec) = rec {
-                                let sub_union = rec.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
-                                let members = rec.get("inner").and_then(|v| v.as_array()).map(|a| a.iter().filter(|c| c.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")).collect::<Vec<_>>()).unwrap_or_default();
-                                if sub_union {
-                                    let mut widest: Option<CParam> = None;
-                                    for m in &members {
-                                        let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                        if mn.is_empty() { continue; }
-                                        let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
-                                        let w = type_width_bytes(&mt);
-                                        if widest.as_ref().map(|x| w > type_width_bytes(&x.ty)).unwrap_or(true) {
-                                            widest = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
-                                        }
-                                    }
-                                    if let Some(w) = widest {
-                                        fields.push(w);
-                                    }
-                                } else {
-                                    for m in &members {
-                                        let mn = m.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                        if mn.is_empty() { continue; }
-                                        let mt = m.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
-                                        fields.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
-                                    }
-                                }
+                                // Flatten the anonymous record's members into this
+                                // struct (recursive via flatten_anon). `seen` seeds
+                                // from already-collected named fields so duplicates
+                                // are skipped at the flatten boundary. Generic.
+                                let mut seen: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                                flatten_anon(rec, &mut seen, &mut fields);
                             }
                         }
                     }
@@ -1540,19 +1528,33 @@ fn classify_node(
                         if !(cn.is_empty() && !cn_implicit) {
                             continue; // named record or implicit decl: handled elsewhere
                         }
-                        let sub_union = c.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
-                        // An anonymous nested record (struct OR union) must NOT
-                        // have its members flattened up into the enclosing
-                        // struct. For a union the members overlap (surfacing them
-                        // all corrupts layout); for an anonymous struct the
-                        // members collide with same-named fields on the parent
-                        // (curl `curl_fileinfo.strings.time` vs `curl_fileinfo.time`)
-                        // and Charger cannot name the nested scope, so the
-                        // generated accessors reference non-existent members and
-                        // fail to compile. Skip entirely; the nested record stays
-                        // opaque inside its C struct. Generic — no library names.
-                        let _ = sub_union;
-                        continue;
+                        // C distinguishes a TRUE anonymous member (no FieldDecl
+                        // name at all) from a *named* member whose type is an
+                        // unnamed-tag record (`union { ... } u;` — FieldDecl
+                        // name == "u"). Only the former is scope-injected: its
+                        // members are addressable as `parent.member`. A named
+                        // member's body RecordDecl is ALSO emitted as an unnamed
+                        // sibling node, but its members are only reachable
+                        // through the member name (`u.mask`), so flattening it
+                        // would generate accessors like `u->mask` that do not
+                        // compile. Guard on the existence of a NAMELESS
+                        // FieldDecl whose spelling points at this record.
+                        let has_anon_field = inner.iter().any(|f| {
+                            f.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")
+                                && f.get("name").and_then(|v| v.as_str()).map(|n| n.is_empty()).unwrap_or(true)
+                                && f.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()).map(is_anon_record_spelling).unwrap_or(false)
+                        });
+                        if !has_anon_field {
+                            continue; // named-member body (e.g. `union {...} u;`): not flattenable
+                        }
+                        // An anonymous record (struct OR union) nested directly in
+                        // this record's body (no field name) — flatten its members
+                        // up into the enclosing struct so Lime can name/access
+                        // them. Recursion + `seen` (seeded from the already-pushed
+                        // named fields) make duplicates impossible without rename.
+                        // Generic — no library names.
+                        let mut seen: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                        flatten_anon(c, &mut seen, &mut fields);
                     }
                 }
             }
@@ -1973,6 +1975,138 @@ fn fn_sig_normalize(ty: &CType) -> CType {
             }
         }
         other => other.clone(),
+    }
+}
+
+/// Recursively flatten the members of an *anonymous* record (`struct` or `union`)
+/// into a parent struct's field list, so Lime can name and access them through
+/// generated get/set shims. Generic — derived purely from the record's AST
+/// shape, never from a library/struct/symbol name.
+///
+/// * anonymous struct  -> each named member is surfaced (members occupy disjoint
+///   storage, so inlining keeps the overall layout correct). A member that is
+///   itself an anonymous record is flattened recursively.
+/// * anonymous union    -> the members overlap, so only ONE survives. Priority:
+///   (1) a named scalar/ptr member, (2) the `sizeof`-widest member, (3) any
+///   member that converts to a surfacable `CParam` (e.g. an opaque/named record
+///   handle). This keeps the union's value-type ABI width correct while picking
+///   a member Lime can actually name — a widest member that is an inner
+///   anonymous struct would otherwise yield an unsurfacable accessor.
+///
+/// `seen` is the set of field names already pushed for the *enclosing* struct;
+/// a duplicate name is skipped (no rename, no index suffix — minimal change, and
+/// a same-named parent/anon member would not be addressable in C either).
+/// Recursion shares `seen`, so a transient duplicate list is never built.
+///
+/// NOTE: the *named* record case (`union U { int i; }`-style, with a tag) is NOT
+/// anonymous and is handled by the caller's normal named-record path, not here.
+fn flatten_anon(
+    rec: &serde_json::Value,
+    seen: &mut Vec<String>,
+    out: &mut Vec<CParam>,
+) {
+    let sub_union = rec.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
+    // clang's `-ast-dump=json` emits an anonymous nested record's BODY as a
+    // SIBLING `RecordDecl` node (name == null) among this record's children —
+    // the corresponding unnamed `FieldDecl` (type `(anonymous at ...)`) has an
+    // EMPTY `inner` and never contains it. The injected members additionally
+    // appear as `IndirectFieldDecl` nodes. So walk ALL children and dispatch on
+    // kind; filtering to FieldDecls only would silently miss every anonymous
+    // record body (measured on clang 22, Iteration 18).
+    let children: Vec<&serde_json::Value> = rec
+        .get("inner")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    if children.is_empty() {
+        return;
+    }
+    fn is_record_child(c: &serde_json::Value) -> Option<bool> {
+        // Some(union?) for an *anonymous* (unnamed) RecordDecl child.
+        if c.get("kind").and_then(|k| k.as_str()) != Some("RecordDecl") {
+            return None;
+        }
+        let nm = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let implicit = c.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !nm.is_empty() || implicit {
+            return None; // named/implicit decls are handled by the normal path
+        }
+        Some(c.get("tagUsed").and_then(|t| t.as_str()) == Some("union"))
+    }
+    if sub_union {
+        // The members overlap, so only ONE accessor survives. Priority per the
+        // approved design: (1) named member, (2) sizeof-widest, (3) surfacable
+        // CParam. Nested anonymous records contribute their own leaves as
+        // candidates (C injects them into the enclosing scope, so each leaf is
+        // a valid accessor spelling on the parent).
+        fn union_candidates(
+            rec: &serde_json::Value,
+            best: &mut Option<CParam>,
+            best_score: &mut (bool, usize, bool),
+        ) {
+            let children: Vec<&serde_json::Value> = rec
+                .get("inner")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().collect())
+                .unwrap_or_default();
+            for c in children {
+                match c.get("kind").and_then(|k| k.as_str()) {
+                    Some("RecordDecl") => {
+                        // Anonymous nested record: descend into its leaves.
+                        let nm = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        if nm.is_empty() {
+                            union_candidates(c, best, best_score);
+                        }
+                    }
+                    Some("FieldDecl") => {
+                        let mn = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        if mn.is_empty() {
+                            continue;
+                        }
+                        let mt = c.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                        let w = type_width_bytes(&mt);
+                        let surfacable = !matches!(&mt, CType::Other(s) if s == ANON_RECORD_MARKER);
+                        let score = (true, w, surfacable);
+                        if best.is_none() || score > *best_score {
+                            *best_score = score;
+                            *best = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut chosen: Option<CParam> = None;
+        let mut best_score: (bool, usize, bool) = (false, 0, false);
+        union_candidates(rec, &mut chosen, &mut best_score);
+        if let Some(c) = chosen {
+            if !seen.contains(&c.name) {
+                seen.push(c.name.clone());
+                out.push(c);
+            }
+        }
+    } else {
+        for c in children {
+            // Anonymous record body (sibling RecordDecl, name == null)?
+            // Flatten recursively FIRST — its own members must surface before
+            // any name-based skipping can drop them.
+            if is_record_child(c).is_some() {
+                flatten_anon(c, seen, out);
+                continue;
+            }
+            if c.get("kind").and_then(|k| k.as_str()) != Some("FieldDecl") {
+                continue; // IndirectFieldDecl / other bookkeeping nodes
+            }
+            let mn = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if mn.is_empty() {
+                continue; // unnamed FieldDecl of an anon record: body handled above
+            }
+            let mt = c.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+            if !seen.contains(&mn) {
+                seen.push(mn.clone());
+                out.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
+            }
+        }
     }
 }
 

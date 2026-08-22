@@ -1,0 +1,11 @@
+[corpus]
+name = "anon_flatten"
+version = "0.1.0"
+
+[charger]
+api_header = "anon_flatten.h"
+build_flags = []
+sources = ["anon_flatten.c"]
+
+[output]
+lime_module = "anon_flatten"
