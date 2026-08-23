@@ -1,0 +1,5 @@
+{
+  "vae_sum": "Int",
+  "vae_ptr_int": ["Opaque", "Int"],
+  "vae_dbl_ptr": ["Double", "Double", "Opaque"]
+}

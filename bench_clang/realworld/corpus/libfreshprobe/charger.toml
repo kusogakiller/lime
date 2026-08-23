@@ -1,0 +1,4 @@
+[charger]
+api_header = "libfreshprobe.h"
+build_flags = []
+deps = []

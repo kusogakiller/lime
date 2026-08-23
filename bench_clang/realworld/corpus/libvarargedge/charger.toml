@@ -1,0 +1,4 @@
+[charger]
+api_header = "libvarargedge.h"
+build_flags = []
+deps = []

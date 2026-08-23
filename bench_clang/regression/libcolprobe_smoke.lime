@@ -1,0 +1,5 @@
+extern fn col_make() -> Opaque(ColProbe_) "col_make"
+
+fn main():
+    let h = col_make()
+    print("COL_OK\n")

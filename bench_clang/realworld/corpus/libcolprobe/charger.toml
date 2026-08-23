@@ -1,0 +1,4 @@
+[charger]
+api_header = "libcolprobe.h"
+build_flags = []
+deps = []

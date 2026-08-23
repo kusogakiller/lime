@@ -1,0 +1,5 @@
+extern fn fresh_hmake() -> Opaque(FreshHandle) "fresh_hmake"
+
+fn main():
+    let h = fresh_hmake()
+    print("FP_OK\n")

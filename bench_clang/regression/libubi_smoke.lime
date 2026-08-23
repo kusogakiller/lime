@@ -1,0 +1,85 @@
+// Iteration 25 investigation smoke: bitfield-inside-union ABI edge.
+// Proves the existing generic Opaque + C-shim ABI surfaces bitfield-bearing
+// unions without a new Lime type. Three proven-reachable paths:
+//   A. union w/ anonymous-struct bitfields -> only `word` is Lime-visible
+//      (union is Opaque; anonymous bitfield members are not individually
+//      surfaced -- a Lime modeling limit, not a Charger ABI bug).
+//   B. union w/ NAMED struct bitfields -> `bf` as Opaque(BitFields), then
+//      bitfield lo/hi via 2-hop accessors.
+//   C. container struct holding a bitfield union -> `uv` as Opaque(UBitView),
+//      then word via 2-hop accessor.
+// We do NOT require Lime to model overlapping bitfield members directly.
+
+extern fn make_view() -> Opaque(UBitView) "lime_make_UBitView"
+extern fn free_view(Opaque(UBitView): p) "ubi_free_view"
+extern fn set_word(Opaque(UBitView): p, Int: v) "lime_set_UBitView_word"
+extern fn get_word(Opaque(UBitView): p) -> Int "lime_get_UBitView_word"
+
+extern fn make_named() -> Opaque(UBitNamed) "lime_make_UBitNamed"
+extern fn free_named(Opaque(UBitNamed): p) "ubi_free_named"
+extern fn get_bf(Opaque(UBitNamed): p) -> Opaque(BitFields) "lime_get_UBitNamed_bf"
+extern fn set_named_word(Opaque(UBitNamed): p, Int: v) "lime_set_UBitNamed_word"
+extern fn get_named_word(Opaque(UBitNamed): p) -> Int "lime_get_UBitNamed_word"
+
+extern fn get_lo(Opaque(BitFields): p) -> Int "lime_get_BitFields_lo"
+extern fn get_hi(Opaque(BitFields): p) -> Int "lime_get_BitFields_hi"
+
+extern fn make_holder() -> Opaque(UBitHolder) "lime_make_UBitHolder"
+extern fn free_holder(Opaque(UBitHolder): p) "ubi_free_holder"
+extern fn get_uv(Opaque(UBitHolder): p) -> Opaque(UBitView) "lime_get_UBitHolder_uv"
+extern fn set_holder_tag(Opaque(UBitHolder): p, Int: v) "lime_set_UBitHolder_tag"
+extern fn get_holder_tag(Opaque(UBitHolder): p) -> Int "lime_get_UBitHolder_tag"
+
+fn main():
+    print("UBI_L0\n")
+    let v = make_view()
+    set_word(v, 4660)
+    let wv = get_word(v)
+    if wv == 4660:
+        print("UBI_L1\n")
+    else:
+        print("UBI_A_FAIL\n")
+        return
+    free_view(v)
+    print("UBI_L2\n")
+    let n = make_named()
+    set_named_word(n, 22136)
+    let wn = get_named_word(n)
+    if wn == 22136:
+        print("UBI_L3\n")
+    else:
+        print("UBI_B_FAIL\n")
+        return
+    let bf = get_bf(n)
+    let lo = get_lo(bf)
+    if lo == 120:
+        print("UBI_L4\n")
+    else:
+        print("UBI_C_FAIL\n")
+        return
+    let hi = get_hi(bf)
+    if hi == 86:
+        print("UBI_L5\n")
+    else:
+        print("UBI_D_FAIL\n")
+        return
+    free_named(n)
+    print("UBI_L6\n")
+    let h = make_holder()
+    set_holder_tag(h, 7)
+    let uv = get_uv(h)
+    set_word(uv, 43981)
+    let tag = get_holder_tag(h)
+    if tag == 7:
+        print("UBI_L7\n")
+    else:
+        print("UBI_E_FAIL\n")
+        return
+    let cw = get_word(uv)
+    if cw == 43981:
+        print("UBI_L8\n")
+    else:
+        print("UBI_F_FAIL\n")
+        return
+    free_holder(h)
+    print("UBI_OK\n")

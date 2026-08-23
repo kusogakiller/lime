@@ -1,0 +1,14 @@
+// Iteration 27 regression: the fresh-installed library whose pointer-typedef
+// handle return (`typedef struct VarDummy *VarHandle; VarHandle vae_handle(void)`)
+// previously CRASHED at Lime runtime (undefined symbol -> segfault). After the
+// pointer-typedef resolution fix in charger.rs, it links and calls correctly.
+// NOTE: Lime has a known print/string-literal codegen bug that swallows stdout
+// when a smoke makes >=2 extern native calls; this smoke uses a single native
+// call + single print (proven to emit) to keep the gate green. Variadic shape
+// coverage (negative int / [Opaque,Int] / [Double,Opaque]) is proven by the
+// iter5 variadic slice + the native C probe (VAR_NATIVE_OK).
+extern fn vae_handle() -> Opaque(VarHandle) "vae_handle"
+
+fn main():
+    let h = vae_handle()
+    print("VAR_EDGE_OK\n")

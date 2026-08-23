@@ -687,6 +687,70 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
             }
         }
     }
+    // Pointer-typedef resolution: a typedef whose underlying type is a data
+    // pointer (the spelling contains `*` but is NOT a function pointer
+    // `(*`) and is NOT a scalar alias) must be surfaced as `CType::Pointer`,
+    // NOT left as `CType::Other(name)`. Without this, a function returning a
+    // pointer-typedef handle (`typedef struct X *T; T make(void);`) keeps
+    // `ret = CType::Other("T")`; `T` then collides with the pointee struct tag
+    // `X` (or is otherwise treated as a complete record) and charger emits a
+    // `lime_ret_<fn>` struct-return wrapper while dropping the real symbol —
+    // Lime then fails to link the function (undefined symbol) and crashes at
+    // runtime. Generic: driven purely by the AST typedef table
+    // (`ctx.typedefs`); no library name, no function-name heuristic. A scalar
+    // or function-pointer typedef is handled by its own pass above and left
+    // untouched here.
+    let pointer_aliases: std::collections::HashMap<String, CType> = ctx
+        .typedefs
+        .iter()
+        .filter_map(|(n, u)| {
+            let ut = u.trim();
+            if !ut.contains('*') || ut.contains("(*") {
+                return None; // not a data pointer (fn-ptr handled separately)
+            }
+            if resolve_scalar_spelling(n).is_some() {
+                return None; // scalar alias handled by scalar pass
+            }
+            // Pointee spelling = everything before the first `*`.
+            let pointee = ut.split('*').next().unwrap_or("").trim();
+            let pointee = pointee
+                .trim_start_matches("const ")
+                .trim_start_matches("volatile ")
+                .trim_start_matches("restrict ")
+                .trim_start_matches("struct ")
+                .trim_start_matches("union ")
+                .trim();
+            if pointee.is_empty() {
+                return None;
+            }
+            Some((n.clone(), CType::Pointer(Box::new(parse_c_type(pointee)))))
+        })
+        .collect();
+    if !pointer_aliases.is_empty() {
+        for f in &mut api.functions {
+            for p in &mut f.params {
+                if let CType::Other(n) | CType::Opaque(n) = &p.ty {
+                    if let Some(pt) = pointer_aliases.get(n) {
+                        p.ty = pt.clone();
+                    }
+                }
+            }
+            if let CType::Other(n) | CType::Opaque(n) = &f.ret {
+                if let Some(pt) = pointer_aliases.get(n) {
+                    f.ret = pt.clone();
+                }
+            }
+        }
+        for s in &mut api.structs {
+            for f in &mut s.fields {
+                if let CType::Other(n) | CType::Opaque(n) = &f.ty {
+                    if let Some(pt) = pointer_aliases.get(n) {
+                        f.ty = pt.clone();
+                    }
+                }
+            }
+        }
+    }
     // Record every typedef name so adapter generation can suppress the
     // `struct` keyword for typedef'd types (e.g. libjpeg's `JQUANT_TBL`). A
     // pointer to a typedef'd record must spell `JQUANT_TBL*`, not

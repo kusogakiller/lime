@@ -35,6 +35,10 @@ libenumedge:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libe
 libenumedge_nanchor:bench_clang/realworld/corpus/libenumedge:bench_clang/regression/libenumedge_n-anchor
 libpackedbitfield:bench_clang/realworld/corpus/libpackedbitfield:bench_clang/regression/libpackedbitfield_smoke
 libfamprobe:bench_clang/realworld/corpus/libfamprobe:bench_clang/regression/libfamprobe_smoke
+libfreshprobe:bench_clang/realworld/corpus/libfreshprobe:bench_clang/regression/libfreshprobe_smoke
+libcolprobe:bench_clang/realworld/corpus/libcolprobe:bench_clang/regression/libcolprobe_smoke
+libvarargedge:bench_clang/realworld/corpus/libvarargedge:bench_clang/regression/libvarargedge_smoke
+libubi:bench_clang/realworld/corpus/libubi:bench_clang/regression/libubi_smoke
 "
 
 PASS=0
