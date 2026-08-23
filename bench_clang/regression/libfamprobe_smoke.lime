@@ -1,0 +1,53 @@
+// Iteration 24 regression: C ABI edge — flexible array member (FAM).
+// Proves a FAM struct WITHOUT a `len` field still gets a working sized
+// allocator + element-wise `_i` accessors via Opaque + C-shim ABI.
+// FAM payload length is tracked by the struct's own `n` field on the C side;
+// Lime never assumes any length-metadata field.
+
+extern fn make_fam(Int: len) -> Opaque(FAMProbe) "lime_make_FAMProbe_flex"
+extern fn fam_free(Opaque(FAMProbe): p) "fam_free"
+extern fn set_n(Opaque(FAMProbe): p, Int: v) "lime_set_FAMProbe_n"
+extern fn get_n(Opaque(FAMProbe): p) -> Int "lime_get_FAMProbe_n"
+extern fn set_data(Opaque(FAMProbe): p, Int: i, Int: v) "lime_set_FAMProbe_data_i"
+extern fn get_data(Opaque(FAMProbe): p, Int: i) -> Int "lime_get_FAMProbe_data_i"
+extern fn fam_sum(Opaque(FAMProbe): p) -> Int "fam_sum"
+
+fn main():
+    let N = 8
+    let p = make_fam(N)
+    set_n(p, N)
+    if get_n(p) == 8:
+        // ok
+    else:
+        print("FAM_N_FAIL")
+        print("\n")
+        return
+    set_data(p, 0, 3)
+    set_data(p, 1, 6)
+    set_data(p, 2, 9)
+    set_data(p, 3, 12)
+    set_data(p, 4, 15)
+    set_data(p, 5, 18)
+    set_data(p, 6, 21)
+    set_data(p, 7, 24)
+    if get_data(p, 0) == 3:
+        // ok
+    else:
+        print("FAM_R0_FAIL")
+        print("\n")
+        return
+    if get_data(p, 7) == 24:
+        // ok
+    else:
+        print("FAM_R7_FAIL")
+        print("\n")
+        return
+    if fam_sum(p) == 108:
+        // ok
+    else:
+        print("FAM_SUM_FAIL")
+        print("\n")
+        return
+    fam_free(p)
+    print("FAM_OK")
+    print("\n")

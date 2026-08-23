@@ -3123,12 +3123,17 @@ fn gen_adapter_c_source(
                     let c_ty = c_type_text(elem);
                     if size.is_none() {
                         // Flexible array member: emit a sized constructor that
-                        // allocates sizeof(struct) + len*sizeof(elem), and records
-                        // the element count in the struct's `len` field (if present)
-                        // so C-side bounds checks (e.g. `idx < f->len`) work.
+                        // allocates sizeof(struct) + len*sizeof(elem). Record the
+                        // element count into a `len` field ONLY if the struct
+                        // genuinely has one (generic: checked against st.fields,
+                        // not assumed). Structs without a `len` field simply get
+                        // the allocation — Lime never auto-infers any other field
+                        // (e.g. `n`) as length metadata.
+                        let has_len = st.fields.iter().any(|fl| fl.name == "len");
+                        let len_assign = if has_len { "if (f) f->len = len; " } else { "" };
                         s.push_str(&format!(
-                            "void* lime_make_{0}_flex(int len) {{ {1}* f = ({1}*)calloc(1, sizeof({1}) + (size_t)len * sizeof({2})); if (f) f->len = len; return (void*)f; }}\n",
-                            st.name, spelling, c_ty
+                            "void* lime_make_{0}_flex(int len) {{ {1}* f = ({1}*)calloc(1, sizeof({1}) + (size_t)len * sizeof({2})); {3}return (void*)f; }}\n",
+                            st.name, spelling, c_ty, len_assign
                         ));
                     }
                     s.push_str(&format!(
