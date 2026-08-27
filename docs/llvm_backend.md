@@ -1,374 +1,408 @@
 # Lime LLVM Backend Design (Step 10)
 
-このドキュメントは Step 10 の LLVM バックエンド設計である。
-実装ではなく「設計」を定める。目標: Interpreter 依存から Compiler Backend へ移行し、
-`AST → Typed AST → Memory Analysis → LLVM IR` の流れを確立する。
+This document describes the Step 10 LLVM backend design. It defines the
+**design**, not the implementation. Goal: transition from interpreter dependency
+to a compiler backend, establishing the flow
+`AST → Typed AST → Memory Analysis → LLVM IR`.
 
-制約（維持）:
-- GC なし
-- borrow checker / lifetime 構文をユーザーに公開しない
-- Runtime 依存は最小限（Lime ランタイム = 小さな C 相当のヘルパのみ）
-- 既存の Lexer/Parser/AST/TypeChecker/Generic/Interface/Async/Memory Analysis を流用
+Constraints (maintained):
+- No GC
+- No borrow checker / lifetime syntax exposed to users
+- Minimal Runtime dependency (Lime runtime = only a small C-equivalent helper)
+- Existing Lexer/Parser/AST/TypeChecker/Generic/Interface/Async/Memory Analysis is reused
 
 ---
 
-## 0. 現在の状態と移行方針
+## 0. Current State and Migration Strategy
 
-現在の `src/main.rs` は単一パス Interpreter:
+Current `src/main.rs` is a single-pass interpreter:
 ```
 tokenize → parse → collect_defs → (operators) → type_check → memory_analyze → execute
 ```
-実行は `Value`  enum（i64/f64/String/Bool/Array/Struct/State/Option/Future…）を Rust の
-ヒープ（`Box`/ `Vec`/`HashMap`）で保持する。
+Execution holds values in `Value` enum (i64/f64/String/Bool/Array/Struct/State/Option/Future...)
+via Rust's heap (`Box` / `Vec` / `HashMap`).
 
-LLVM 移行後:
+After LLVM migration:
 ```
 tokenize → parse → collect_defs
-         → type_check        (既存: Typed 情報を AST に付与/検証)
-         → memory_analyze    (既存: 各 let を Stack/Heap に決定)
-         → lower_to_llvm     (新規: LLVM IR 生成)
-         → (MC/obj) → 実行 / または ORC JIT
+         → type_check        (existing: attach/verify Typed info on AST)
+         → memory_analyze    (existing: determine Stack/Heap for each `let`)
+         → lower_to_llvm     (new: generate LLVM IR)
+         → (MC/obj) → execution / or ORC JIT
 ```
 
-原則:
-- AST ノードに新フィールドを追加しない。Typed/Memory 情報は別パスで `Defs` に集約
-  されたものを参照する（現在の `resolved_operator` のように）。
-- Interpreter は削除せず、**Phase ごとに並行稼働**させ、LLVM 出力と Interpreter 出力を
-  比較する差分テストで正当性を保証する（Nightly テスト化）。
-- 最初は `main` のみをコンパイルし、徐々に機能を広げる。
+Principles:
+- No new fields added to AST nodes. Typed/Memory information is referenced from
+  `Defs` aggregated by separate passes (similar to existing `resolved_operator`).
+- The Interpreter is not deleted; it **runs in parallel per phase**, and diff
+  testing comparing LLVM output with Interpreter output guarantees correctness
+  (Nightly testing).
+- Initially only `main` is compiled; functionality is gradually expanded.
 
 ---
 
-## 1. LLVM IR 生成方式
+## 1. LLVM IR Generation Approach
 
-### 1.1 利用手段
-- **Inkwell**（`llvm-sys` ラッパ）を `Cargo.toml` に追加。ターゲットはホストネイティブ
-  （`llvm-sys` はシステムの LLVM 共有庫に依存するため、開発環境に LLVM が必要）。
-- テスト駆動で進めるため、**最初の数 Phase は ORC JIT で直接実行**し、のちに
-  `TargetMachine` 経由でオブジェクト/実行ファイル生成へ拡張する。
+### 1.1 Approach
+- Add **Inkwell** (`llvm-sys` wrapper) to `Cargo.toml`. The target is the host
+  native (since `llvm-sys` depends on the system's LLVM shared library, the
+  development environment requires LLVM).
+- To progress with test-driven development, the **first few phases use ORC JIT
+  for direct execution**, later expanding to object/executable generation via
+  `TargetMachine`.
 
-### 1.2 モジュール構成
+### 1.2 Module Structure
 ```
 src/
-  main.rs              (既存: Lexer/Parser/AST/TC/Memory/Interp)
+  main.rs              (existing: Lexer/Parser/AST/TC/Memory/Interp)
   codegen/
-    mod.rs             (CodegenContext, Module/Builder/TargetData 保持)
-    types.rs           (Lime Type → LLVM Type マッピング)
-    value.rs           (Sized/Unsized 値の表現, 一時値スタック)
-    fn_builder.rs      (関数ごとの IR 生成, 基本ブロック管理)
-    structs.rs         (struct / state / variant 型レイアウト)
+    mod.rs             (CodegenContext, holds Module/Builder/TargetData)
+    types.rs           (Lime Type → LLVM Type mapping)
+    value.rs           (Sized/Unsized value representation, temporary value stack)
+    fn_builder.rs      (per-function IR generation, basic block management)
+    structs.rs         (struct / state / variant type layout)
     calls.rs           (call / call_method / builtin → runtime FFI)
-    generic.rs         (型引数単体化 monomorphization)
+    generic.rs         (type argument monomorphization)
     interface.rs       (vtable / fat-pointer dispatch)
-    async_rt.rs        (Future 構造体 + 状態マシン)
+    async_rt.rs        (Future struct + state machine)
     runtime/
-      runtime.c/.h     (アロケータ, print, List/String ヘルパ, 例外なし)
-      runtime.rs       (extern "C" 宣言, 組込みシンボル)
+      runtime.c/.h     (allocator, print, List/String helpers, no exceptions)
+      runtime.rs       (extern "C" declarations, built-in symbols)
 ```
 
-### 1.3 関数モデル
-- 各 Lime 関数 → LLVM `Function`。引数は値またはポインタで渡す（§4/§3 参照）。
-- 戻り値は ABI により:
-  - スカラ（i64/f64/i1）→ レジスタ返し。
-  - 集約型（struct/State/Option/List/String/Future）→ 呼び出し側が確保した
-    sret 領域へのポインタを第1暗黙引数として渡す（`sret` 規約）。
-- 制御フローは `basic block` で表現。`if/while/for/match` はブロック分岐へ。
+### 1.3 Function Model
+- Each Lime function → LLVM `Function`. Arguments are passed by value or pointer
+  (see §4/§3).
+- Return values follow ABI:
+  - Scalar (i64/f64/i1) → register return.
+  - Aggregate (struct/State/Option/List/String/Future) → caller-allocated sret
+    pointer passed as first implicit argument (`sret` convention).
+- Control flow is represented by `basic blocks`. `if/while/for/match` become
+  block branches.
 
 ---
 
-## 2. Typed AST から LLVM への変換責務
+## 2. Conversion Responsibilities from Typed AST to LLVM
 
-現在 `type_check` はエラー検出のみで、型を AST に書き戻さない。LLVM には「型付き情報」
-が必要であるため、軽量な **Typed AST（T-IR）** の中間層を導入する。
+Currently `type_check` only detects errors and does not write types back to the
+AST. Since LLVM requires "typed information", a lightweight **Typed AST (T-IR)**
+intermediate layer is introduced.
 
-### 2.1 Typed AST の形（最小追加）
-新しい列挙を `codegen` 専用に用意（既存 `Expr` を壊さない）:
+### 2.1 Typed AST Form (minimal addition)
+A new enum is prepared exclusively for `codegen` (without breaking existing `Expr`):
 ```
 TypedExpr = TInt(i64) | TFloat(f64) | TString(&str) | TBool(bool)
-          | TVar(String, Type)                      // 変数参照 + その型
-          | TBinOp(Box, op, Box, ResolvedOperator)  // 既存 resolved_operator を流用
+          | TVar(String, Type)                      // variable reference + its type
+          | TBinOp(Box, op, Box, ResolvedOperator)  // reuses existing resolved_operator
           | TCall { func, args: Vec<TypedExpr>, ret: Type }
           | TMethodCall { .. , ret: Type }
           | TFieldAccess { .. , field_ty: Type }
           | TAwait(Box, ret: Type)
           | ...
 ```
-- `type_check` の最後に `lower_to_typed(stmts, defs) -> Vec<TypedStmt>` を走らせる
-  （既存 `infer_type` / `check_expr` の成果を再利用）。
-- `Memory Analysis` 結果（`let name -> Stack/Heap`）は `Defs` または別マップ
-  `memory: HashMap<(fn, var), MemoryPlace>` に保持し、codegen が参照。
+- At the end of `type_check`, run `lower_to_typed(stmts, defs) -> Vec<TypedStmt>`
+  (reusing existing `infer_type` / `check_expr` results).
+- Memory Analysis results (`let name -> Stack/Heap`) are kept in `Defs` or a
+  separate map `memory: HashMap<(fn, var), MemoryPlace>` referenced by codegen.
 
-### 2.2 変換責務の分割
-| 責務 | 層 |
-|------|----|
-| 式の型決定 | TypeChecker（既存） |
-| 配置決定 (Stack/Heap) | Memory Analysis（既存） |
-| 型→LLVM型 | `types.rs` |
-| 式→IR | `fn_builder.rs`（`visit_expr`） |
-| 文→IR | `fn_builder.rs`（`visit_stmt`） |
-| 宣言→IR | `structs.rs` / `calls.rs` |
-| 単体化 | `generic.rs` |
-| 多相 dispatch | `interface.rs` |
-| 非同期 | `async_rt.rs` |
-
----
-
-## 3. Stack/Heap Memory 情報の LLVM 反映
-
-Memory Analysis の出力（各 `let` が Stack か Heap か）をそのまま allocation 戦略へ。
-
-- **Stack**: `alloca` で関数フレームに確保。lifetime は基本ブロックスコープ。
-  escape しないためポインタは関数内のみで有効。`alloca` は LLVM が自動で
-  レジスタに昇格（mem2reg）するため、事実上スタックでもレジスタでも OK。
-- **Heap**: `runtime_alloc(size, align)`（§9 FFI）を呼び、返った `i8*` を
-  適切な構造体ポインタ型に `bitcast` して使用。
-- **明示 `heap`**: 常に `runtime_alloc`。
-- **明示 `stack` だが escape**: Memory Analysis でコンパイルエラー済（Step 9）。
-  よって codegen 到達時点では「stack で escape する」ケースは存在しない。
-- **async 内で await 以降に使用される値**: Memory Analysis で Heap 決定済。
-  Future frame（§8）のヒープ領域に配置。
-
-LLVM 上の「所有」概念は存在しない。単に「値の生存期間に応じ alloca or malloc」
-を選ぶだけ。ユーザーには一切見せない（＝設計通り）。
-
-> 注意: GC/RC なし。Compiler 内部では単一所有モデルを利用する。
-> 値型はコピー、String/List などのヒープ型は Compiler が内部的に最適な移動・共有方式を
-> 選択する。ユーザーには copy/move 概念を公開しない。
+### 2.2 Conversion Responsibility Split
+| Responsibility | Layer |
+|----------------|-------|
+| Expression type determination | TypeChecker (existing) |
+| Placement determination (Stack/Heap) | Memory Analysis (existing) |
+| Type → LLVM type | `types.rs` |
+| Expression → IR | `fn_builder.rs` (`visit_expr`) |
+| Statement → IR | `fn_builder.rs` (`visit_stmt`) |
+| Declaration → IR | `structs.rs` / `calls.rs` |
+| Monomorphization | `generic.rs` |
+| Polymorphic dispatch | `interface.rs` |
+| Async | `async_rt.rs` |
 
 ---
 
-## 4. Struct 表現
+## 3. Stack/Heap Memory Information in LLVM
 
-現在の `Value::Struct { name, fields: Vec<(String,Value)> }` はタグ付き動的タプル。
-LLVM では各 struct を **名前付き LLVM StructType** としてレイアウトする。
+Memory Analysis output (whether each `let` is Stack or Heap) maps directly to
+allocation strategy.
 
-### 4.1 レイアウト
+- **Stack**: `alloca` in the function frame. Lifetime is the basic block scope.
+  Since it doesn't escape, the pointer is only valid within the function. `alloca`
+  is automatically promoted to registers by LLVM (mem2reg), so it's effectively
+  OK whether it's stack or registers.
+- **Heap**: Call `runtime_alloc(size, align)` (§9 FFI), then `bitcast` the
+  returned `i8*` to the appropriate struct pointer type.
+- **Explicit `heap`**: always `runtime_alloc`.
+- **Explicit `stack` but escapes**: compile error already raised by Memory
+  Analysis (Step 9). Therefore, by the time codegen is reached, "stack that
+  escapes" cases do not exist.
+- **Values used after `await` in async**: Memory Analysis already determined Heap.
+  Placed in Future frame (§8) heap area.
+
+There is no "ownership" concept on LLVM. It simply selects "alloca or malloc
+depending on value lifetime." This is never exposed to users (= per design).
+
+> Note: No GC/RC. The compiler internally uses a single-owner model.
+> Value types are copied; heap types like String/List are internally optimized
+> for movement/sharing by the compiler. Copy/move concepts are not exposed to users.
+
+---
+
+## 4. Struct Representation
+
+Current `Value::Struct { name, fields: Vec<(String,Value)> }` is a tagged dynamic
+tuple. In LLVM, each struct is laid out as a **named LLVM StructType**.
+
+### 4.1 Layout
 - `struct User { str: name }` →
-  `%User = type { i8* }` （`str` は §5 の String = `i8*` 管理）。
-- フィールド順は `StructDef.fields` の順。パディングは LLVM が `TargetData` で決定。
-- Generic struct `Vec2(T)` → 型引数ごとに **monomorphize**（§6）して
-  `%Vec2_i64` / `%Vec2_f64` を生成。
+  `%User = type { i8* }` (`str` is managed as `i8*` per §5 String).
+- Field order follows `StructDef.fields`. Padding is determined by LLVM's `TargetData`.
+- Generic struct `Vec2(T)` → **monomorphized** per type argument (§6),
+  generating `%Vec2_i64` / `%Vec2_f64`.
 
-### 4.2 コンストラクタ
+### 4.2 Constructor
 `User("Alice")` →
-1. `alloca %User`（配置に従い stack/heap）
-2. フィールド初期化 GEP+store
-3. 値として `%User*` または sret コピー
+1. `alloca %User` (stack/heap per placement)
+2. Field initialization via GEP + store
+3. Value as `%User*` or sret copy
 
-### 4.3 フィールドアクセス
-`u.name` → `getelementptr` でフィールドポインタ → `load`。ポインタ経由のため
-値型コピーセマンティクスは `load` のタイミングで発生。
+### 4.3 Field Access
+`u.name` → `getelementptr` to field pointer → `load`. Since it's via pointer,
+value-type copy semantics occur at the `load` timing.
 
 ### 4.4 State / Variant
-`Result(T,E)` は現在 `State { name, values }`。LLVM では:
-- 各 `State` を **タグ付きユニオン** として `{ i32 tag; [N x i8] payload }` または
-  `i32` + 最大幅バリアントの構造体で表現。
-- `Success(v)` / `Error(e)` → tag 書込 + payload 書込。
-- `match` → tag 比較で基本ブロック分岐。網羅性は TypeChecker 済。
+`Result(T,E)` is currently `State { name, values }`. In LLVM:
+- Each `State` is a **tagged union**: `{ i32 tag; [N x i8] payload }` or
+  `i32` + the largest variant's struct.
+- `Success(v)` / `Error(e)` → tag write + payload write.
+- `match` → tag comparison for basic block branching. Exhaustiveness is guaranteed
+  by TypeChecker.
 
 ---
 
-## 5. List / String Runtime 設計
+## 5. List / String Runtime Design
 
-GC なし・最小 Runtime の核心。
+Core of no-GC, minimal Runtime.
 
 ### 5.1 String
-- 表現: `i8*` + 長さ の **fat pointer** または `%LimeStr = type { i8*, i64 len }`。
-- 不変（immutable）セマンティクス: 連結 `+` は新規バッファ確保（既存 Interpreter と同じ）。
-- 生成: `runtime_str_from_utf8(ptr, len)` / 連結 `runtime_str_concat(a,b)`。
-- UTF-8 保証はコンパイル時（リテラル）＋ 実行時エントリで検証（エラー時は
-  `Result`/`State` 経由、例外なし）。
+- Representation: `i8*` + length **fat pointer** or `%LimeStr = type { i8*, i64 len }`.
+- Immutable semantics: concatenation `+` allocates a new buffer (same as existing
+  Interpreter).
+- Generation: `runtime_str_from_utf8(ptr, len)` / concatenation `runtime_str_concat(a,b)`.
+- UTF-8 guarantee is compile-time (literals) + runtime entry verification (on error,
+  via `Result`/`State`, no exceptions).
 
 ### 5.2 List
-- 現在: `Value::Array(Vec<Value>)`。LLVM では:
-  - header: `%LimeList = type { i8* data; i64 len; i64 cap }`（data はヒープ）。
-  - 要素 `T` の配列を `runtime_alloc` で確保（要素サイズ×cap）。
-  - `List(T)` は monomorphize で `T` を固定。
-- Buffer は常に Heap（Memory Analysis で List 値は heap 扱いの方針を採用してもよい；
-  あるいは header は stack、buffer は heap と分離。§3 の通り「内部 buffer は heap」）。
-- インデクス / `for` イテレーション: GEP + bounds check（失敗は `State` 経由で
-  `Error` を返すか、トラップ。仕様上は Result を返す API にする）。
+- Current: `Value::Array(Vec<Value>)`. In LLVM:
+  - Header: `%LimeList = type { i8* data; i64 len; i64 cap }` (data is on Heap).
+  - Element array `T` is allocated via `runtime_alloc` (element size × cap).
+  - `List(T)` is monomorphized to fix `T`.
+- Buffer is always Heap (Memory Analysis may treat List values as heap; or
+  separate header=stack, buffer=heap. As stated in §3, "internal buffer is Heap").
+- Index / `for` iteration: GEP + bounds check (failure returns `Error` via `State`
+  or traps; spec uses Result-returning API).
 
-### 5.3 ライフタイム（Runtime 側）
-- Lime は単一所有者・コピーセマンティクス。参照カウント（Rc/Arc）は**使わない**。
-- 関数 return / スコープ終了で生きている Heap 値をどう解放するか？
-  - Phase 1（Step 10 前半）: **解放しない（リーク許容）** でコンパイラを完成させる。
-  - Phase 2: 線形スコープ解析（DOM ベースの最後使用位置）で `runtime_free` を
-    自動挿入。Escape Analysis 結果を流用し、「最後の使用」後に free を emit。
-  - GC / RC は禁止。あくまでコンパイラが静的挿入。
-
----
-
-## 6. Generic の扱い
-
-現在: `Type::Var(T)` を `type_check` 時に制約解決し、実体は単一化されているわけでは
-ない（インタプリタは実行時 `Value` で多相を吸収）。
-LLVM では **Monomorphization（型引数単体化）** を採用。
-
-- `fn max<T>(...)` が `T=i64` と `T=f64` で呼ばれるなら、それぞれ
-  `@max_i64` / `@max_f64` を生成。
-- 手順:
-  1. `collect_defs` で generic 関数を「テンプレート」として保持。
-  2. 呼び出し site（`TCall`）から実引数の具象型を取得。
-  3. 未生成なら `instantiate(fn, [具象型])` を実行:
-     - `Type::Var(T)` を具象型へ置換（AST の型注釈・制約を書き換え）。
-     - 制約 `T: Compare` は具象型が Interface を満たすか静的検査（既存ロジック流用）。
-     - 単体化された `FunctionDef` を codegen する。
-  4. 同じ具象型ならキャッシュ（再生成しない）。
-- Interface 制約を持つ generic は §7 の vtable へ。
-
-> Generic 専用 Memory 規則は追加しない（Step 9 決定通り）。単体化後の具象型で
-> 通常の Memory Analysis を適用する。
+### 5.3 Lifetime (Runtime side)
+- Lime has single-owner, copy semantics. Reference counting (Rc/Arc) is **not used**.
+- How to free living Heap values on function return / scope end?
+  - Phase 1 (first half of Step 10): **do not free (tolerate leaks)** to complete
+    the compiler.
+  - Phase 2: linear scope analysis (DOM-based last-use position) automatically
+    inserts `runtime_free`. Reuses Escape Analysis results; emits free after "last use."
+  - GC / RC is forbidden. Only static insertion by the compiler.
 
 ---
 
-## 7. Interface Dispatch 方式
+## 6. Generic Handling
 
-現在: `Type::Interface(name, [Type])`、暗黙実装、`resolved_operator` で静的決定。
-LLVM では2択:
+Current: `Type::Var(T)` has constraints resolved during `type_check`, but the
+actual type is not unified (the interpreter absorbs polymorphism at runtime via
+`Value`). LLVM uses **Monomorphization (type argument unification)**.
 
-### 7.1 静的単体化（優先・Phase 1）
-- 呼び出し site で receiver の具象型が決まる場合（多くの Lime コードは静的に決まる）、
-  `resolved_operator` と同じく**直接その具象メソッドを呼ぶ**（devirtualize）。
-- Memory Analysis と同様に「呼ばれる interface メソッドは具象型で決定」する。
+- If `fn max<T>(...)` is called with `T=i64` and `T=f64`, generate
+  `@max_i64` / `@max_f64` respectively.
+- Steps:
+  1. `collect_defs` keeps generic functions as "templates."
+  2. From the call site (`TCall`), obtain the concrete type of actual arguments.
+  3. If not yet generated, run `instantiate(fn, [concrete_type])`:
+     - Replace `Type::Var(T)` with the concrete type (rewrite AST type annotations/constraints).
+     - Constraint `T: Compare` is statically checked for whether the concrete type
+       satisfies the Interface (reuses existing logic).
+     - Codegen the unified `FunctionDef`.
+  4. Cache for the same concrete type (don't regenerate).
+- Generics with Interface constraints go to §7 vtable.
 
-### 7.2 vtable / fat-pointer（必要時・Phase 2）
-- 具象型が静的に決まらない場合（コレクション格納、引数経由で unknown な場合）のみ
-  **fat pointer** を使用: `InterfaceValue = { i8* data; vtable* vp }`。
-  - `vtable = { fn ptr, fn ptr, ... }`（各メソッド1エントリ）。
-  - メソッド呼び出し: `vp->slot[k](data, args...)`。
-- ユーザーには trait/object 構文を見せない。コンパイラ内部の dispatch のみ。
-- Operator Interface（`Add`/`Equal`/`Compare`）は既存 `resolved_operator` を LLVM の
-  `call` にそのまま落とす（静的決定済）。
+> No generic-specific Memory rules are added (per Step 9 decision). After
+> monomorphization, normal Memory Analysis is applied to the concrete type.
 
 ---
 
-## 8. Async / Future 表現
+## 7. Interface Dispatch Method
 
-現在: `lime` 関数 → `Value::Future{func,args}`、`await` で force-run（Interpreter）。
-LLVM では真の非同期ランタイム（ステートマシン）または **簡易同期展開** のいずれか。
+Current: `Type::Interface(name, [Type])`, implicit implementation, static
+resolution via `resolved_operator`. In LLVM, two options:
 
-### 8.1 Phase 1: 同期展開（シングルスレッド協調）
-- `lime` 関数を「Future を返す関数」としてコードゲン:
-  - `Future` 構造体 = `{ i32 state; i8* frame; fn* resume }`。
-  - `frame` は Heap（Memory Analysis で async 内 escape 値は Heap 決定済）。
+### 7.1 Static Monomorphization (preferred, Phase 1)
+- When the receiver's concrete type is determined at the call site (most Lime
+  code is statically determinable), **directly call the concrete method**
+  (devirtualize), same as `resolved_operator`.
+- Like Memory Analysis, "called interface methods are resolved to concrete types."
+
+### 7.2 vtable / fat-pointer (when needed, Phase 2)
+- Only when the concrete type cannot be statically determined (stored in
+  collections, unknown via argument):
+  **fat pointer**: `InterfaceValue = { i8* data; vtable* vp }`.
+  - `vtable = { fn ptr, fn ptr, ... }` (one entry per method).
+  - Method call: `vp->slot[k](data, args...)`.
+- Users are not shown trait/object syntax. This is internal compiler dispatch only.
+- Operator Interface (`Add`/`Equal`/`Compare`) maps existing `resolved_operator`
+  directly to LLVM `call` (already statically resolved).
+
+---
+
+## 8. Async / Future Representation
+
+Current: `lime` functions → `Value::Future{func,args}`, `await` force-runs
+(Interpreter). In LLVM, either a true async runtime (state machine) or
+**simple synchronous expansion**.
+
+### 8.1 Phase 1: Synchronous Expansion (single-threaded cooperative)
+- Codegen `lime` functions as "functions that return a Future":
+  - `Future` struct = `{ i32 state; i8* frame; fn* resume }`.
+  - `frame` is Heap (Memory Analysis already determined async-escaping values as Heap).
 - `await e`:
-  1. `e` を評価 → `Future f`。
-  2. 現在の状態を `frame` に保存し、`f` の `resume()` を実行。
-  3. `f` 完了まで **簡易イベントループ / 同期ポーリング**（単一スレッド）で進行。
-- 例外機構なし。失敗は `Result(T,E)` / `State` 値として伝播（既存仕様維持）。
+  1. Evaluate `e` → `Future f`.
+  2. Save current state to `frame`, execute `f`'s `resume()`.
+  3. Progress via **simple event loop / synchronous polling** (single thread)
+     until `f` completes.
+- No exception mechanism. Failures propagate as `Result(T,E)` / `State` values
+  (maintaining existing spec).
 
-### 8.2 Phase 2: 真のステートマシン（LLVM coroutine / 手書き分割）
-- `lime` 関数本体を `await` 境界で基本ブロックに分割し、C++20 coroutine 相当の
-  ステートマシンを生成（あるいは `llvm.coro.*`  intrinsics を利用）。
-- `Future` はヒープ確保された resume 状態保持領域。
-- スレッドプール / ランタイム scheduler は §9 の minimal runtime に追加。
+### 8.2 Phase 2: True State Machine (LLVM coroutine / manual splitting)
+- Split `lime` function body at `await` boundaries into basic blocks,
+  generating a C++20-coroutine-equivalent state machine (or using `llvm.coro.*`
+  intrinsics).
+- `Future` is a heap-allocated resume state-holding area.
+- Thread pool / runtime scheduler is added to the §9 minimal runtime.
 
-### 8.3 設計原則
-- `async` 予約語・キーワードは追加しない（`await` のみ）。
-- `fn` と `lime` は戻り値型システムを完全共有（既存）。codegen でも同じ戻り値 ABI。
-- 非同期専用の特別な型システムは作らない（Runtime 実行モデルのみ）。
-
----
-
-## 9. FFI / Runtime 設計
-
-最小 Runtime（`runtime.c` + `runtime.rs` extern 宣言）。全て `extern "C"`、
-`#[no_mangle]`、C ABI。
-
-| Runtime シンボル | 役割 |
-|------------------|------|
-| `runtime_alloc(size, align) -> i8*` | Heap 配置（§3） |
-| `runtime_free(i8*)` | 線形解放（§5.3 Phase 2） |
-| `runtime_str_from_utf8 / concat / len / slice` | String 操作 |
-| `runtime_list_new / push / get / len` | List 操作 |
-| `runtime_print(i8*, len)` | 標準出力（既存 `print` の背後） |
-| `runtime_panic(msg)` | 到達不能/オーバーフロー等（例外なし、abort） |
-| `runtime_async_schedule(Future*)` | 非同期スケジューラ（§8） |
-
-- 言語組込み `print/len/StringBuilder/int/float...` はすべて上記 Runtime への
-  `call` に lowering する（既存 Interpreter の builtin マッチと 1:1 対応）。
-- 浮動小数点 / 整数演算は LLVM IR のネイティブ命令（`add`/`fadd` 等）。
-- 演算子の `resolved_operator`（Operator Interface）は、そのまま具象関数の `call` へ。
-
-### 9.1 Stdlib runtime builtin integration (Phase 12 Step 1)
-
-バンドル stdlib パッケージ（`string`/`math`/`time`/`fs`/`io`）のラッパー関数が
-ネイティブバックエンドでも動くよう、`is_runtime_builtin` の組込みを C ヘルパー呼び出し
-へ lowering する（`fn_builder.rs` の `codegen_runtime_builtin`）。
-
-- ラッパー関数（例: `string.trim`）は `defs.functions` に dotted 名でマージされており、
-  `Defs::resolve_function` / `Defs::resolve_type`（`pub(crate)`）のフォールバックで解決される。
-  バラの型名（`Instant(f)` など）は `resolve_type` で `time.Instant` に解決される。
-- `codegen_call` のディスパッチ順: ランタイム組込み → 構造体コンストラクタ →
-  状態コンストラクタ → モノモーフ関数 → ユーザー関数。
-- 対応表は `docs/runtime.md`「Stdlib builtin helpers」参照。文字列リストを返す
-  `split`/`fs_list_dir` は MSVC `sret` ABI で `%LimeList` を返す。
-- `compile_runtime_c()` は埋め込み `runtime.c` をその場で clang コンパイルし、
-  ソース内容のハッシュで `.obj` を命名する（編集時に stale cache がリンクされる
-  のを防ぐ）。
+### 8.3 Design Principles
+- No `async` reserved keyword or keyword added (only `await`).
+- `fn` and `lime` fully share the return value type system (existing). Codegen
+  uses the same return value ABI.
+- No special type system for async-only (only Runtime execution model).
 
 ---
 
-## 10. Phase 分割（段階的実装計画）
+## 9. FFI / Runtime Design
 
-### Phase 0 — 基盤（非破壊）
-- `Cargo.toml` に `inkwell` 追加。`codegen/mod.rs` で `Context/Module/Builder/
-  TargetMachine` を初期化し、空の `main` を生成して実行可能ファイルを吐くところ
-  まで確認（Hello-world 相当）。
-- `type_check` 後に `lower_to_typed` を通し Typed AST を作る（まずは式のみ）。
-- 差分テスト基盤: Interpreter 出力と LLVM 出力を比較。
+Minimal Runtime (`runtime.c` + `runtime.rs` extern declarations). All `extern "C"`,
+`#[no_mangle]`, C ABI.
 
-### Phase 1 — スカラ + 制御流れ
-- `int/float/bool/str` リテラル、`let`、代入、`if/else`、`while`、`for`(range)、
-  `return`、二項演算（静的決定済のもの）、`print`。
-- Memory: 全 `let` を `alloca`（escape は後で heap 化）。まずは Stack のみで通す。
-- 目標: 既存 `steptest_*` のスカラ部分を LLVM で実行し Interpreter と一致。
+| Runtime Symbol | Role |
+|----------------|------|
+| `runtime_alloc(size, align) -> i8*` | Heap allocation (§3) |
+| `runtime_free(i8*)` | Linear deallocation (§5.3 Phase 2) |
+| `runtime_str_from_utf8 / concat / len / slice` | String operations |
+| `runtime_list_new / push / get / len` | List operations |
+| `runtime_print(i8*, len)` | Standard output (behind existing `print`) |
+| `runtime_panic(msg)` | Unreachable/overflow etc. (no exceptions, abort) |
+| `runtime_async_schedule(Future*)` | Async scheduler (§8) |
+
+- Language built-ins `print/len/StringBuilder/int/float...` all lower to `call`
+  to the above Runtime (1:1 correspondence with existing Interpreter builtin
+  matching).
+- Floating point / integer arithmetic uses LLVM IR native instructions
+  (`add`/`fadd` etc.).
+- Operator `resolved_operator` (Operator Interface) maps directly to concrete
+  function `call`.
+
+### 9.1 Stdlib Runtime Builtin Integration (Phase 12 Step 1)
+
+Wrapper functions in bundled stdlib packages (`string`/`math`/`time`/`fs`/`io`)
+are lowered to C helper calls so they work in the native backend
+(`codegen_runtime_builtin` in `fn_builder.rs`).
+
+- Wrapper functions (e.g., `string.trim`) are merged into `defs.functions` with
+  dotted names and resolved via `Defs::resolve_function` / `Defs::resolve_type`
+  (`pub(crate)`) fallback. Bare type names (e.g., `Instant(f)`) are resolved to
+  `time.Instant` via `resolve_type`.
+- `codegen_call` dispatch order: runtime builtins → struct constructors →
+  state constructors → monomorphic functions → user functions.
+- Correspondence table: see `docs/runtime.md` "Stdlib builtin helpers."
+  `split`/`fs_list_dir` returning string lists return `%LimeList` via MSVC
+  `sret` ABI.
+- `compile_runtime_c()` embeds and compiles `runtime.c` on-the-fly with clang,
+  naming the `.obj` by a hash of the source content (preventing stale cached
+  objects from being linked when the source is edited).
+
+---
+
+## 10. Phase Splitting (gradual implementation plan)
+
+### Phase 0 — Foundation (non-breaking)
+- Add `inkwell` to `Cargo.toml`. Initialize `Context/Module/Builder/TargetMachine`
+  in `codegen/mod.rs`, generate an empty `main` and verify it produces an
+  executable (Hello-world equivalent).
+- After `type_check`, run `lower_to_typed` to create Typed AST (expressions only
+  first).
+- Diff test infrastructure: compare Interpreter output with LLVM output.
+
+### Phase 1 — Scalar + Control Flow
+- `int/float/bool/str` literals, `let`, assignment, `if/else`, `while`,
+  `for` (range), `return`, binary operations (statically resolved), `print`.
+- Memory: all `let` via `alloca` (escape handled later). First pass through with
+  Stack only.
+- Goal: execute existing `steptest_*` scalar portions with LLVM and match
+  Interpreter output.
 
 ### Phase 2 — Struct / State / Match
-- `struct` レイアウト・コンストラクタ・フィールドアクセス（§4）。
-- `State`/`Result`/`Option` タグ付きユニオン + `match` 分岐（§4.4）。
-- 網羅性は既存 TypeChecker 結果を信頼。
+- `struct` layout, constructor, field access (§4).
+- `State`/`Result`/`Option` tagged union + `match` branching (§4.4).
+- Exhaustiveness trusts existing TypeChecker results.
 
-### Phase 3 — Heap + Memory Analysis 反映
-- §3 の通り `runtime_alloc`/`free` を emit。escape する値・明示 heap を heap 化。
-- §5.3 の線形 free 挿入（最後の使用後に `runtime_free`）。
+### Phase 3 — Heap + Memory Analysis Reflection
+- Emit `runtime_alloc`/`free` per §3. Escape values and explicit heap → heap.
+- §5.3 linear free insertion (`runtime_free` after last use).
 
 ### Phase 4 — List / String Runtime
-- §5 の Runtime 関数を実装し、List/Array/Range イテレーションと String API を
-  LLVM へ lowering。
+- Implement §5 Runtime functions, lower List/Array/Range iteration and String
+  API to LLVM.
 
 ### Phase 5 — Generic (Monomorphization)
-- §6 の `instantiate` を実装。`List(T)`/`Result(T,E)`/`Vec2(T)` 等を単体化コード生成。
+- Implement §6 `instantiate`. Monomorphize codegen for `List(T)`/`Result(T,E)`/
+  `Vec2(T)` etc.
 
 ### Phase 6 — Interface Dispatch
-- §7.1 静的 devirtualize を実装。必要なら §7.2 vtable/fat-pointer。
+- Implement §7.1 static devirtualize. Add §7.2 vtable/fat-pointer if needed.
 
-### Phase 7 — Async (同期展開)
-- §8.1 の Future 構造体 + 簡易スケジューラで `lime`/`await` をコード生成。
-- 目標: `steptest_async.lime` を LLVM で実行し Interpreter と一致。
+### Phase 7 — Async (synchronous expansion)
+- Generate `lime`/`await` with §8.1 Future struct + simple scheduler.
+- Goal: execute `steptest_async.lime` with LLVM and match Interpreter output.
 
-### Phase 8 — 最適化 + 真の非同期 + 実行ファイル
-- `PassManager` で O2 相当最適化。
-- §8.2 の coroutine ステートマシン化（任意）。
-- `TargetMachine` で `.o` / 実行ファイル生成、`clang`/`cc` で Runtime とリンク。
-
----
-
-## 11. リスクと決定保留事項
-
-- **LLVM バージョン依存**: `inkwell`/`llvm-sys` はシステム LLVM に依存。
-  CI に LLVM 導入が必要。代替として `#[cfg]` で Interpreter を fallback に保つ。
-- **メモリ解放ポリシー**: Phase 1 はリーク許容。最終は線形 free 挿入（RC/GC なし）。
-- **非同期の並行度**: Phase 1 は単一スレッド同期展開。真の並行は Phase 8 以降。
-- **Generic のコードバロン**: monomorphization はバイナリを膨らますが、Lime は
-  小規模言語のため許容。共有化（generic 関数内で interface 経由）は vtable で抑制。
+### Phase 8 — Optimization + True Async + Executable
+- `PassManager` for O2-equivalent optimization.
+- §8.2 coroutine state machine (optional).
+- `TargetMachine` for `.o` / executable generation, link with Runtime via
+  `clang`/`cc`.
 
 ---
 
-## 12. 次アクション
+## 11. Risks and Pending Decisions
 
-1. Phase 0 の `Cargo.toml` / `codegen/mod.rs` 雛形を作成し、空 `main` 実行を確認。
-2. 差分テスト基盤（Interpreter vs LLVM）を `sandbox/` に追加。
-3. Phase 1 から順に実装し、各 Phase で `steptest_*.lime` の一致を確認。
-4. 各 Phase 完了ごとに `git commit`。
+- **LLVM version dependency**: `inkwell`/`llvm-sys` depend on system LLVM.
+  CI requires LLVM setup. As a fallback, `#[cfg]` can keep the Interpreter.
+- **Memory deallocation policy**: Phase 1 tolerates leaks. Final is linear free
+  insertion (no RC/GC).
+- **Async concurrency**: Phase 1 is single-threaded synchronous expansion.
+  True concurrency is Phase 8 onward.
+- **Generic code bloat**: monomorphization inflates binaries, but Lime is a
+  small language so it's tolerable. Sharing (via Interface within generic
+  functions) is suppressed by vtable.
+
+---
+
+## 12. Next Actions
+
+1. Create Phase 0 `Cargo.toml` / `codegen/mod.rs` skeleton and verify empty `main` execution.
+2. Add diff test infrastructure (Interpreter vs LLVM) in `sandbox/`.
+3. Implement phases sequentially, verifying `steptest_*.lime` consistency at each phase.
+4. `git commit` after each phase completion.

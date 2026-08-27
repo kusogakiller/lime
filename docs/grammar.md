@@ -1,38 +1,38 @@
-# Lime 仮文法仕様書（EBNF + 型規則）
+# Lime Grammar Specification (EBNF + Type Rules)
 
-## 目的
+## Purpose
 
-現在の試作（Lexer / Parser / AST / TypeChecker / Interpreter）と整合する
-正式な文法を EBNF で固定し、型規則を定義する。
-構文は既存仕様・決定事項に従う。
+To formalize the grammar in EBNF and define type rules that are consistent with
+the current prototype (Lexer / Parser / AST / TypeChecker / Interpreter).
+Syntax follows existing specs and decided items.
 
-維持事項:
+Preserved principles:
 - Easy. Simple. Fast.
-- 簡潔構文 / 可読性重視
-- Rust 化しない / C++ 化しない / self-this なし / impl なし
-- 暗黙型変換禁止（数値→bool 変換も禁止）
-- GC なし / コンパイラ自動 Memory 管理
-- Match 完全網羅必須 / else 禁止 / Ignore 破棄
-- 文字列演算子なし（String API 経由）
+- Concise syntax / readability first
+- No Rust-ification / No C++-ification / No self-this / No impl
+- No implicit type conversions (numeric→bool also forbidden)
+- No GC / no compiler automatic memory management
+- Match exhaustive matching required / `else` forbidden / `Ignore` for discards
+- No string-specific operators (use String API instead)
 
 ---
 
-## 1. 字句規則（Lexer 既存、変更禁止）
+## 1. Lexical Rules (Lexer exists, changes forbidden)
 
-| カテゴリ | 例 |
-|----------|-----|
-| 識別子 | `[A-Za-z_][A-Za-z0-9_]*` |
-| キーワード | fn struct interface state match if else return let mut lime await unsafe |
-| 整数リテラル | `123` / `0xFF`（後続） |
-| 浮動小数 | `1.5` / `.5` |
-| 文字列 | `"..."` |
-| 演算子 | `+ - * / % == != < > <= >= && || ! = += -=` |
-| 区切り | `( ) [ ] { } : , . .. ; ->` |
-| インデント | Indent / Dedent / Newline |
+| Category | Example |
+|----------|---------|
+| Identifier | `[A-Za-z_][A-Za-z0-9_]*` |
+| Keywords | fn struct interface state match if else return let mut lime await unsafe |
+| Integer literal | `123` / `0xFF` (later) |
+| Float literal | `1.5` / `.5` |
+| String literal | `"..."` |
+| Operators | `+ - * / % == != < > <= >= && \|\| ! = += -=` |
+| Delimiters | `( ) [ ] { } : , . .. ; ->` |
+| Indentation | Indent / Dedent / Newline |
 
 ---
 
-## 2. プログラム構造（EBNF）
+## 2. Program Structure (EBNF)
 
 ```
 program        ::= statement*
@@ -59,14 +59,15 @@ indent_block   ::= Newline Indent (statement | field_decl)* Dedent
 field_decl     ::= type ":" ident
 
 interface_decl ::= "interface" ident ":" indent_block
-                 （indent_block 内は fn_decl のシグネチャのみ）
+                 (indent_block contains only fn_decl signatures)
 
 struct_decl    ::= "struct" ident type_params? ":" indent_block
-                 （明示的な implements は不要。interface の全メソッドを
-                   満たす署名で持っていれば自動的に実装とみなす＝暗黙実装）
+                 (No explicit `implements` required. If a struct has
+                   matching signatures for all methods of an interface,
+                   it is automatically considered an implementation = implicit implementation)
 
 state_decl     ::= "state" ident type_params? ":" indent_block
-                 （indent_block 内は variant 名 + 任意 payload）
+                 (indent_block contains variant names + optional payloads)
 
 let_stmt       ::= "let" "mut"? type ":" ident "=" expr
                  | "let" "mut"? ident "=" expr
@@ -74,7 +75,7 @@ let_stmt       ::= "let" "mut"? type ":" ident "=" expr
 if_stmt        ::= "if" expr ":" block ("else" ":" block)?
 
 match_stmt     ::= "match" expr ":" indent_block
-                 （各腕: variant_pattern ":" block）
+                 (each arm: variant_pattern ":" block)
 variant_pattern ::= ident ("(" binding_list? ")")?
 binding_list   ::= ident ("," ident)* | "Ignore" ("," "Ignore")*
 
@@ -85,7 +86,7 @@ expr_stmt      ::= expr
 
 ---
 
-## 3. 式（EBNF）
+## 3. Expressions (EBNF)
 
 ```
 expr           ::= binary_expr
@@ -116,103 +117,109 @@ bin_op         ::= "+" | "-" | "*" | "/" | "%"
 un_op         ::= "-" | "not"
 ```
 
-注意: 文字列連結は `+` 演算子で許可（両辺 str の場合）。これは既存の `+` の用途拡張であり、新規の文字列専用演算子は追加しない。
-数値型同士は算術演算。文字列専用演算子（独自記号等）は存在しない。
+Note: String concatenation via the `+` operator is allowed (when both sides are
+`str`). This extends the existing `+` usage; no new string-specific operators
+are added.
+Numeric types use arithmetic operators. No string-specific operators (custom
+symbols etc.) exist.
 
 ---
 
-## 4. 型規則
+## 4. Type Rules
 
-### 4.1 基本型
+### 4.1 Basic Types
 
-| 型名 | 意味 |
-|------|------|
-| `int` | 符号付き整数 |
-| `float` | 浮動小数点 |
-| `bool` | 真偽値 |
-| `str` | UTF-8 文字列 |
-| `byte` | 1 バイト（UTF-8 操作向け） |
-| `char` | Unicode 文字単位 |
+| Type Name | Meaning |
+|-----------|---------|
+| `int` | Signed integer |
+| `float` | Floating point |
+| `bool` | Boolean |
+| `str` | UTF-8 string |
+| `byte` | One byte (for UTF-8 operations) |
+| `char` | Unicode codepoint unit |
 
-### 4.2 複合型
+### 4.2 Composite Types
 
-| 型構文 | 意味 |
-|--------|------|
-| `List(T)` | リスト（固定長・可変長を統一。例: `List(int)`） |
-| `Map(K, V)` | マップ |
-| `Set(T)` | 集合 |
-| `Tuple(T1, T2, ...)` | タプル |
-| `Option(T)` | Null 安全（`T?` 省略記法可） |
-| `Result(T, E)` | 成功/失敗の結果型。`Success(T)` / `Error(E)` の組（`Ok`/`Err` は不使用）。`state` 宣言不要の組み込み（既存の State + Generic 仕組みで実装）。 |
-| `State` 派生 | `state Name(T):` で定義 |
-| `Struct` 派生 | `struct User:` で定義 |
-| `Interface` 派生 | `interface Animal:` で定義 |
-| `T*` | Pointer（unsafe のみ） |
+| Type Syntax | Meaning |
+|-------------|---------|
+| `List(T)` | List (unified fixed/variable length. E.g., `List(int)`) |
+| `Map(K, V)` | Map |
+| `Set(T)` | Set |
+| `Tuple(T1, T2, ...)` | Tuple |
+| `Option(T)` | Null safety (`T?` shorthand allowed) |
+| `Result(T, E)` | Success/failure result type. A pair of `Success(T)` / `Error(E)` (`Ok`/`Err` not used). Built-in without requiring a `state` declaration (implemented via existing State + Generic mechanism). |
+| `State` derived | Defined via `state Name(T):` |
+| `Struct` derived | Defined via `struct User:` |
+| `Interface` derived | Defined via `interface Animal:` |
+| `T*` | Pointer (unsafe only) |
 
-注意: 配列・リストは `List(T)` に統一（固定長/可変長の区別は不要または Runtime が判断）。
+Note: Arrays and lists are unified as `List(T)` (fixed/variable length distinction is unnecessary or determined by the Runtime).
 
-### 4.3 型変換規則
+### 4.3 Type Conversion Rules
 
-- **暗黙変換: 全面禁止**。
-- **明示変換（関数形式）**:
-  - `int(x)`: x が float/str を受容 → int
-  - `float(x)`: x が int/str → float
-  - `str(x)`: 任意の表示可能値 → str
-  - `bool(x)`: **禁止**（数値→bool は不可）
-  - bool は比較演算の結果、または専用真偽値表現のみ。
-- **`int(float)` の変換規則（固定）**:
-  - 小数部分は **0 方向へ切り捨て（truncate）**。
-  - 例: `int(2.9) = 2` / `int(-2.9) = -2`
-  - Rust の `as i64`（`f64 as i64`）と同セマンティクス。
-- 変換失敗時は `Error` State を返す（後続で Error 伝播と合わせ決定）。
+- **Implicit conversion: completely forbidden**.
+- **Explicit conversion (function form)**:
+  - `int(x)`: x is float/str → int
+  - `float(x)`: x is int/str → float
+  - `str(x)`: any displayable value → str
+  - `bool(x)`: **forbidden** (numeric→bool is not allowed)
+  - bool is only available via comparison operator results or dedicated boolean expressions.
+- **`int(float)` conversion rules (fixed)**:
+  - The fractional part is **truncated toward 0**.
+  - Example: `int(2.9) = 2` / `int(-2.9) = -2`
+  - Same semantics as Rust's `as i64` (`f64 as i64`).
+- On conversion failure, returns an `Error` State (to be decided together with Error propagation later).
 
-### 4.4 String API の型
+### 4.4 String API Types
 
-| メソッド | 戻り型 |
-|----------|--------|
+| Method | Return Type |
+|--------|-------------|
 | `.bytes()` | `Array(byte)` |
 | `.chars()` | `Array(char)` |
 | `.slice(a, b)` | `str` |
-| `.len()` | `int`（Unicode 文字数） |
-| `.byte_len()` | `int`（バイト長） |
+| `.len()` | `int` (Unicode character count) |
+| `.byte_len()` | `int` (byte length) |
 
-### 4.5 Operator Interface（ユーザー定義型対象）
+### 4.5 Operator Interface (for user-defined types)
 
-| Interface | 対応演算子 | 解決メソッド | 戻り値解釈 |
-|-----------|-----------|-------------|-----------|
-| `Add` | `+` | `add` | そのまま（構造体） |
-| `Equal` | `==` `!=` | `equal` | bool（`!=` は否定） |
-| `Compare` | `<` `>` `<=` `>=` | `compare` | int の符号と比較（`<` : 符号<0 等） |
+| Interface | Operators | Resolved Method | Return Value Interpretation |
+|-----------|-----------|-----------------|----------------------------|
+| `Add` | `+` | `add` | As-is (struct) |
+| `Equal` | `==` `!=` | `equal` | bool (`!=` is negation) |
+| `Compare` | `<` `>` `<=` `>=` | `compare` | int sign comparison (`<` : sign<0 etc.) |
 
-`Sub` / `Mul` / `Div` は今後追加（順次拡張）。
-ユーザーは `fn add(...)` 等を実装するだけで演算子が使用可能（暗黙実装）。
-文字列は対象外（String API 経由）。組み込み数値・bool・文字列は従来の組み込み演算を維持。
+`Sub` / `Mul` / `Div` will be added later (incremental extension).
+Users only need to implement `fn add(...)` etc. to use operators (implicit
+implementation).
+Strings are excluded (use String API instead). Built-in numeric, bool, and
+string types maintain their existing built-in operations.
 
-命名は初心者にも役割が伝わること（Easy. Simple. Fast.）を優先：
-- `Eq` は略語で直感的でないため採用せず `Equal`。
-- `Ord` は "Order" の略で意味が伝わりにくいため採用せず `Compare`。
+Naming prioritizes clarity for beginners (Easy. Simple. Fast.):
+- `Eq` was not adopted because the abbreviation is not intuitive; `Equal` was chosen.
+- `Ord` was not adopted because "Order" abbreviation is unclear; `Compare` was chosen.
 
-#### 静的型解決（AST 格納方式）
+#### Static Type Resolution (AST Storage Method)
 
-演算子の解決は **TypeChecker のみ**が担当し、結果を AST の `BinOp.resolved_operator`
-に格納する。Interpreter / 将来の LLVM Backend はこの情報だけを見て実行し、
-**Runtime での型検索や Struct 名からの Interface 検索は一切行わない**。
+Operator resolution is performed **exclusively by the TypeChecker**, and the
+result is stored in `BinOp.resolved_operator` in the AST. The Interpreter /
+future LLVM Backend reads only this information to execute, and **performs no
+runtime type searches or Struct-name-based Interface searches**.
 
 ```
 BinOp:
-  - 左式
-  - 演算子
-  - 右式
+  - left expression
+  - operator
+  - right expression
   - resolved_operator: Option<ResolvedOperator>
 
 ResolvedOperator:
-  - Builtin                         # 組み込み型（int/float/str 等）の既存演算
-  - MethodCall { method, op }       # Operator Interface 経由（例: Add.add / Equal.equal / Compare.compare）
+  - Builtin                         # Existing operation for built-in types (int/float/str etc.)
+  - MethodCall { method, op }       # Via Operator Interface (e.g., Add.add / Equal.equal / Compare.compare)
 ```
 
-- ユーザー定義型（両辺が同一の struct）のみ Operator Interface を解決対象とする。
-- `!=` は `equal()` の結果を否定、`<` `>` `<=` `>=` は `compare()` の戻り int と 0 を比較して bool を生成。
-- 組み込み型は解決せず `Builtin` とする（既存演算を維持）。
+- Only user-defined types (both sides are the same struct) are resolved via Operator Interface.
+- `!=` negates the `equal()` result; `<` `>` `<=` `>=` compare the `compare()` return int against 0 to produce a bool.
+- Built-in types are not resolved and remain `Builtin` (maintaining existing operations).
 
 ### 4.6 Generic / Constraint
 
@@ -221,26 +228,26 @@ type_params    ::= "(" ident ("," ident)* ")"
 constraint     ::= ident "where" ident ":" ident ("," ident ":" ident)*
 ```
 
-例: `fn max(List(T where T: Compare)): T:`
+Example: `fn max(List(T where T: Compare)): T:`
 
 ---
 
-## 5. 制御構造の型
+## 5. Control Structure Types
 
 ### 5.1 if
 
-- 条件式は **必ず括弧で囲む**: `if (cond):`
-- 条件式の型は `bool` 必須（暗黙変換なし）。
-- then / else ブロックの最後の式が戻り値型に整合すれば OK。
+- The condition **must always be wrapped in parentheses**: `if (cond):`
+- The condition type must be `bool` (no implicit conversion).
+- The last expression in the then/else block must match the return value type.
 
 ### 5.2 match
 
-- 対象式の型は `State` 派生必須。
-- 全 variant を網羅（不足はコンパイルエラー）。
-- `else` 禁止。
-- 各腕の binding は `Ignore` で破棄可能。
+- The subject expression type must be a `State` derivative.
+- All variants must be covered (missing variants cause a compile error).
+- `else` is forbidden.
+- Each arm's binding can be discarded with `Ignore`.
 
-### 5.3 ループ（後続実装）
+### 5.3 Loops (later implementation)
 
 ```
 loop_stmt     ::= "for" ident "in" expr ":" block
@@ -251,25 +258,25 @@ range         ::= expr ".." expr
 
 ---
 
-## 6. 演算子仕様
+## 6. Operator Specification
 
-### 6.1 演算子一覧
+### 6.1 Operator List
 
-算術演算子:
+Arithmetic operators:
 - `+` `-` `*` `/` `%`
 
-比較演算子:
+Comparison operators:
 - `==` `!=` `<` `>` `<=` `>=`
 
-論理演算子（単語形式）:
+Logical operators (word form):
 - `and` `or` `not`
-- `&&` `||` `!` は使用しない。
+- `&&` `||` `!` are not used.
 
-### 6.2 条件式の括弧必須
+### 6.2 Parentheses Required for Conditions
 
-`if` / `while` 等の条件式は必ず括弧で囲む。
+Conditions in `if` / `while` etc. must always be wrapped in parentheses.
 
-例:
+Example:
 ```
 if (a >= 10 and b != 0):
     ...
@@ -278,15 +285,15 @@ while (count < 10):
     ...
 ```
 
-理由:
-- 演算子優先順位への依存を減らす
-- 可読性向上
-- パーサ実装の単純化
-- 初心者向け設計と一致
+Reasons:
+- Reduce dependency on operator precedence
+- Improve readability
+- Simplify parser implementation
+- Align with beginner-friendly design
 
-### 6.3 演算子優先順位（推奨仕様）
+### 6.3 Operator Precedence (recommended spec)
 
-高い方から:
+From highest to lowest:
 1. `not`
 2. `*` `/` `%`
 3. `+` `-`
@@ -295,109 +302,109 @@ while (count < 10):
 6. `and`
 7. `or`
 
-ただし括弧による明示指定を推奨する。
+However, explicit specification via parentheses is recommended.
 
 ---
 
-## 7. Async（決定事項）
+## 7. Async (Decided Items)
 
-一般関数も非同期になり得る。`List()` に統一された Collection 仕様に合わせ、
-非同期関数は `lime` キーワードで宣言。
+Regular functions can also be asynchronous. To align with the Collection spec
+unified under `List()`, async functions are declared with the `lime` keyword.
 
 ```
 async_fn      ::= "lime" ident "(" param_list? ")" type? ":" block
 await_expr    ::= "await" call_expr
 ```
 
-- 通常関数: `fn function():`
-- 非同期関数: `lime function():`
+- Regular functions: `fn function():`
+- Async functions: `lime function():`
 - `let data = await request("url")`
-- `async` 予約語は使用しない（Lime 独自構文）。
-- 通常関数（`fn`）は非同期処理へ参加不可。`await` の使用は `lime` 関数内のみ許可。
-- await 可能な呼び出し規則や Runtime 上の詳細な扱いは、後続の Async / Runtime 設計で具体化。
+- The `async` reserved keyword is not used (Lime uses its own syntax).
+- Regular functions (`fn`) cannot participate in async processing. `await` usage is only allowed inside `lime` functions.
+- Callable rules and detailed Runtime behavior for await will be specified in the Async / Runtime design.
 
 ---
 
-## 7. Memory 指定（実装済み: Step 9）
+## 7. Memory Specification (implemented: Step 9)
 
-基本方針: GC なし。ユーザーに所有権・ライフタイムを書かせない。コンパイラ内部で
-自動 Memory 管理を行う。デフォルトでは Escape Analysis によって Stack / Heap を決定する。
-Memory 情報はコンパイル時に決定し、Runtime 検索はしない。
+Basic principle: No GC. Users are not required to write ownership/lifetime
+annotations. The compiler handles automatic memory management internally.
+By default, Escape Analysis determines Stack / Heap placement.
+Memory information is determined at compile time; no Runtime lookups.
 
-配置規則:
-- Stack 配置: 関数内のみで使用 / return されない / callback へ渡されない / Heap 上の
-  データへ保存されない値。
-- Heap 配置: 関数外へ Escape する値 / 非同期処理で保持される値 / 長寿命データ。
+Placement rules:
+- Stack: values used only within the function / not returned / not passed to callbacks / not stored in Heap data.
+- Heap: values that escape the function / values held across async processing / long-lived data.
 
-構文（明示指定）:
-- `let User(heap): user = User("Alice")`  → 必ず Heap 配置
-- `let User(stack): point = Point(1, 2)` → 必ず Stack 配置
-- 明示なし `let User: user = ...`          → Escape Analysis で自動判定
+Syntax (explicit specification):
+- `let User(heap): user = User("Alice")`  → always Heap
+- `let User(stack): point = Point(1, 2)` → always Stack
+- No explicit spec `let User: user = ...`          → automatic via Escape Analysis
 
-Escape 判定（コンパイラ内部）:
-- 値が `return` される → Escape（Heap）
-- `lime` 関数内で `await` の引数に渡される / `await` 以降に使用される → Heap frame に保持
-- Lime には closure / callback / グローバル変数がないため、通常の関数呼び出しの実引数は
-  Escape とみなさない（コンパイラが賢く管理）
+Escape determination (compiler internal):
+- Value is `return`ed → Escape (Heap)
+- Passed as argument to `await` in a `lime` function / used after `await` → held in Heap frame
+- Since Lime has no closures / callbacks / global variables, actual arguments of
+  normal function calls are not considered Escape (compiler manages intelligently)
 
-制約（コンパイルエラー）:
-- `stack` 指定した値が Escape する場合（return / await 保持）は
-  `Memory error: '<name>' is explicitly placed on the stack but escapes ...` となる。
+Constraints (compile errors):
+- If a `stack`-specified value escapes (return / await hold),
+  `Memory error: '<name>' is explicitly placed on the stack but escapes ...` is produced.
 
-Struct: 基本は値型。Non-Escape なら Stack、Escape 時のみ Heap。
-List: 本体(header)は通常 Stack 可能、内部 Buffer は Heap 管理（List(T) として扱う）。
-Option / Result: 内部値の Memory 性質に追従、特別扱いしない（既存 State + Generic を維持）。
-Generic: 型置換後に Memory 解析する。Generic 専用 Memory 規則は追加しない。
-Async: Future / Async frame は Heap 配置。lime 関数の状態保持領域は Runtime 管理。
+Struct: primarily value type. Non-Escape = Stack; only Heap on Escape.
+List: header can typically be Stack; internal buffer is Heap-managed (treated as `List(T)`).
+Option / Result: follows the Memory properties of the internal value, no special handling (maintains existing State + Generic).
+Generic: Memory analysis is performed after type substitution. No generic-specific Memory rules are added.
+Async: Future / Async frames are Heap-allocated. State-holding areas in lime functions are Runtime-managed.
 
-解析フロー:
+Analysis flow:
 ```
-AST → TypeChecker → Memory Analysis(Escape Analysis) → (LLVM)
+AST → TypeChecker → Memory Analysis (Escape Analysis) → (LLVM)
 ```
 
 ---
 
-## 8. 禁止事項（この仕様書でも維持）
+## 8. Prohibitions (maintained in this spec)
 
-- Rust 化（'a / lifetime 注釈 / borrow checker 公開）
-- C++ 化（継承 / template 自由定義 / operator 過剰）
+- Rust-ification ('a / lifetime annotations / borrow checker exposure)
+- C++-ification (inheritance / free template definitions / operator overuse)
 - self / this
-- impl ブロック形式
-- 暗黙型変換（数値→bool 含む）
-- 文字列専用演算子
+- impl block form
+- Implicit type conversions (including numeric→bool)
+- String-specific operators
 - match else
-- `_` による Ignore（代わりに `Ignore`）
+- `_` for Ignore (use `Ignore` instead)
 
 ---
 
-## 9. Type Checker との整合
+## 9. Type Checker Consistency
 
-現在の試作 TypeChecker は以下をカバー:
-- 基本型リテラル / 変数 / Binary / Call / Struct constructor /
-  FieldAccess / MethodCall / State constructor の型検査
-- Struct フィールド型検査
-- 関数引数・戻り値型検査
-- Match 網羅性検査
+The current prototype TypeChecker covers:
+- Basic type literals / variables / Binary / Call / Struct constructor /
+  FieldAccess / MethodCall / State constructor type checking
+- Struct field type checking
+- Function argument / return value type checking
+- Match exhaustiveness checking
 
-未実装（後続ステップ）:
-- Pointer / unsafe 型
-- 明示変換 `int(x)` 等の組込み型定義
-- LLVM 統合（現在は Memory 解析結果をデバッグ出力 `=== Memory ===` として報告）
+Not yet implemented (later steps):
+- Pointer / unsafe types
+- Built-in type definitions for explicit conversions like `int(x)`
+- LLVM integration (currently Memory analysis results are reported as debug output `=== Memory ===`)
 
 ---
 
-## 10. 次ステップ（実装順）
+## 10. Next Steps (implementation order)
 
-この EBNF + 型規則を基に、試作へ以下の順で実装:
-1. 明示変換 API（int/float/str）
-2. String API（.len/.byte_len/.chars/.bytes/.slice）
-3. Collections（List 統一 + リテラル + 型）
-4. ループ（for / while / range）
-5. Option（T? / Match）
-6. Generic（Result(T) / Box(T) / Constraint）
-7. Interface（暗黙実装 + Operator Interface）
- 8. Async（lime 関数 + await）[実装済み]
- 9. Memory 解析（Escape / Lifetime / Stack-Heap）[実装済み]
- 10. LLVM 統合
+Based on this EBNF + type rule, implement the prototype in the following order:
+1. Explicit conversion API (int/float/str)
+2. String API (.len/.byte_len/.chars/.bytes/.slice)
+3. Collections (List unification + literals + types)
+4. Loops (for / while / range)
+5. Option (T? / Match)
+6. Generic (Result(T) / Box(T) / Constraint)
+7. Interface (implicit implementation + Operator Interface)
+ 8. Async (lime functions + await) [implemented]
+ 9. Memory analysis (Escape / Lifetime / Stack-Heap) [implemented]
+ 10. LLVM integration
 
-禁止事項は全段階で維持。
+Prohibitions are maintained at all stages.
