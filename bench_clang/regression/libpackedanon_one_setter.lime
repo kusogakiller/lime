@@ -1,0 +1,4 @@
+extern fn pka_set_head(Opaque(PackedAnon): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_set_head"
+
+fn main():
+    print("TEST\n")

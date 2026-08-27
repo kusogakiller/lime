@@ -1,0 +1,12 @@
+{
+  "library": "libfreshprobe (ABI fixture, Iteration-29 shape)",
+  "version": "0.1.0",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "functions": [
+    { "name": "fresh_add", "params": ["Int"], "ret": "Int", "symbol": "fresh_add" },
+    { "name": "fresh_make", "params": [], "ret": "Opaque(FreshProbe)", "symbol": "fresh_make" },
+    { "name": "fresh_hmake", "params": [], "ret": "Opaque(FreshHandle_)", "symbol": "fresh_hmake" }
+  ],
+  "required_symbols": ["fresh_add", "fresh_make", "fresh_hmake"]
+}

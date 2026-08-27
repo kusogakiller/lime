@@ -1,0 +1,13 @@
+// Level 3: branching (nested if/else ? else-if is not supported)
+fn level_of(int: score):
+    if score >= 80:
+        println("HIGH")
+    else:
+        if score >= 50:
+            println("MEDIUM")
+        else:
+            println("LOW")
+fn main():
+    level_of(92)
+    level_of(60)
+    level_of(10)

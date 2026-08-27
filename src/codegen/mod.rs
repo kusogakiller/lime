@@ -11,30 +11,37 @@
 //   fn_builder.rs / structs.rs / calls.rs / generic.rs / interface.rs /
 //   async_rt.rs / runtime/ ... (Phase 1+ 縺ｯ頒ｦ)
 
-pub mod types;
 pub mod fn_builder;
+pub mod types;
 
 use crate::Defs;
-use crate::Stmt;
 use crate::Expr;
 use crate::FunctionDef;
 use crate::MemoryPlace;
+use crate::Stmt;
 use crate::Type;
+use crate::codegen::types::llvm_type_name;
 use crate::type_from_str;
 use std::collections::HashMap;
-use crate::codegen::types::llvm_type_name;
 
 const DEFAULT_TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 const LIME_MAIN: &str = "main_lime";
 
-pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPlace>) -> (String, Vec<String>) {
+pub fn emit_llvm(
+    stmts: &[Stmt],
+    defs: &Defs,
+    memory: &HashMap<String, MemoryPlace>,
+) -> (String, Vec<String>) {
     let _ = stmts;
     let mut out = String::new();
     let mut warnings: Vec<String> = Vec::new();
 
     out.push_str("; ModuleID = 'lime'\n");
     out.push_str("source_filename = \"lime\"\n");
-    out.push_str(&format!("target triple = \"{}\"\n\n", DEFAULT_TARGET_TRIPLE));
+    out.push_str(&format!(
+        "target triple = \"{}\"\n\n",
+        DEFAULT_TARGET_TRIPLE
+    ));
 
     // Runtime aggregate types must precede any declaration that uses them
     // (LLVM rejects forward-referenced struct types in function signatures).
@@ -78,7 +85,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_str_from_i64(i64)\n");
     out.push_str("declare i8* @runtime_str_from_f64(double)\n");
     out.push_str("declare i8* @runtime_str_from_bool(i1)\n");
-    out.push_str("declare i64 @runtime_str_byte(i8* nocapture readonly, i64) nounwind willreturn\n");
+    out.push_str(
+        "declare i64 @runtime_str_byte(i8* nocapture readonly, i64) nounwind willreturn\n",
+    );
     out.push_str("declare i8* @runtime_str_new(i64)\n");
     out.push_str("declare i8* @runtime_str_from_byte(i64)\n");
     out.push_str("declare i8* @runtime_str_push_byte(i8*, i64)\n");
@@ -184,7 +193,6 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i64 @runtime_stack_len(ptr)\n");
     out.push_str("declare i32 @runtime_stack_is_empty(ptr)\n");
     out.push_str("declare void @runtime_stack_clear(ptr sret(%LimeList), ptr)\n");
-
 
     // Phase B-2.2: closure / function-value runtime helpers
     out.push_str("declare %LimeClosure* @runtime_make_closure(i8*, i8*)\n");
@@ -303,7 +311,9 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     out.push_str("declare i8* @runtime_requests_multipart_new()\n");
     out.push_str("declare i32 @runtime_requests_multipart_text(i8*, i8*, i8*)\n");
     out.push_str("declare i32 @runtime_requests_multipart_file(i8*, i8*, i8*)\n");
-    out.push_str("declare i32 @runtime_requests_multipart_file_with_metadata(i8*, i8*, i8*, i8*, i8*)\n");
+    out.push_str(
+        "declare i32 @runtime_requests_multipart_file_with_metadata(i8*, i8*, i8*, i8*, i8*)\n",
+    );
     out.push_str("declare i8* @runtime_requests_tls_config_new()\n");
     out.push_str("declare i32 @runtime_requests_tls_config_add_ca_cert(i8*, i8*)\n");
     out.push_str("declare i32 @runtime_requests_tls_config_add_client_cert(i8*, i8*, i8*)\n");
@@ -375,7 +385,17 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
     emit_extern_declarations(&mut out, defs);
 
     // Phase 5: collect string literals and emit globals
-    let string_literals = collect_string_literals(defs);
+
+    let mut string_literals = collect_string_literals(defs);
+    // Iteration 34 PH4: register enum variant names as string globals so
+    // println(enum_value) can print the variant name natively.
+    for (_base, variants) in &defs.states {
+        for v in variants {
+            string_literals
+                .entry(v.clone())
+                .or_insert_with(|| format!(".str.var.{}", v));
+        }
+    }
     for (s, name) in &string_literals {
         let len = s.len() + 1;
         let escaped = escape_llvm_string(s);
@@ -393,7 +413,15 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
 
     // Emit monomorphized function definitions first
     for (mangled, mono_fdef) in &mono_fdefs {
-        let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, mangled, mono_fdef);
+        let (func_ir, fw) = fn_builder::codegen_function(
+            defs,
+            memory,
+            &string_literals,
+            &mono_name_map,
+            &mono_fdefs,
+            mangled,
+            mono_fdef,
+        );
         out.push_str(&func_ir);
         warnings.extend(fw);
     }
@@ -403,7 +431,15 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
         if !fdef.type_params.is_empty() {
             continue;
         }
-        let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, name, fdef);
+        let (func_ir, fw) = fn_builder::codegen_function(
+            defs,
+            memory,
+            &string_literals,
+            &mono_name_map,
+            &mono_fdefs,
+            name,
+            fdef,
+        );
         out.push_str(&func_ir);
         warnings.extend(fw);
     }
@@ -426,7 +462,15 @@ pub fn emit_llvm(stmts: &[Stmt], defs: &Defs, memory: &HashMap<String, MemoryPla
                 body: mdef.body.clone(),
                 is_async: false,
             };
-            let (func_ir, fw) = fn_builder::codegen_function(defs, memory, &string_literals, &mono_name_map, &mono_fdefs, &method_func_name, &method_fdef);
+            let (func_ir, fw) = fn_builder::codegen_function(
+                defs,
+                memory,
+                &string_literals,
+                &mono_name_map,
+                &mono_fdefs,
+                &method_func_name,
+                &method_fdef,
+            );
             out.push_str(&func_ir);
             warnings.extend(fw);
         }
@@ -477,18 +521,29 @@ fn collect_string_literals(defs: &Defs) -> HashMap<String, String> {
     strings
 }
 
-fn collect_strings_from_stmts(stmts: &[Stmt], strings: &mut HashMap<String, String>, idx: &mut usize) {
+fn collect_strings_from_stmts(
+    stmts: &[Stmt],
+    strings: &mut HashMap<String, String>,
+    idx: &mut usize,
+) {
     for s in stmts {
         match s {
             Stmt::Let { value, .. } => collect_strings_from_expr(value, strings, idx),
-            Stmt::Return { explicit_type: _, value } => {
+            Stmt::Return {
+                explicit_type: _,
+                value,
+            } => {
                 if let Some(e) = value {
                     collect_strings_from_expr(e, strings, idx);
                 }
             }
             Stmt::Expr(e) => collect_strings_from_expr(e, strings, idx),
             Stmt::Assign { value, .. } => collect_strings_from_expr(value, strings, idx),
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 collect_strings_from_expr(cond, strings, idx);
                 collect_strings_from_stmts(then_branch, strings, idx);
                 if let Some(eb) = else_branch {
@@ -581,11 +636,19 @@ fn monomorphize_type_str(t: &str, type_params: &[String], type_args: &[&str]) ->
     result
 }
 
-fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: &[&str]) -> FunctionDef {
-    let params: Vec<(String, String)> = fdef.params.iter()
+fn monomorphize_function(
+    fdef: &FunctionDef,
+    type_params: &[String],
+    type_args: &[&str],
+) -> FunctionDef {
+    let params: Vec<(String, String)> = fdef
+        .params
+        .iter()
         .map(|(n, t)| (n.clone(), monomorphize_type_str(t, type_params, type_args)))
         .collect();
-    let return_type = fdef.return_type.as_ref()
+    let return_type = fdef
+        .return_type
+        .as_ref()
         .map(|rt| monomorphize_type_str(rt, type_params, type_args));
     FunctionDef {
         type_params: Vec::new(),
@@ -606,7 +669,9 @@ fn monomorphize_all(defs: &Defs) -> (HashMap<String, String>, HashMap<String, Fu
     let mut done: HashMap<String, bool> = HashMap::new();
 
     while let Some(name) = worklist.pop() {
-        if done.contains_key(&name) { continue; }
+        if done.contains_key(&name) {
+            continue;
+        }
         done.insert(name.clone(), true);
 
         let fdef = match defs.functions.get(&name) {
@@ -614,7 +679,13 @@ fn monomorphize_all(defs: &Defs) -> (HashMap<String, String>, HashMap<String, Fu
             None => continue,
         };
 
-        collect_mono_from_stmts(&fdef.body, defs, &mut mono_name_map, &mut mono_fdefs, &mut worklist);
+        collect_mono_from_stmts(
+            &fdef.body,
+            defs,
+            &mut mono_name_map,
+            &mut mono_fdefs,
+            &mut worklist,
+        );
     }
 
     (mono_name_map, mono_fdefs)
@@ -629,15 +700,26 @@ fn collect_mono_from_stmts(
 ) {
     for s in stmts {
         match s {
-            Stmt::Let { value, .. } => collect_mono_from_expr(value, defs, mono_name_map, mono_fdefs, worklist),
-            Stmt::Return { explicit_type: _, value } => {
+            Stmt::Let { value, .. } => {
+                collect_mono_from_expr(value, defs, mono_name_map, mono_fdefs, worklist)
+            }
+            Stmt::Return {
+                explicit_type: _,
+                value,
+            } => {
                 if let Some(e) = value {
                     collect_mono_from_expr(e, defs, mono_name_map, mono_fdefs, worklist);
                 }
             }
             Stmt::Expr(e) => collect_mono_from_expr(e, defs, mono_name_map, mono_fdefs, worklist),
-            Stmt::Assign { value, .. } => collect_mono_from_expr(value, defs, mono_name_map, mono_fdefs, worklist),
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::Assign { value, .. } => {
+                collect_mono_from_expr(value, defs, mono_name_map, mono_fdefs, worklist)
+            }
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 collect_mono_from_expr(cond, defs, mono_name_map, mono_fdefs, worklist);
                 collect_mono_from_stmts(then_branch, defs, mono_name_map, mono_fdefs, worklist);
                 if let Some(eb) = else_branch {
@@ -696,14 +778,18 @@ fn collect_mono_from_expr(
             collect_mono_from_expr(left, defs, mono_name_map, mono_fdefs, worklist);
             collect_mono_from_expr(right, defs, mono_name_map, mono_fdefs, worklist);
         }
-        Expr::UnOp { operand, .. } => collect_mono_from_expr(operand, defs, mono_name_map, mono_fdefs, worklist),
+        Expr::UnOp { operand, .. } => {
+            collect_mono_from_expr(operand, defs, mono_name_map, mono_fdefs, worklist)
+        }
         Expr::MethodCall { object, args, .. } => {
             collect_mono_from_expr(object, defs, mono_name_map, mono_fdefs, worklist);
             for a in args {
                 collect_mono_from_expr(a, defs, mono_name_map, mono_fdefs, worklist);
             }
         }
-        Expr::FieldAccess { object, .. } => collect_mono_from_expr(object, defs, mono_name_map, mono_fdefs, worklist),
+        Expr::FieldAccess { object, .. } => {
+            collect_mono_from_expr(object, defs, mono_name_map, mono_fdefs, worklist)
+        }
         Expr::Array(items) => {
             for it in items {
                 collect_mono_from_expr(it, defs, mono_name_map, mono_fdefs, worklist);
@@ -713,7 +799,9 @@ fn collect_mono_from_expr(
             collect_mono_from_expr(start, defs, mono_name_map, mono_fdefs, worklist);
             collect_mono_from_expr(end, defs, mono_name_map, mono_fdefs, worklist);
         }
-        Expr::Await(inner) => collect_mono_from_expr(inner, defs, mono_name_map, mono_fdefs, worklist),
+        Expr::Await(inner) => {
+            collect_mono_from_expr(inner, defs, mono_name_map, mono_fdefs, worklist)
+        }
         _ => {}
     }
 }
@@ -727,7 +815,11 @@ fn emit_aggregate_decls(out: &mut String, defs: &Defs) {
             .iter()
             .map(|(_, ftype)| llvm_type_name(&type_from_str(ftype, defs)))
             .collect();
-        out.push_str(&format!("%{} = type {{ {} }}\n", sname, field_tys.join(", ")));
+        out.push_str(&format!(
+            "%{} = type {{ {} }}\n",
+            sname,
+            field_tys.join(", ")
+        ));
     }
     // state declarations as tagged unions (Phase 4)
     for sname in defs.states.keys() {
@@ -754,9 +846,15 @@ fn emit_extern_declarations(out: &mut String, defs: &Defs) {
             // pick the element that is a known scalar keyword, else the element
             // that is NOT the parameter name (struct types are not valid names
             // in the scalar set, so the type is the non-name element).
-            let ptype = if matches!(first.as_str(), "Int" | "Float" | "String" | "Bool" | "Unit" | "Void") {
+            let ptype = if matches!(
+                first.as_str(),
+                "Int" | "Float" | "String" | "Bool" | "Unit" | "Void"
+            ) {
                 first.clone()
-            } else if matches!(second.as_str(), "Int" | "Float" | "String" | "Bool" | "Unit" | "Void") {
+            } else if matches!(
+                second.as_str(),
+                "Int" | "Float" | "String" | "Bool" | "Unit" | "Void"
+            ) {
                 second.clone()
             } else if first == "Point" || first == "Widget" || first.starts_with("__") {
                 // first is the struct type name (type, name) ordering
@@ -777,11 +875,19 @@ fn emit_extern_declarations(out: &mut String, defs: &Defs) {
             if is_this_return {
                 let mut decls = vec!["ptr".to_string()];
                 decls.extend(param_decls);
-                out.push_str(&format!("declare void @\"{}\"({})\n", symbol, decls.join(", ")));
+                out.push_str(&format!(
+                    "declare void @\"{}\"({})\n",
+                    symbol,
+                    decls.join(", ")
+                ));
             } else {
                 let mut decls = vec![format!("ptr sret({})", llvm_type_name(&rt))];
                 decls.extend(param_decls);
-                out.push_str(&format!("declare void @\"{}\"({})\n", symbol, decls.join(", ")));
+                out.push_str(&format!(
+                    "declare void @\"{}\"({})\n",
+                    symbol,
+                    decls.join(", ")
+                ));
             }
         } else {
             out.push_str(&format!(

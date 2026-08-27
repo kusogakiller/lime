@@ -1,0 +1,36 @@
+[package]
+name = "libpackedanon"
+version = "0.1.0"
+source = "local"
+
+[build]
+c = ["libpackedanon.c"]
+include_dirs = []
+
+[abi]
+calling_convention = "default"
+
+[slice]
+functions = [
+    "pka_make",
+    "pka_free",
+    "pka_get_head",
+    "pka_set_head",
+    "pka_get_x",
+    "pka_set_x",
+    "pka_get_y",
+    "pka_set_y",
+    "pka_get_tail",
+    "pka_set_tail",
+    "pka_bit_make",
+    "pka_bit_free",
+    "pka_bit_get_lead",
+    "pka_bit_set_lead",
+    "pka_bit_get_a",
+    "pka_bit_set_a",
+    "pka_bit_get_b",
+    "pka_bit_set_b",
+    "pka_bit_get_trail",
+    "pka_bit_set_trail",
+    "pka_link_anchor"
+]

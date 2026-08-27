@@ -31,7 +31,7 @@ pub fn llvm_type_name(ty: &Type) -> String {
         Type::Interface(_, _) => "%LimeIface".to_string(),
         Type::Array(_) => "i8*".to_string(), // Phase 0: placeholder
         Type::Slice(_) => "i8*".to_string(), // Phase 0: placeholder
-        Type::Tuple(_) => "i64".to_string(), // Phase 0: placeholder
+        Type::Tuple(tys) => format!("[{} x i64]", tys.len().max(1)), // Iteration 34: elements are i64-slot aggregates
         Type::Fn(_, _) => "i8*".to_string(), // function values are opaque pointers
         // Task #2 (Charger FFI): an opaque C pointer handle is a bare address.
         // Spelled `i8*` rather than `ptr` for the same reason `Type::String` and
@@ -43,7 +43,7 @@ pub fn llvm_type_name(ty: &Type) -> String {
         Type::Opaque(_) => "i8*".to_string(),
         Type::Unit => "void".to_string(),
         Type::Unknown => "i64".to_string(), // Phase 0: placeholder
-        Type::Var(_) => "i64".to_string(), // Phase 0: monomorphization
+        Type::Var(_) => "i64".to_string(),  // Phase 0: monomorphization
         Type::Json => "i8*".to_string(), // JSON values are opaque pointers 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
     }
 }

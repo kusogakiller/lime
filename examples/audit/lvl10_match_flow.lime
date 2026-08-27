@@ -1,0 +1,22 @@
+// Level 10: match driving behavior on struct-with-enum-field
+enum St:
+    Todo
+    Done
+    Failed(int)
+struct Task:
+    int: id
+    St: st
+fn action(Task: t):
+    match t.st:
+        Todo:
+            println("start task")
+        Done:
+            println("archive task")
+        Failed(code):
+            println("alert on")
+            println(code)
+fn main():
+    let t1 = Task(1, Todo)
+    let t2 = Task(2, Failed(500))
+    action(t1)
+    action(t2)

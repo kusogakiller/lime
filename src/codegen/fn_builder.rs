@@ -15,17 +15,20 @@
 // (Phase 0 縺ｮ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ ret <zero> 縺ｾ縺ｧ繧｢蜷阪→)
 
 use crate::Defs;
+
+// Iteration 33 P2.3: module-wide unique counter for anonymous closure wrappers.
+static ANON_GLOBAL_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+use super::types::{align_of, is_float, llvm_type_name, zero_value_for_type};
 use crate::Expr;
-use crate::Stmt;
-use crate::Type;
 use crate::FunctionDef;
-use crate::StructDef;
-use crate::Pattern;
 use crate::MemoryPlace;
-use crate::type_from_str;
+use crate::Pattern;
 use crate::ResolvedOperator;
+use crate::Stmt;
+use crate::StructDef;
+use crate::Type;
+use crate::type_from_str;
 use std::collections::HashMap;
-use super::types::{llvm_type_name, is_float, align_of, zero_value_for_type};
 
 struct Cg<'a> {
     out: String,
@@ -43,7 +46,6 @@ struct Cg<'a> {
     warnings: Vec<String>,
     fn_ret_ty: String,
     pending_fns: Vec<String>,
-    anon_count: usize,
     /// Phase B.1: string-length trackers (ACTIVE). Maps a string variable name
     /// to the alloca (i64*) holding its currently-known length. ONLY populated
     /// once we actually see `var = var.push_byte(...)` on a pending variable.
@@ -80,7 +82,13 @@ struct Cg<'a> {
 }
 
 impl<'a> Cg<'a> {
-    fn new(defs: &'a Defs, memory: &'a HashMap<String, MemoryPlace>, string_literals: &'a HashMap<String, String>, mono_name_map: &'a HashMap<String, String>, mono_fdefs: &'a HashMap<String, FunctionDef>) -> Self {
+    fn new(
+        defs: &'a Defs,
+        memory: &'a HashMap<String, MemoryPlace>,
+        string_literals: &'a HashMap<String, String>,
+        mono_name_map: &'a HashMap<String, String>,
+        mono_fdefs: &'a HashMap<String, FunctionDef>,
+    ) -> Self {
         Cg {
             out: String::new(),
             defs,
@@ -97,7 +105,6 @@ impl<'a> Cg<'a> {
             warnings: Vec::new(),
             fn_ret_ty: "void".to_string(),
             pending_fns: Vec::new(),
-            anon_count: 0,
             string_len_trackers: HashMap::new(),
             pending_len_trackers: HashMap::new(),
             var_range: HashMap::new(),
@@ -126,11 +133,7 @@ impl<'a> Cg<'a> {
     /// duplicate terminators after it.
     fn block_terminated(&self) -> bool {
         let trimmed = self.out.trim_end();
-        let last = trimmed
-            .rsplit('\n')
-            .next()
-            .unwrap_or("")
-            .trim();
+        let last = trimmed.rsplit('\n').next().unwrap_or("").trim();
         last.starts_with("ret ")
             || last.starts_with("br ")
             || last.starts_with("switch ")
@@ -173,13 +176,29 @@ impl<'a> Cg<'a> {
 
         // 蝗ｲ繧險ｱ蜿ｯ: 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・蝗ｲ繧縺ｮ縺ｿ縺ｪ縺・縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
         if !body_supported(&fdef.body) {
+            // Iteration 33 P2.1: an unsupported body previously emitted this
+            // silent stub (`ret void` / ret zero) with NO warning, producing
+            // "ok:" builds whose executables did nothing at runtime
+            // (measured: for-in loops, tuple let-bindings). Record a warning
+            // so compile_pipeline's existing refusal guard rejects object
+            // generation LOUDLY instead of silently.
+            self.warnings.push(format!(
+                "{}: body uses constructs not supported by native codegen — refusing to emit a stub",
+                name
+            ));
             // Phase 1 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・ stub (Phase 0 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・)
             let mut s = String::new();
             if ret_ty == "void" {
                 s.push_str("  ret void\n");
             } else {
-                s.push_str(&format!("  ret {} {}\n", ret_ty, zero_value_for_type(&type_from_str(
-                    fdef.return_type.as_deref().unwrap_or(""), self.defs))));
+                s.push_str(&format!(
+                    "  ret {} {}\n",
+                    ret_ty,
+                    zero_value_for_type(&type_from_str(
+                        fdef.return_type.as_deref().unwrap_or(""),
+                        self.defs
+                    ))
+                ));
             }
             return format!("{}{}}}\n", head, s);
         }
@@ -195,11 +214,17 @@ impl<'a> Cg<'a> {
             pidx += 1;
             param_allocs.push_str(&format!(
                 "  {} = alloca {}, align {}\n",
-                ptr, llty, align_of(&ty)
+                ptr,
+                llty,
+                align_of(&ty)
             ));
             param_allocs.push_str(&format!(
                 "  store {} {}, {}* {}, align {}\n",
-                llty, val, llty, ptr, align_of(&ty)
+                llty,
+                val,
+                llty,
+                ptr,
+                align_of(&ty)
             ));
             self.env.insert(pname.clone(), ty);
             self.named.insert(pname.clone(), ptr);
@@ -220,7 +245,10 @@ impl<'a> Cg<'a> {
                         let self_loaded = self.fresh_temp();
                         field_extracts.push_str(&format!(
                             "  {} = load {}, {}* {}, align {}\n",
-                            self_loaded, self_llty, self_llty, self_ptr,
+                            self_loaded,
+                            self_llty,
+                            self_llty,
+                            self_ptr,
                             align_of(&Type::Struct(sname.clone()))
                         ));
                         for (i, (fname, ftype)) in sdef.fields.iter().enumerate() {
@@ -234,11 +262,17 @@ impl<'a> Cg<'a> {
                             let fptr = self.fresh_temp();
                             field_extracts.push_str(&format!(
                                 "  {} = alloca {}, align {}\n",
-                                fptr, ll_field_ty, align_of(&field_ty)
+                                fptr,
+                                ll_field_ty,
+                                align_of(&field_ty)
                             ));
                             field_extracts.push_str(&format!(
                                 "  store {} {}, {}* {}, align {}\n",
-                                ll_field_ty, ftmp, ll_field_ty, fptr, align_of(&field_ty)
+                                ll_field_ty,
+                                ftmp,
+                                ll_field_ty,
+                                fptr,
+                                align_of(&field_ty)
                             ));
                             self.env.insert(fname.clone(), field_ty);
                             self.named.insert(fname.clone(), fptr);
@@ -263,8 +297,14 @@ impl<'a> Cg<'a> {
             if ret_ty == "void" {
                 self.out.push_str("  ret void\n");
             } else {
-                self.out.push_str(&format!("  ret {} {}\n", ret_ty, zero_value_for_type(&type_from_str(
-                    fdef.return_type.as_deref().unwrap_or(""), self.defs))));
+                self.out.push_str(&format!(
+                    "  ret {} {}\n",
+                    ret_ty,
+                    zero_value_for_type(&type_from_str(
+                        fdef.return_type.as_deref().unwrap_or(""),
+                        self.defs
+                    ))
+                ));
             }
         }
         self.out.push_str("}\n");
@@ -286,7 +326,13 @@ impl<'a> Cg<'a> {
 
     fn codegen_stmt(&mut self, s: &Stmt) -> Result<(), String> {
         match s {
-            Stmt::Let { name, value, place, type_hint, .. } => {
+            Stmt::Let {
+                name,
+                value,
+                place,
+                type_hint,
+                ..
+            } => {
                 let (v, mut ty) = self.codegen_expr(value)?;
                 // Phase 4 fix: when a type hint (e.g. `List(int)`) is present and
                 // the initializer is an empty list literal, the element type from
@@ -320,15 +366,17 @@ impl<'a> Cg<'a> {
                     ptr
                 } else {
                     let ptr = self.fresh_temp();
-                    self.out.push_str(&format!(
-                        "  {} = alloca {}, align {}\n",
-                        ptr, llty, align
-                    ));
+                    self.out
+                        .push_str(&format!("  {} = alloca {}, align {}\n", ptr, llty, align));
                     ptr
                 };
                 self.out.push_str(&format!(
                     "  store {} {}, {}* {}, align {}\n",
-                    llty, self.bare_value(&v), llty, ptr, align
+                    llty,
+                    self.bare_value(&v),
+                    llty,
+                    ptr,
+                    align
                 ));
                 let is_string = matches!(ty, Type::String);
                 let is_literal_init = matches!(value, Expr::StringLit(_));
@@ -349,25 +397,25 @@ impl<'a> Cg<'a> {
                 // `let s = "hello"; s.length()`) lowering to strlen as before.
                 if is_string && is_literal_init {
                     let len_ptr = self.fresh_temp();
-                    self.out.push_str(&format!(
-                        "  {} = alloca i64, align 8\n",
-                        len_ptr
-                    ));
-                    self.out.push_str(&format!(
-                        "  store i64 0, i64* {}\n",
-                        len_ptr
-                    ));
+                    self.out
+                        .push_str(&format!("  {} = alloca i64, align 8\n", len_ptr));
+                    self.out
+                        .push_str(&format!("  store i64 0, i64* {}\n", len_ptr));
                     self.pending_len_trackers.insert(name.clone(), len_ptr);
                 }
                 Ok(())
             }
-            Stmt::Return { explicit_type: _, value } => {
+            Stmt::Return {
+                explicit_type: _,
+                value,
+            } => {
                 self.terminated = true;
                 match value {
                     Some(expr) => {
                         let (v, ty) = self.codegen_expr(expr)?;
                         let llty = llvm_type_name(&ty);
-                        self.out.push_str(&format!("  ret {} {}\n", llty, self.bare_value(&v)));
+                        self.out
+                            .push_str(&format!("  ret {} {}\n", llty, self.bare_value(&v)));
                         Ok(())
                     }
                     None => {
@@ -387,12 +435,13 @@ impl<'a> Cg<'a> {
                                     _ => "0".to_string(),
                                 }
                             };
-                            self.out.push_str(&format!("  ret {} {}\n", self.fn_ret_ty, zero));
+                            self.out
+                                .push_str(&format!("  ret {} {}\n", self.fn_ret_ty, zero));
                         }
                         Ok(())
                     }
                 }
-            },
+            }
             Stmt::Expr(e) => {
                 self.codegen_expr(e)?;
                 Ok(())
@@ -414,18 +463,27 @@ impl<'a> Cg<'a> {
                         && matches!(right.as_ref(), Expr::StringLit(_))
                 );
                 if is_concat_lit {
-                    if let Some(len_ptr) = self.pending_len_trackers.get(name).cloned()
-                        .or_else(|| self.string_len_trackers.get(name).cloned()) {
+                    if let Some(len_ptr) = self
+                        .pending_len_trackers
+                        .get(name)
+                        .cloned()
+                        .or_else(|| self.string_len_trackers.get(name).cloned())
+                    {
                         // Promote pending -> active if needed.
                         self.pending_len_trackers.remove(name);
-                        self.string_len_trackers.insert(name.clone(), len_ptr.clone());
+                        self.string_len_trackers
+                            .insert(name.clone(), len_ptr.clone());
                         // Emit the concat normally: text = runtime_str_concat(text, literal)
                         let (v, _ty) = self.codegen_expr(value)?;
-                        let ptr = self.named.get(name).cloned()
+                        let ptr = self
+                            .named
+                            .get(name)
+                            .cloned()
                             .ok_or_else(|| format!("undefined variable '{}'", name))?;
                         self.out.push_str(&format!(
                             "  store i8* {}, i8** {}\n",
-                            self.bare_value(&v), ptr
+                            self.bare_value(&v),
+                            ptr
                         ));
                         // text__len = text__len + literal.len()
                         if let Expr::BinOp { right, .. } = value {
@@ -438,11 +496,14 @@ impl<'a> Cg<'a> {
                                 let new_len = self.fresh_temp();
                                 self.out.push_str(&format!(
                                     "  {} = add i64 {}, {}\n",
-                                    new_len, cur_len, lit.len()
+                                    new_len,
+                                    cur_len,
+                                    lit.len()
                                 ));
                                 self.out.push_str(&format!(
                                     "  store i64 {}, i64* {}\n",
-                                    self.bare_value(&new_len), len_ptr
+                                    self.bare_value(&new_len),
+                                    len_ptr
                                 ));
                             }
                         }
@@ -462,7 +523,8 @@ impl<'a> Cg<'a> {
                     if let Some(len_ptr) = self.pending_len_trackers.get(name).cloned() {
                         // Promote pending -> active.
                         self.pending_len_trackers.remove(name);
-                        self.string_len_trackers.insert(name.clone(), len_ptr.clone());
+                        self.string_len_trackers
+                            .insert(name.clone(), len_ptr.clone());
                         // Emit: cur = runtime_str_push_byte_len(cur, *cur__len, ch)
                         // then cur__len = cur__len + 1.
                         if let Expr::MethodCall { object, args, .. } = value {
@@ -474,10 +536,8 @@ impl<'a> Cg<'a> {
                                 .cloned()
                                 .ok_or_else(|| format!("undefined variable '{}'", name))?;
                             let cur_val = self.fresh_temp();
-                            self.out.push_str(&format!(
-                                "  {} = load i8*, i8** {}\n",
-                                cur_val, cur_ptr
-                            ));
+                            self.out
+                                .push_str(&format!("  {} = load i8*, i8** {}\n", cur_val, cur_ptr));
                             let loaded_len = self.fresh_temp();
                             self.out.push_str(&format!(
                                 "  {} = load i64, i64* {}\n",
@@ -493,16 +553,19 @@ impl<'a> Cg<'a> {
                             ));
                             self.out.push_str(&format!(
                                 "  store i8* {}, i8** {}\n",
-                                self.bare_value(&new_cur), cur_ptr
+                                self.bare_value(&new_cur),
+                                cur_ptr
                             ));
                             let inc = self.fresh_temp();
                             self.out.push_str(&format!(
                                 "  {} = add i64 {}, 1\n",
-                                inc, self.bare_value(&loaded_len)
+                                inc,
+                                self.bare_value(&loaded_len)
                             ));
                             self.out.push_str(&format!(
                                 "  store i64 {}, i64* {}\n",
-                                self.bare_value(&inc), len_ptr
+                                self.bare_value(&inc),
+                                len_ptr
                             ));
                             return Ok(());
                         }
@@ -521,10 +584,14 @@ impl<'a> Cg<'a> {
                         let llty = "i8*";
                         self.out.push_str(&format!(
                             "  store {} {}, {}* {}, align 8\n",
-                            llty, self.bare_value(&v), llty, ptr
+                            llty,
+                            self.bare_value(&v),
+                            llty,
+                            ptr
                         ));
                         // reset length to 0
-                        self.out.push_str(&format!("  store i64 0, i64* {}\n", len_ptr));
+                        self.out
+                            .push_str(&format!("  store i64 0, i64* {}\n", len_ptr));
                         return Ok(());
                     }
                     // Any other assignment (concat, etc.) invalidates tracking.
@@ -543,15 +610,15 @@ impl<'a> Cg<'a> {
                     .get(name)
                     .cloned()
                     .ok_or_else(|| format!("undefined variable '{}'", name))?;
-                let ty = self
-                    .env
-                    .get(name)
-                    .cloned()
-                    .unwrap_or(Type::Int);
+                let ty = self.env.get(name).cloned().unwrap_or(Type::Int);
                 let llty = llvm_type_name(&ty);
                 self.out.push_str(&format!(
                     "  store {} {}, {}* {}, align {}\n",
-                    llty, self.bare_value(&v), llty, ptr, align_of(&ty)
+                    llty,
+                    self.bare_value(&v),
+                    llty,
+                    ptr,
+                    align_of(&ty)
                 ));
                 // i32-narrowing range tracking (see Stmt::Let for rationale).
                 if let Some(r) = self.int_range(value) {
@@ -561,19 +628,31 @@ impl<'a> Cg<'a> {
                 }
                 Ok(())
             }
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 let (c, _ct) = self.codegen_expr(cond)?;
                 let then_b = self.fresh_block();
                 let else_b = self.fresh_block();
                 let merge_b = self.fresh_block();
                 match else_branch {
                     Some(_) => {
-                        self.out
-                            .push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&c), then_b, else_b));
+                        self.out.push_str(&format!(
+                            "  br i1 {}, label %{}, label %{}\n",
+                            self.bare_value(&c),
+                            then_b,
+                            else_b
+                        ));
                     }
                     None => {
-                        self.out
-                            .push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&c), then_b, merge_b));
+                        self.out.push_str(&format!(
+                            "  br i1 {}, label %{}, label %{}\n",
+                            self.bare_value(&c),
+                            then_b,
+                            merge_b
+                        ));
                     }
                 }
                 self.out.push_str(&format!("{}:\n", then_b));
@@ -603,7 +682,10 @@ impl<'a> Cg<'a> {
                 let saved_init = self.loop_counter_init;
                 let saved_pure = self.loop_pure_arith;
                 let mut counter_cmp_i32: Option<(String, String)> = None; // (i32_instr, bound_literal)
-                if let Expr::BinOp { op, left, right, .. } = cond {
+                if let Expr::BinOp {
+                    op, left, right, ..
+                } = cond
+                {
                     let (counter, bound) = match op.as_str() {
                         "<" => (left, right),
                         "<=" => (left, right),
@@ -615,7 +697,8 @@ impl<'a> Cg<'a> {
                         if *b <= i32::MAX as i64 && *b >= i32::MIN as i64 {
                             self.loop_counter = Some(cn.clone());
                             self.loop_bound = Some(*b as i128);
-                            self.loop_counter_init = self.var_range.get(cn).map(|r| r.0).unwrap_or(0);
+                            self.loop_counter_init =
+                                self.var_range.get(cn).map(|r| r.0).unwrap_or(0);
                             let cmp_instr = match op.as_str() {
                                 "<" => "icmp slt",
                                 "<=" => "icmp sle",
@@ -643,9 +726,11 @@ impl<'a> Cg<'a> {
                     // Emit the loop condition in i32 so the induction variable
                     // matches the loop body's i32 arithmetic (enables LLVM
                     // auto-vectorization, mirroring Clang -O3).
-                    let (cv, _ct) = self.codegen_expr(
-                        if let Expr::BinOp { left, .. } = cond { left } else { cond },
-                    )?;
+                    let (cv, _ct) = self.codegen_expr(if let Expr::BinOp { left, .. } = cond {
+                        left
+                    } else {
+                        cond
+                    })?;
                     let ci = self.fresh_temp();
                     self.out.push_str(&format!(
                         "  {} = trunc i64 {} to i32\n",
@@ -662,13 +747,12 @@ impl<'a> Cg<'a> {
                     let (c, _ct) = self.codegen_expr(cond)?;
                     c
                 };
-                self.out
-                    .push_str(&format!(
-                        "  br i1 {}, label %{}, label %{}\n",
-                        self.bare_value(&c),
-                        body_b,
-                        merge_b
-                    ));
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    self.bare_value(&c),
+                    body_b,
+                    merge_b
+                ));
                 self.out.push_str(&format!("{}:\n", body_b));
                 self.current_block = body_b;
                 self.codegen_stmts(body)?;
@@ -680,6 +764,160 @@ impl<'a> Cg<'a> {
                 self.loop_bound = saved_bound;
                 self.loop_counter_init = saved_init;
                 self.loop_pure_arith = saved_pure;
+                Ok(())
+            }
+            // Iteration 34 PH2: for-in loop native codegen.
+            // Desugars `for x in list:` into a while-style indexed loop:
+            //   idx = 0; while idx < list.len { x = list_get(list, idx); body; idx++ }
+            Stmt::For {
+                var,
+                iterable,
+                body,
+            } => {
+                // Evaluate the iterable to a LimeList SSA value.
+                let (list_val, list_ty) = self.codegen_expr(iterable)?;
+                let elem_ty = match &list_ty {
+                    Type::List(e) | Type::Slice(e) | Type::Array(e) => (**e).clone(),
+                    _ => Type::Int,
+                };
+
+                // Alloca for the list so we can pass a pointer to runtime_list_get.
+                let list_slot = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", list_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_val),
+                    list_slot
+                ));
+
+                // Extract length: load the list, then extractvalue field 1.
+                let list_loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    list_loaded, list_slot
+                ));
+                let len = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %LimeList {}, 1\n",
+                    len, list_loaded
+                ));
+
+                // Index alloca, init to 0.
+                let idx_slot = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca i64, align 8\n", idx_slot));
+                self.out
+                    .push_str(&format!("  store i64 0, ptr {}\n", idx_slot));
+
+                // Loop variable alloca.
+                let var_slot = self.fresh_temp();
+                let ll_var_ty = llvm_type_name(&elem_ty);
+                self.out
+                    .push_str(&format!("  {} = alloca {}, align 8\n", var_slot, ll_var_ty));
+
+                // CFG blocks.
+                let cond_b = self.fresh_block();
+                let body_b = self.fresh_block();
+                let merge_b = self.fresh_block();
+
+                // Entry → cond.
+                self.out.push_str(&format!("  br label %{}\n", cond_b));
+
+                // --- cond: idx < len ---
+                self.out.push_str(&format!("{}:\n", cond_b));
+                self.current_block = cond_b.clone();
+                let idx_cur = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = load i64, ptr {}\n", idx_cur, idx_slot));
+                let cmp = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = icmp slt i64 {}, {}\n", cmp, idx_cur, len));
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    cmp, body_b, merge_b
+                ));
+
+                // --- body ---
+                self.out.push_str(&format!("{}:\n", body_b));
+                self.current_block = body_b.clone();
+
+                // Load list to extract data pointer.
+                let list_for_get = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    list_for_get, list_slot
+                ));
+
+                // Direct element access: extract data ptr, GEP into i64 array.
+                // This avoids calling runtime_list_get (which may be always_inline
+                // and not emitted as a standalone symbol).
+                let data_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %LimeList {}, 0\n",
+                    data_ptr, list_for_get
+                ));
+                let elem_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds i64, ptr {}, i64 {}\n",
+                    elem_ptr, data_ptr, idx_cur
+                ));
+                let elem = self.fresh_temp();
+                if is_float(&elem_ty) {
+                    // For float elements, load as i64 then bitcast to double.
+                    let raw = self.fresh_temp();
+                    self.out
+                        .push_str(&format!("  {} = load i64, ptr {}\n", raw, elem_ptr));
+                    let conv = self.fresh_temp();
+                    self.out
+                        .push_str(&format!("  {} = bitcast i64 {} to double\n", conv, raw));
+                    self.out
+                        .push_str(&format!("  store double {}, ptr {}\n", conv, var_slot));
+                } else {
+                    self.out
+                        .push_str(&format!("  {} = load i64, ptr {}\n", elem, elem_ptr));
+                    self.out
+                        .push_str(&format!("  store i64 {}, ptr {}\n", elem, var_slot));
+                }
+
+                // Bind loop variable in env.
+                let saved_var = self.named.get(var).cloned();
+                let saved_var_ty = self.env.get(var).cloned();
+                self.named.insert(var.clone(), var_slot.clone());
+                self.env.insert(var.clone(), elem_ty);
+
+                // Execute body.
+                self.codegen_stmts(body)?;
+
+                // Increment index.
+                let idx_next = self.fresh_temp();
+                let idx_reload = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = load i64, ptr {}\n", idx_reload, idx_slot));
+                self.out
+                    .push_str(&format!("  {} = add i64 {}, 1\n", idx_next, idx_reload));
+                self.out
+                    .push_str(&format!("  store i64 {}, ptr {}\n", idx_next, idx_slot));
+
+                // Back-edge to cond.
+                self.out.push_str(&format!("  br label %{}\n", cond_b));
+
+                // --- merge ---
+                self.out.push_str(&format!("{}:\n", merge_b));
+                self.current_block = merge_b;
+
+                // Restore loop variable if it shadowed an outer binding.
+                if let Some(prev_ptr) = saved_var {
+                    self.named.insert(var.clone(), prev_ptr);
+                } else {
+                    self.named.remove(var);
+                }
+                if let Some(prev_ty) = saved_var_ty {
+                    self.env.insert(var.clone(), prev_ty);
+                } else {
+                    self.env.remove(var);
+                }
+
                 Ok(())
             }
             Stmt::Match { expr, arms } => self.codegen_match(expr, arms),
@@ -700,7 +938,10 @@ impl<'a> Cg<'a> {
                 };
                 Ok((format!("double {}", s), Type::Float))
             }
-            Expr::BoolLit(b) => Ok((format!("i1 {}", if *b { "true" } else { "false" }), Type::Bool)),
+            Expr::BoolLit(b) => Ok((
+                format!("i1 {}", if *b { "true" } else { "false" }),
+                Type::Bool,
+            )),
             Expr::Ident(n) => {
                 // Check if it's a local variable first
                 if let Some(ptr) = self.named.get(n).cloned() {
@@ -713,7 +954,11 @@ impl<'a> Cg<'a> {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!(
                         "  {} = load {}, {}* {}, align {}\n",
-                        tmp, llty, llty, ptr, align_of(&ty)
+                        tmp,
+                        llty,
+                        llty,
+                        ptr,
+                        align_of(&ty)
                     ));
                     // If the variable holds a function value (closure), it's already loaded
                     // as %LimeClosure* — return it directly with the Fn type.
@@ -724,7 +969,9 @@ impl<'a> Cg<'a> {
                 }
                 // Phase B-2.2: named function reference -> generate wrapper + wrap in closure
                 if let Some(fdef) = self.defs.functions.get(n) {
-                    let param_types: Vec<Type> = fdef.params.iter()
+                    let param_types: Vec<Type> = fdef
+                        .params
+                        .iter()
                         .map(|(_, t)| type_from_str(t, self.defs))
                         .collect();
                     let ret = match &fdef.return_type {
@@ -798,10 +1045,7 @@ impl<'a> Cg<'a> {
                     // Call the real function
                     let args_str = unpacked_args.join(", ");
                     if ll_ret == "void" {
-                        wrapper_ir.push_str(&format!(
-                            "  call void @{}({})\n",
-                            llvm_name, args_str
-                        ));
+                        wrapper_ir.push_str(&format!("  call void @{}({})\n", llvm_name, args_str));
                         wrapper_ir.push_str("  ret void\n");
                     } else {
                         wrapper_ir.push_str(&format!(
@@ -827,14 +1071,37 @@ impl<'a> Cg<'a> {
                     ));
                     return Ok((closure, Type::Fn(param_types, Box::new(ret))));
                 }
+                // Iteration 33 P2 (re-applied): a BARE payload-less enum
+                // variant (`Red`) is a value — lower it exactly like the
+                // zero-argument constructor call `Red()`.
+                if let Some(state_name) = self.defs.state_variants.get(n) {
+                    if self
+                        .defs
+                        .variant_fields
+                        .get(n)
+                        .map(|f| f.is_empty())
+                        .unwrap_or(false)
+                    {
+                        return self.codegen_state_ctor(state_name, n, &[]);
+                    }
+                }
                 Err(format!("undefined variable '{}'", n))
             }
-            Expr::BinOp { left, op, right, resolved_operator } => self.codegen_binop(left, op, right, resolved_operator),
+            Expr::BinOp {
+                left,
+                op,
+                right,
+                resolved_operator,
+            } => self.codegen_binop(left, op, right, resolved_operator),
             Expr::UnOp { op, operand } => {
                 if op == "not" {
                     let (v, _t) = self.codegen_expr(operand)?;
                     let tmp = self.fresh_temp();
-                    self.out.push_str(&format!("  {} = xor i1 {}, true\n", tmp, self.bare_value(&v)));
+                    self.out.push_str(&format!(
+                        "  {} = xor i1 {}, true\n",
+                        tmp,
+                        self.bare_value(&v)
+                    ));
                     Ok((tmp, Type::Bool))
                 } else if op == "-" {
                     let (v, t) = self.codegen_expr(operand)?;
@@ -860,10 +1127,85 @@ impl<'a> Cg<'a> {
             Expr::FieldAccess { object, field } => self.codegen_field_access(object, field),
             Expr::Call { func, args } => self.codegen_call(func, args),
             Expr::StringLit(s) => self.codegen_string_lit(s),
-            Expr::MethodCall { object, method, args } => self.codegen_method_call(object, method, args),
+            Expr::MethodCall {
+                object,
+                method,
+                args,
+            } => self.codegen_method_call(object, method, args),
             Expr::Array(items) => self.codegen_array_lit(items),
             Expr::Await(inner) => self.codegen_expr(inner),
             Expr::FnDef { params, body } => self.codegen_anon_fn(params, body),
+            // Iteration 34 PH1: tuple literal — elements are stored as i64
+            // slots in an anonymous [N x i64] aggregate (same payload model
+            // as enum payloads), built with an insertvalue chain.
+            Expr::Tuple(items) => {
+                let n = items.len().max(1);
+                let mut tys: Vec<Type> = Vec::new();
+                let mut vals: Vec<String> = Vec::new();
+                for it in items {
+                    let (v, t) = self.codegen_expr(it)?;
+                    let c = self.convert_to_i64(&v, &t)?;
+                    tys.push(t);
+                    vals.push(c);
+                }
+                let mut cur = String::from("undef");
+                for (i, cv) in vals.iter().enumerate() {
+                    let nx = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = insertvalue [{} x i64] {}, i64 {}, {}\n",
+                        nx, n, cur, cv, i
+                    ));
+                    cur = nx;
+                }
+                Ok((cur, Type::Tuple(tys)))
+            }
+            // Iteration 34 PH1: tuple field access — extractvalue with the
+            // checker-provided element type converting the raw i64 slot back
+            // to its typed value (int / float / bool / string).
+            Expr::TupleAccess { tuple, index } => {
+                let (tv, tt) = self.codegen_expr(tuple)?;
+                if let Type::Tuple(tys) = &tt {
+                    let i = *index;
+                    if i >= tys.len() {
+                        return Err(format!(
+                            "tuple index {} out of range (len {})",
+                            i,
+                            tys.len()
+                        ));
+                    }
+                    let e = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = extractvalue [{} x i64] {}, {}\n",
+                        e,
+                        tys.len(),
+                        tv,
+                        i
+                    ));
+                    match &tys[i] {
+                        Type::Float => {
+                            let f = self.fresh_temp();
+                            self.out
+                                .push_str(&format!("  {} = bitcast i64 {} to double\n", f, e));
+                            Ok((f, Type::Float))
+                        }
+                        Type::Bool => {
+                            let b = self.fresh_temp();
+                            self.out
+                                .push_str(&format!("  {} = trunc i64 {} to i1\n", b, e));
+                            Ok((b, Type::Bool))
+                        }
+                        Type::String => {
+                            let p = self.fresh_temp();
+                            self.out
+                                .push_str(&format!("  {} = inttoptr i64 {} to i8*\n", p, e));
+                            Ok((p, Type::String))
+                        }
+                        _ => Ok((e, Type::Int)),
+                    }
+                } else {
+                    Err(format!("tuple access on non-tuple type {:?}", tt))
+                }
+            }
             _ => Err("Phase 5: unsupported expression in codegen".to_string()),
         }
     }
@@ -900,7 +1242,11 @@ impl<'a> Cg<'a> {
                 Stmt::Return { value: Some(e), .. } => {
                     Self::collect_vars_expr(e, used, defined);
                 }
-                Stmt::If { cond, then_branch, else_branch } => {
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
                     Self::collect_vars_expr(cond, used, defined);
                     Self::collect_vars_stmts(then_branch, used, defined);
                     if let Some(eb) = else_branch {
@@ -963,8 +1309,12 @@ impl<'a> Cg<'a> {
             }
             Expr::Slice { target, start, end } => {
                 Self::collect_vars_expr(target, used, defined);
-                if let Some(s) = start { Self::collect_vars_expr(s, used, defined); }
-                if let Some(e) = end { Self::collect_vars_expr(e, used, defined); }
+                if let Some(s) = start {
+                    Self::collect_vars_expr(s, used, defined);
+                }
+                if let Some(e) = end {
+                    Self::collect_vars_expr(e, used, defined);
+                }
             }
             Expr::Tuple(elems) => {
                 for elem in elems {
@@ -998,11 +1348,17 @@ impl<'a> Cg<'a> {
         params: &[(String, String)],
         body: &[Stmt],
     ) -> Result<(String, Type), String> {
-        let name = format!("anon_{}", self.anon_count);
-        self.anon_count += 1;
+        // Iteration 33 P2.3: unique across the whole module — a fresh Cg per
+        // function restarted this counter at 0, so two functions that each
+        // contained a closure literal both emitted `@anon_0` (duplicate symbol).
+        let name = format!(
+            "anon_{}",
+            ANON_GLOBAL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
 
         // Parse parameter types
-        let param_types: Vec<Type> = params.iter()
+        let param_types: Vec<Type> = params
+            .iter()
             .map(|(_, t)| type_from_str(t, self.defs))
             .collect();
 
@@ -1012,24 +1368,31 @@ impl<'a> Cg<'a> {
         // Detect free variables in the body that exist in the parent scope
         let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
         let all_free = Self::collect_free_vars(body, &param_names);
-        let captures: Vec<(String, Type)> = all_free.iter()
-            .filter_map(|n| {
-                self.env.get(n).cloned().map(|t| (n.clone(), t))
-            })
+        let captures: Vec<(String, Type)> = all_free
+            .iter()
+            .filter_map(|n| self.env.get(n).cloned().map(|t| (n.clone(), t)))
             .collect();
 
         // Build function head: define i64 @anon_N(i8* %env, i8* %packed_args) {
         let mut ir = String::new();
         ir.push_str(&format!(
             "\n; Anonymous function ({} captures)\ndefine {} @{}(i8* %env, i8* %packed_args) {{\n",
-            captures.len(), ret_type_str, name
+            captures.len(),
+            ret_type_str,
+            name
         ));
 
         // Entry block
         ir.push_str("L0:\n");
 
         // Unpack captured variables from the env array
-        let mut child = Cg::new(self.defs, self.memory, self.string_literals, self.mono_name_map, self.mono_fdefs);
+        let mut child = Cg::new(
+            self.defs,
+            self.memory,
+            self.string_literals,
+            self.mono_name_map,
+            self.mono_fdefs,
+        );
         let mut named: HashMap<String, String> = HashMap::new();
         let mut env_types: HashMap<String, Type> = HashMap::new();
 
@@ -1067,10 +1430,7 @@ impl<'a> Cg<'a> {
                     ));
                 }
                 _ => {
-                    ir.push_str(&format!(
-                        "  {} = add i64 {}, 0\n",
-                        converted, loaded_i64
-                    ));
+                    ir.push_str(&format!("  {} = add i64 {}, 0\n", converted, loaded_i64));
                 }
             }
             // alloca + store for the body to reference
@@ -1113,10 +1473,7 @@ impl<'a> Cg<'a> {
 
             // alloca + store for the body to reference
             let alloca_ptr = format!("%al_{}", i);
-            ir.push_str(&format!(
-                "  {} = alloca {}, align 8\n",
-                alloca_ptr, llty
-            ));
+            ir.push_str(&format!("  {} = alloca {}, align 8\n", alloca_ptr, llty));
             ir.push_str(&format!(
                 "  store {} {}, {}* {}, align 8\n",
                 llty, loaded, llty, alloca_ptr
@@ -1171,18 +1528,27 @@ impl<'a> Cg<'a> {
                 env_raw, env_size
             ));
             // Collect alloca pointers first to avoid borrow conflict
-            let capture_ptrs: Vec<(String, Type, String)> = captures.iter().map(|(cname, ctype)| {
-                let ptr = self.named.get(cname)
-                    .cloned()
-                    .unwrap_or_else(|| format!("MISSING_{}", cname));
-                (cname.clone(), ctype.clone(), ptr)
-            }).collect();
+            let capture_ptrs: Vec<(String, Type, String)> = captures
+                .iter()
+                .map(|(cname, ctype)| {
+                    let ptr = self
+                        .named
+                        .get(cname)
+                        .cloned()
+                        .unwrap_or_else(|| format!("MISSING_{}", cname));
+                    (cname.clone(), ctype.clone(), ptr)
+                })
+                .collect();
             for (i, (_cname, ctype, ptr)) in capture_ptrs.iter().enumerate() {
                 let loaded = self.fresh_temp();
                 let llty = llvm_type_name(ctype);
                 self.out.push_str(&format!(
                     "  {} = load {}, {}* {}, align {}\n",
-                    loaded, llty, llty, ptr, align_of(ctype)
+                    loaded,
+                    llty,
+                    llty,
+                    ptr,
+                    align_of(ctype)
                 ));
                 // Pack as i64
                 let packed_val = self.fresh_temp();
@@ -1194,16 +1560,12 @@ impl<'a> Cg<'a> {
                         ));
                     }
                     Type::Bool => {
-                        self.out.push_str(&format!(
-                            "  {} = zext i1 {} to i64\n",
-                            packed_val, loaded
-                        ));
+                        self.out
+                            .push_str(&format!("  {} = zext i1 {} to i64\n", packed_val, loaded));
                     }
                     _ => {
-                        self.out.push_str(&format!(
-                            "  {} = add i64 {}, 0\n",
-                            packed_val, loaded
-                        ));
+                        self.out
+                            .push_str(&format!("  {} = add i64 {}, 0\n", packed_val, loaded));
                     }
                 }
                 // Store into env array slot
@@ -1230,10 +1592,13 @@ impl<'a> Cg<'a> {
             ));
         }
 
-        Ok((closure, Type::Fn(
-            param_types,
-            Box::new(Type::Int), // MVP: assume i64 return
-        )))
+        Ok((
+            closure,
+            Type::Fn(
+                param_types,
+                Box::new(Type::Int), // MVP: assume i64 return
+            ),
+        ))
     }
 
     /// Statically estimate the integer value range of an expression. Returns
@@ -1246,10 +1611,18 @@ impl<'a> Cg<'a> {
         const I32MIN: i128 = i32::MIN as i128;
         const I32MAX: i128 = i32::MAX as i128;
         fn sat_add(a: i128, b: i128) -> i128 {
-            a.checked_add(b).unwrap_or(if (a > 0) == (b > 0) { i32::MAX as i128 + 1 } else { i32::MIN as i128 - 1 })
+            a.checked_add(b).unwrap_or(if (a > 0) == (b > 0) {
+                i32::MAX as i128 + 1
+            } else {
+                i32::MIN as i128 - 1
+            })
         }
         fn sat_mul(a: i128, b: i128) -> i128 {
-            a.checked_mul(b).unwrap_or(if (a > 0) == (b > 0) { i32::MAX as i128 + 1 } else { i32::MIN as i128 - 1 })
+            a.checked_mul(b).unwrap_or(if (a > 0) == (b > 0) {
+                i32::MAX as i128 + 1
+            } else {
+                i32::MIN as i128 - 1
+            })
         }
         let r = match e {
             Expr::IntLit(i) => (*i as i128, *i as i128),
@@ -1258,7 +1631,11 @@ impl<'a> Cg<'a> {
                     if c == n {
                         let lo = self.loop_counter_init;
                         let hi = self.loop_bound.map(|b| b - 1).unwrap_or(i32::MAX as i128);
-                        return if lo >= I32MIN && hi <= I32MAX { Some((lo, hi)) } else { None };
+                        return if lo >= I32MIN && hi <= I32MAX {
+                            Some((lo, hi))
+                        } else {
+                            None
+                        };
                     }
                 }
                 match self.var_range.get(n) {
@@ -1266,37 +1643,41 @@ impl<'a> Cg<'a> {
                     None => return None,
                 }
             }
-            Expr::BinOp { op, left, right, .. } => {
-                match op.as_str() {
-                    "+" | "-" | "*" => {
-                        let (ll, lh) = self.int_range(left)?;
-                        let (rl, rh) = self.int_range(right)?;
-                        let (lo, hi) = match op.as_str() {
-                            "+" => (sat_add(ll, rl), sat_add(lh, rh)),
-                            "-" => (sat_add(ll, -rh), sat_add(lh, -rl)),
-                            "*" => (sat_mul(ll, rl), sat_mul(lh, rh)),
-                            _ => unreachable!(),
-                        };
-                        (lo, hi)
-                    }
-                    "%" => {
-                        if let Expr::IntLit(c) = right.as_ref() {
-                            if *c >= 1 {
-                                let m = *c - 1;
-                                (-(m as i128), m as i128)
-                            } else {
-                                return None;
-                            }
+            Expr::BinOp {
+                op, left, right, ..
+            } => match op.as_str() {
+                "+" | "-" | "*" => {
+                    let (ll, lh) = self.int_range(left)?;
+                    let (rl, rh) = self.int_range(right)?;
+                    let (lo, hi) = match op.as_str() {
+                        "+" => (sat_add(ll, rl), sat_add(lh, rh)),
+                        "-" => (sat_add(ll, -rh), sat_add(lh, -rl)),
+                        "*" => (sat_mul(ll, rl), sat_mul(lh, rh)),
+                        _ => unreachable!(),
+                    };
+                    (lo, hi)
+                }
+                "%" => {
+                    if let Expr::IntLit(c) = right.as_ref() {
+                        if *c >= 1 {
+                            let m = *c - 1;
+                            (-(m as i128), m as i128)
                         } else {
                             return None;
                         }
+                    } else {
+                        return None;
                     }
-                    _ => return None,
                 }
-            }
+                _ => return None,
+            },
             _ => return None,
         };
-        if r.0 >= I32MIN && r.1 <= I32MAX { Some(r) } else { None }
+        if r.0 >= I32MIN && r.1 <= I32MAX {
+            Some(r)
+        } else {
+            None
+        }
     }
 
     /// Whether an expression contains a method/function call (which lowers to a
@@ -1320,9 +1701,7 @@ impl<'a> Cg<'a> {
                     || start.as_ref().map_or(false, |s| Self::expr_has_call(s))
                     || end.as_ref().map_or(false, |s| Self::expr_has_call(s))
             }
-            Expr::Range { start, end } => {
-                Self::expr_has_call(start) || Self::expr_has_call(end)
-            }
+            Expr::Range { start, end } => Self::expr_has_call(start) || Self::expr_has_call(end),
             Expr::Tuple(es) => es.iter().any(Self::expr_has_call),
             Expr::Array(es) => es.iter().any(Self::expr_has_call),
             _ => false,
@@ -1334,22 +1713,30 @@ impl<'a> Cg<'a> {
         match s {
             Stmt::Let { value, .. } => Self::expr_has_call(value),
             Stmt::Assign { value, .. } => Self::expr_has_call(value),
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 Self::expr_has_call(cond)
                     || then_branch.iter().any(Self::stmt_has_call)
                     || else_branch
                         .as_ref()
                         .map_or(false, |b| b.iter().any(Self::stmt_has_call))
             }
-            Stmt::For { var: _, iterable, body } => {
-                Self::expr_has_call(iterable) || body.iter().any(Self::stmt_has_call)
-            }
+            Stmt::For {
+                var: _,
+                iterable,
+                body,
+            } => Self::expr_has_call(iterable) || body.iter().any(Self::stmt_has_call),
             Stmt::While { cond, body } => {
                 Self::expr_has_call(cond) || body.iter().any(Self::stmt_has_call)
             }
             Stmt::Match { expr, arms } => {
                 Self::expr_has_call(expr)
-                    || arms.iter().any(|(_p, bs)| bs.iter().any(Self::stmt_has_call))
+                    || arms
+                        .iter()
+                        .any(|(_p, bs)| bs.iter().any(Self::stmt_has_call))
             }
             Stmt::Return { value, .. } => value.as_ref().map_or(false, Self::expr_has_call),
             Stmt::Expr(e) => Self::expr_has_call(e),
@@ -1370,7 +1757,8 @@ impl<'a> Cg<'a> {
         // Emit `trunc i64 -> i32` (works for both SSA values and literals;
         // LLVM folds the literal case).
         let t = self.fresh_temp();
-        self.out.push_str(&format!("  {} = trunc i64 {} to i32\n", t, bare));
+        self.out
+            .push_str(&format!("  {} = trunc i64 {} to i32\n", t, bare));
         t
     }
 
@@ -1395,7 +1783,12 @@ impl<'a> Cg<'a> {
         // range analysis is made sound (loop-invariant / accumulator
         // aware), keep this off so results stay correct. perf is frozen;
         // correctness wins.
-        if false && lt == Type::Int && rt == Type::Int && matches!(op, "+" | "-" | "*" | "%") && self.loop_pure_arith {
+        if false
+            && lt == Type::Int
+            && rt == Type::Int
+            && matches!(op, "+" | "-" | "*" | "%")
+            && self.loop_pure_arith
+        {
             if let Some(_wr) = self.int_range(&Expr::BinOp {
                 op: op.to_string(),
                 left: Box::new(left.clone()),
@@ -1427,10 +1820,8 @@ impl<'a> Cg<'a> {
                             t32, i32_instr, flags, la, ra
                         ));
                         let tmp = self.fresh_temp();
-                        self.out.push_str(&format!(
-                            "  {} = sext i32 {} to i64\n",
-                            tmp, t32
-                        ));
+                        self.out
+                            .push_str(&format!("  {} = sext i32 {} to i64\n", tmp, t32));
                         self.i32_form.insert(tmp.clone(), t32.clone());
                         return Ok((tmp, Type::Int));
                     }
@@ -1473,7 +1864,8 @@ impl<'a> Cg<'a> {
                     ));
                     if mop == "!=" {
                         let neg = self.fresh_temp();
-                        self.out.push_str(&format!("  {} = xor i1 {}, true\n", neg, tmp));
+                        self.out
+                            .push_str(&format!("  {} = xor i1 {}, true\n", neg, tmp));
                         return Ok((neg, Type::Bool));
                     }
                     return Ok((tmp, Type::Bool));
@@ -1553,7 +1945,12 @@ impl<'a> Cg<'a> {
                 };
                 self.out.push_str(&format!(
                     "  {} = {}{} {} {}, {}\n",
-                    tmp, instr, flags, llty, self.bare_value(&lv), self.bare_value(&rv)
+                    tmp,
+                    instr,
+                    flags,
+                    llty,
+                    self.bare_value(&lv),
+                    self.bare_value(&rv)
                 ));
                 let ty = if float { Type::Float } else { Type::Int };
                 Ok((tmp, ty))
@@ -1571,12 +1968,129 @@ impl<'a> Cg<'a> {
                     ));
                     if op == "!=" {
                         let neg = self.fresh_temp();
-                        self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", neg, tmp));
+                        self.out
+                            .push_str(&format!("  {} = icmp eq i32 {}, 0\n", neg, tmp));
                         return Ok((neg, Type::Bool));
                     }
                     let iseq = self.fresh_temp();
-                    self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", iseq, tmp));
+                    self.out
+                        .push_str(&format!("  {} = icmp ne i32 {}, 0\n", iseq, tmp));
                     return Ok((iseq, Type::Bool));
+                }
+                // Iteration 34 PH5: enum == / != — compare variant tags
+                // and payloads (when present).
+                if let (Type::State(lsn), Type::State(rsn)) = (&lt, &rt) {
+                    let lbase = crate::struct_base(lsn);
+                    let rbase = crate::struct_base(rsn);
+                    if lbase == rbase {
+                        let llvm_ty = format!("%{}", lbase);
+                        // Extract tags.
+                        let ltag = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 0\n",
+                            ltag, llvm_ty, lv
+                        ));
+                        let rtag = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 0\n",
+                            rtag, llvm_ty, rv
+                        ));
+                        let tag_cmp = self.fresh_temp();
+                        self.out
+                            .push_str(&format!("  {} = icmp eq i32 {}, {}\n", tag_cmp, ltag, rtag));
+                        // Check if enum has any payloads.
+                        let has_payload = self
+                            .defs
+                            .states
+                            .get(&lbase)
+                            .map(|variants| {
+                                variants.iter().any(|v| {
+                                    self.defs
+                                        .variant_fields
+                                        .get(v)
+                                        .map(|f| !f.is_empty())
+                                        .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+                        if !has_payload {
+                            // Bare enum: tag comparison is sufficient.
+                            let final_cmp = if op == "!=" {
+                                let neg = self.fresh_temp();
+                                self.out
+                                    .push_str(&format!("  {} = xor i1 {}, true\n", neg, tag_cmp));
+                                neg
+                            } else {
+                                tag_cmp
+                            };
+                            return Ok((final_cmp, Type::Bool));
+                        }
+                        // Payload enum: also compare the first payload field.
+                        // Extract payload from both sides (field 1, sub 0).
+                        let lpayload = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1, 0\n",
+                            lpayload, llvm_ty, lv
+                        ));
+                        let rpayload = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1, 0\n",
+                            rpayload, llvm_ty, rv
+                        ));
+                        // Check if first variant has str payload.
+                        let first_variant = self.defs.states.get(&lbase).and_then(|v| v.first());
+                        let is_str_payload = first_variant
+                            .and_then(|v| self.defs.variant_fields.get(v))
+                            .and_then(|f| f.first())
+                            .map(|(_, t)| t == "str")
+                            .unwrap_or(false);
+                        let payload_cmp = if is_str_payload {
+                            // String payload: use runtime_str_equals.
+                            // inttoptr to get i8* from i64.
+                            let lptr = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = inttoptr i64 {} to i8*\n",
+                                lptr, lpayload
+                            ));
+                            let rptr = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = inttoptr i64 {} to i8*\n",
+                                rptr, rpayload
+                            ));
+                            let eq_tmp = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = call i32 @runtime_str_equals(i8* {}, i8* {})\n",
+                                eq_tmp, lptr, rptr
+                            ));
+                            let is_eq = self.fresh_temp();
+                            self.out
+                                .push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_eq, eq_tmp));
+                            is_eq
+                        } else {
+                            // Int/bool/float payload: compare as i64.
+                            let pc = self.fresh_temp();
+                            self.out.push_str(&format!(
+                                "  {} = icmp eq i64 {}, {}\n",
+                                pc, lpayload, rpayload
+                            ));
+                            pc
+                        };
+                        // Combine: tag_eq AND payload_eq.
+                        let both = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n",
+                            both, tag_cmp, payload_cmp
+                        ));
+                        let final_cmp = if op == "!=" {
+                            let neg = self.fresh_temp();
+                            self.out
+                                .push_str(&format!("  {} = xor i1 {}, true\n", neg, both));
+                            neg
+                        } else {
+                            both
+                        };
+                        return Ok((final_cmp, Type::Bool));
+                    }
                 }
                 let (instr, llty) = if float {
                     let i = match op {
@@ -1603,7 +2117,11 @@ impl<'a> Cg<'a> {
                 };
                 self.out.push_str(&format!(
                     "  {} = {} {} {}, {}\n",
-                    tmp, instr, llty, self.bare_value(&lv), self.bare_value(&rv)
+                    tmp,
+                    instr,
+                    llty,
+                    self.bare_value(&lv),
+                    self.bare_value(&rv)
                 ));
                 Ok((tmp, Type::Bool))
             }
@@ -1611,7 +2129,12 @@ impl<'a> Cg<'a> {
                 let prev = self.current_block.clone();
                 let rhs_b = self.fresh_block();
                 let end_b = self.fresh_block();
-                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&lv), rhs_b, end_b));
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    self.bare_value(&lv),
+                    rhs_b,
+                    end_b
+                ));
                 self.out.push_str(&format!("{}:\n", rhs_b));
                 self.current_block = rhs_b.clone();
                 self.out.push_str(&format!("  br label %{}\n", end_b));
@@ -1620,7 +2143,10 @@ impl<'a> Cg<'a> {
                 let res = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = phi i1 [ false, %{} ], [ {}, %{} ]\n",
-                    res, prev, self.bare_value(&rv), rhs_b
+                    res,
+                    prev,
+                    self.bare_value(&rv),
+                    rhs_b
                 ));
                 Ok((res, Type::Bool))
             }
@@ -1628,7 +2154,12 @@ impl<'a> Cg<'a> {
                 let prev = self.current_block.clone();
                 let rhs_b = self.fresh_block();
                 let end_b = self.fresh_block();
-                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", self.bare_value(&lv), end_b, rhs_b));
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    self.bare_value(&lv),
+                    end_b,
+                    rhs_b
+                ));
                 self.out.push_str(&format!("{}:\n", rhs_b));
                 self.current_block = rhs_b.clone();
                 self.out.push_str(&format!("  br label %{}\n", end_b));
@@ -1637,7 +2168,10 @@ impl<'a> Cg<'a> {
                 let res = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = phi i1 [ true, %{} ], [ {}, %{} ]\n",
-                    res, prev, self.bare_value(&rv), rhs_b
+                    res,
+                    prev,
+                    self.bare_value(&rv),
+                    rhs_b
                 ));
                 Ok((res, Type::Bool))
             }
@@ -1707,10 +2241,7 @@ impl<'a> Cg<'a> {
             // with the C `fn` pointer ABI). The Lime function is emitted as a plain
             // `define` with the standard C calling convention (no hidden args), so
             // its address is directly callable from C.
-            let expected_ty = _params
-                .get(i)
-                .map(|(_, t)| t.as_str())
-                .unwrap_or("");
+            let expected_ty = _params.get(i).map(|(_, t)| t.as_str()).unwrap_or("");
             if expected_ty.starts_with("fn(") {
                 if let Expr::Ident(fnname) = a {
                     if self.defs.functions.contains_key(fnname) {
@@ -1791,8 +2322,10 @@ impl<'a> Cg<'a> {
         // native call to its linkable (possibly mangled) name. No `define` is
         // emitted for the callee; the symbol is supplied by the prepared
         // Charger native artifact injected at link time.
-        if let Some((symbol, params, ret)) =
-            self.defs.extern_symbols.get(&(func.to_string(), args.len()))
+        if let Some((symbol, params, ret)) = self
+            .defs
+            .extern_symbols
+            .get(&(func.to_string(), args.len()))
         {
             return self.codegen_extern_call(func, symbol, params, ret.as_deref(), args);
         }
@@ -1811,10 +2344,7 @@ impl<'a> Cg<'a> {
             }
             let (v, t) = self.codegen_expr(&args[0])?;
             if t != Type::String {
-                return Err(format!(
-                    "panic() argument must be a string, got {:?}",
-                    t
-                ));
+                return Err(format!("panic() argument must be a string, got {:?}", t));
             }
             self.out.push_str(&format!(
                 "  call void @runtime_panic({})\n",
@@ -1840,7 +2370,8 @@ impl<'a> Cg<'a> {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!(
                         "  {} = call i8* @runtime_str_from_i64({})\n",
-                        tmp, self.fmt_call_arg(&v, &Type::Int)
+                        tmp,
+                        self.fmt_call_arg(&v, &Type::Int)
                     ));
                     return Ok((tmp, Type::String));
                 }
@@ -1848,7 +2379,8 @@ impl<'a> Cg<'a> {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!(
                         "  {} = call i8* @runtime_str_from_f64({})\n",
-                        tmp, self.fmt_call_arg(&v, &Type::Float)
+                        tmp,
+                        self.fmt_call_arg(&v, &Type::Float)
                     ));
                     return Ok((tmp, Type::String));
                 }
@@ -1856,7 +2388,8 @@ impl<'a> Cg<'a> {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!(
                         "  {} = call i8* @runtime_str_from_bool({})\n",
-                        tmp, self.fmt_call_arg(&v, &Type::Bool)
+                        tmp,
+                        self.fmt_call_arg(&v, &Type::Bool)
                     ));
                     return Ok((tmp, Type::String));
                 }
@@ -1866,10 +2399,8 @@ impl<'a> Cg<'a> {
                     let tmp_tag = self.fresh_temp();
                     let tmp_payload = self.fresh_temp();
                     let tmp_result = self.fresh_temp();
-                    self.out.push_str(&format!(
-                        "  {} = extractvalue %Option {}, 0\n",
-                        tmp_tag, v
-                    ));
+                    self.out
+                        .push_str(&format!("  {} = extractvalue %Option {}, 0\n", tmp_tag, v));
                     self.out.push_str(&format!(
                         "  {} = extractvalue %Option {}, 1, 0\n",
                         tmp_payload, v
@@ -1923,23 +2454,55 @@ impl<'a> Cg<'a> {
                         ));
                         return Ok((tmp_result, Type::String));
                     }
-                    return Err(format!(
-                        "str() cannot convert {:?} to a string in codegen",
-                        t
+                    // Iteration 34 PH4: user-defined enums stringify to their
+                    // VARIANT NAME via registered variant-name globals.
+                    let variants = self
+                        .defs
+                        .states
+                        .get(&base)
+                        .ok_or_else(|| format!("unknown state '{}'", base))?;
+                    let tag_v = self.fresh_temp();
+                    self.out.push_str(&format!(
+                        "  {} = extractvalue {} {}, 0\n",
+                        tag_v, llvm_ty, v
                     ));
+                    let mut name_vals: Vec<(i32, String)> = Vec::new();
+                    for (i, vn) in variants.iter().enumerate() {
+                        let (owned, _) = self.codegen_string_lit(vn)?;
+                        name_vals.push((i as i32, owned));
+                    }
+                    let mut acc = name_vals
+                        .last()
+                        .map(|(_, s)| s.clone())
+                        .ok_or_else(|| format!("enum '{}' has no variants", base))?;
+                    for (i, s) in name_vals.iter().enumerate().rev().skip(1) {
+                        let c = self.fresh_temp();
+                        self.out
+                            .push_str(&format!("  {} = icmp eq i32 {}, {}\n", c, tag_v, i));
+                        let sel = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = select i1 {}, i8* {}, i8* {}\n",
+                            sel, c, s.1, acc
+                        ));
+                        acc = sel;
+                    }
+                    return Ok((acc, Type::String));
                 }
                 Type::Json => {
                     let tmp = self.fresh_temp();
                     self.out.push_str(&format!(
                         "  {} = call i8* @runtime_json_stringify(i8* {})\n",
-                        tmp, self.fmt_call_arg(&v, &Type::Json)
+                        tmp,
+                        self.fmt_call_arg(&v, &Type::Json)
                     ));
                     return Ok((tmp, Type::String));
                 }
-                _ => return Err(format!(
-                    "str() cannot convert {:?} to a string in codegen",
-                    t
-                )),
+                _ => {
+                    return Err(format!(
+                        "str() cannot convert {:?} to a string in codegen",
+                        t
+                    ));
+                }
             }
         }
         // Phase 12 Step 1: stdlib runtime builtins (string/math/time/fs/io)
@@ -1969,9 +2532,10 @@ impl<'a> Cg<'a> {
         }
         // Phase 6: monomorphized generic function call
         if let Some(mangled) = self.mono_name_map.get(func) {
-            let mono_fdef = self.mono_fdefs.get(mangled).ok_or_else(|| {
-                format!("monomorphized function '{}' not found", mangled)
-            })?;
+            let mono_fdef = self
+                .mono_fdefs
+                .get(mangled)
+                .ok_or_else(|| format!("monomorphized function '{}' not found", mangled))?;
             let llvm_name = mangled;
             let mut call_args = Vec::new();
             for (arg, (_, ptype)) in args.iter().zip(&mono_fdef.params) {
@@ -1988,10 +2552,8 @@ impl<'a> Cg<'a> {
                 None => ("void".to_string(), Type::Unit),
             };
             if ret_type.0 == "void" {
-                self.out.push_str(&format!(
-                    "  call void @{}({})\n",
-                    llvm_name, call_args_str
-                ));
+                self.out
+                    .push_str(&format!("  call void @{}({})\n", llvm_name, call_args_str));
                 return Ok((String::new(), Type::Unit));
             } else {
                 let tmp = self.fresh_temp();
@@ -2031,10 +2593,8 @@ impl<'a> Cg<'a> {
             None => ("void".to_string(), Type::Unit),
         };
         if ret_type.0 == "void" {
-            self.out.push_str(&format!(
-                "  call void @{}({})\n",
-                llvm_name, call_args_str
-            ));
+            self.out
+                .push_str(&format!("  call void @{}({})\n", llvm_name, call_args_str));
             Ok((String::new(), Type::Unit))
         } else {
             let tmp = self.fresh_temp();
@@ -2057,9 +2617,11 @@ impl<'a> Cg<'a> {
         ret: &Type,
     ) -> Result<(String, Type), String> {
         // Load the %LimeClosure* from the variable's alloca
-        let closure_ptr = self.named.get(func).cloned().ok_or_else(|| {
-            format!("undefined variable '{}'", func)
-        })?;
+        let closure_ptr = self
+            .named
+            .get(func)
+            .cloned()
+            .ok_or_else(|| format!("undefined variable '{}'", func))?;
         let closure_loaded = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = load %LimeClosure*, %LimeClosure** {}, align 8\n",
@@ -2125,36 +2687,24 @@ impl<'a> Cg<'a> {
                     }
                     Type::Float => {
                         let raw = self.fresh_temp();
-                        self.out.push_str(&format!(
-                            "  {} = bitcast double {} to i64\n",
-                            raw, bare
-                        ));
-                        self.out.push_str(&format!(
-                            "  store i64 {}, i64* {}, align 8\n",
-                            raw, ptr_i64
-                        ));
+                        self.out
+                            .push_str(&format!("  {} = bitcast double {} to i64\n", raw, bare));
+                        self.out
+                            .push_str(&format!("  store i64 {}, i64* {}, align 8\n", raw, ptr_i64));
                     }
                     Type::Bool => {
                         let ext = self.fresh_temp();
-                        self.out.push_str(&format!(
-                            "  {} = zext i1 {} to i64\n",
-                            ext, bare
-                        ));
-                        self.out.push_str(&format!(
-                            "  store i64 {}, i64* {}, align 8\n",
-                            ext, ptr_i64
-                        ));
+                        self.out
+                            .push_str(&format!("  {} = zext i1 {} to i64\n", ext, bare));
+                        self.out
+                            .push_str(&format!("  store i64 {}, i64* {}, align 8\n", ext, ptr_i64));
                     }
                     _ => {
                         let bc = self.fresh_temp();
-                        self.out.push_str(&format!(
-                            "  {} = ptrtoint i8* {} to i64\n",
-                            bc, bare
-                        ));
-                        self.out.push_str(&format!(
-                            "  store i64 {}, i64* {}, align 8\n",
-                            bc, ptr_i64
-                        ));
+                        self.out
+                            .push_str(&format!("  {} = ptrtoint i8* {} to i64\n", bc, bare));
+                        self.out
+                            .push_str(&format!("  store i64 {}, i64* {}, align 8\n", bc, ptr_i64));
                     }
                 }
             }
@@ -2191,7 +2741,11 @@ impl<'a> Cg<'a> {
     /// (`string`/`math`/`time`/`fs`/`io`) to calls into the C runtime helpers
     /// declared in src/codegen/mod.rs. Returns `Ok(None)` when `func` is not a
     /// builtin handled here so the caller can continue to user-function lookup.
-    fn codegen_runtime_builtin(&mut self, func: &str, args: &[Expr]) -> Result<Option<(String, Type)>, String> {
+    fn codegen_runtime_builtin(
+        &mut self,
+        func: &str,
+        args: &[Expr],
+    ) -> Result<Option<(String, Type)>, String> {
         // Evaluate an argument and format it for a call of the given type.
         fn arg(cg: &mut Cg, e: &Expr, want: &Type) -> Result<String, String> {
             let (v, t) = cg.codegen_expr(e)?;
@@ -2211,7 +2765,11 @@ impl<'a> Cg<'a> {
         // N string arguments -> i8* formatted list.
         fn str_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
             if exprs.len() != n {
-                return Err(format!("builtin expects {} string argument(s), got {}", n, exprs.len()));
+                return Err(format!(
+                    "builtin expects {} string argument(s), got {}",
+                    n,
+                    exprs.len()
+                ));
             }
             exprs.iter().map(|e| arg(cg, e, &Type::String)).collect()
         }
@@ -2221,7 +2779,11 @@ impl<'a> Cg<'a> {
         // N float arguments -> double formatted list.
         fn f64_args(cg: &mut Cg, exprs: &[Expr], n: usize) -> Result<Vec<String>, String> {
             if exprs.len() != n {
-                return Err(format!("builtin expects {} float argument(s), got {}", n, exprs.len()));
+                return Err(format!(
+                    "builtin expects {} float argument(s), got {}",
+                    n,
+                    exprs.len()
+                ));
             }
             exprs.iter().map(|e| arg(cg, e, &Type::Float)).collect()
         }
@@ -2237,10 +2799,8 @@ impl<'a> Cg<'a> {
         fn list_arg(cg: &mut Cg, e: &Expr) -> Result<String, String> {
             let (val, _ty) = cg.codegen_expr(e)?;
             let slot = cg.fresh_temp();
-            cg.out.push_str(&format!(
-                "  {} = alloca %LimeList, align 8\n",
-                slot
-            ));
+            cg.out
+                .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
             cg.out.push_str(&format!(
                 "  store %LimeList {}, ptr {}, align 8\n",
                 val, slot
@@ -2253,7 +2813,9 @@ impl<'a> Cg<'a> {
             let tmp = cg.fresh_temp();
             cg.out.push_str(&format!(
                 "  {} = call i8* @{}({})\n",
-                tmp, helper, call_args.join(", ")
+                tmp,
+                helper,
+                call_args.join(", ")
             ));
             (tmp, Type::String)
         }
@@ -2263,9 +2825,12 @@ impl<'a> Cg<'a> {
             let flag = cg.fresh_temp();
             cg.out.push_str(&format!(
                 "  {} = call i32 @{}({})\n",
-                tmp, helper, call_args.join(", ")
+                tmp,
+                helper,
+                call_args.join(", ")
             ));
-            cg.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", flag, tmp));
+            cg.out
+                .push_str(&format!("  {} = icmp ne i32 {}, 0\n", flag, tmp));
             (flag, Type::Bool)
         }
         // Emit a call returning a double.
@@ -2273,7 +2838,9 @@ impl<'a> Cg<'a> {
             let tmp = cg.fresh_temp();
             cg.out.push_str(&format!(
                 "  {} = call double @{}({})\n",
-                tmp, helper, call_args.join(", ")
+                tmp,
+                helper,
+                call_args.join(", ")
             ));
             (tmp, Type::Float)
         }
@@ -2282,7 +2849,9 @@ impl<'a> Cg<'a> {
             let tmp = cg.fresh_temp();
             cg.out.push_str(&format!(
                 "  {} = call i64 @{}({})\n",
-                tmp, helper, call_args.join(", ")
+                tmp,
+                helper,
+                call_args.join(", ")
             ));
             (tmp, Type::Int)
         }
@@ -2292,12 +2861,12 @@ impl<'a> Cg<'a> {
             let result = cg.fresh_temp();
             cg.out.push_str(&format!(
                 "  {} = call i32 @{}({})\n",
-                tmp, helper, call_args.join(", ")
+                tmp,
+                helper,
+                call_args.join(", ")
             ));
-            cg.out.push_str(&format!(
-                "  {} = sext i32 {} to i64\n",
-                result, tmp
-            ));
+            cg.out
+                .push_str(&format!("  {} = sext i32 {} to i64\n", result, tmp));
 
             (result, Type::Int)
         }
@@ -2306,12 +2875,18 @@ impl<'a> Cg<'a> {
         fn call_list(cg: &mut Cg, helper: &str, call_args: &[String]) -> (String, Type) {
             let slot = cg.fresh_temp();
             let tmp = cg.fresh_temp();
-            cg.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+            cg.out
+                .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
             cg.out.push_str(&format!(
                 "  call void @{}(ptr sret(%LimeList) {}, {})\n",
-                helper, slot, call_args.join(", ")
+                helper,
+                slot,
+                call_args.join(", ")
             ));
-            cg.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+            cg.out.push_str(&format!(
+                "  {} = load %LimeList, ptr {}, align 8\n",
+                tmp, slot
+            ));
             (tmp, Type::List(Box::new(Type::String)))
         }
 
@@ -2326,7 +2901,8 @@ impl<'a> Cg<'a> {
                     Type::String => {
                         let s = self.fmt_call_arg(&v, &Type::String);
                         let tmp = self.fresh_temp();
-                        self.out.push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
+                        self.out
+                            .push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
                         Ok(Some((tmp, Type::Int)))
                     }
                     Type::List(_) => {
@@ -2344,7 +2920,8 @@ impl<'a> Cg<'a> {
             "byte_len" => {
                 let s = str_arg(self, &args[0])?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
+                self.out
+                    .push_str(&format!("  {} = call i64 @strlen({})\n", tmp, s));
                 Ok(Some((tmp, Type::Int)))
             }
             "contains" => {
@@ -2588,7 +3165,11 @@ impl<'a> Cg<'a> {
             "eprint" | "eprintln" => {
                 for arg in args {
                     let (v, _) = self.codegen_expr(arg)?;
-                    let rt = if func == "eprint" { "runtime_eprint" } else { "runtime_eprintln" };
+                    let rt = if func == "eprint" {
+                        "runtime_eprint"
+                    } else {
+                        "runtime_eprintln"
+                    };
                     self.out.push_str(&format!(
                         "  call void @{}({})\n",
                         rt,
@@ -2599,12 +3180,14 @@ impl<'a> Cg<'a> {
             }
             "io_read_line" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_read_line()\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = call i8* @runtime_read_line()\n", tmp));
                 Ok(Some((tmp, Type::String)))
             }
             "io_read_all" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_read_all()\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = call i8* @runtime_read_all()\n", tmp));
                 Ok(Some((tmp, Type::String)))
             }
             "io_write_stdout" => {
@@ -2661,23 +3244,37 @@ impl<'a> Cg<'a> {
                 let size_slot = self.fresh_temp();
                 let isdir_slot = self.fresh_temp();
                 let isfile_slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca i64, align 8\n", size_slot));
-                self.out.push_str(&format!("  {} = alloca i8, align 1\n", isdir_slot));
-                self.out.push_str(&format!("  {} = alloca i8, align 1\n", isfile_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca i64, align 8\n", size_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca i8, align 1\n", isdir_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca i8, align 1\n", isfile_slot));
                 self.out.push_str(&format!(
                     "  call void @runtime_fs_metadata({}, ptr {}, ptr {}, ptr {})\n",
                     p, size_slot, isdir_slot, isfile_slot
                 ));
                 let size = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load i64, ptr {}, align 8\n", size, size_slot));
+                self.out.push_str(&format!(
+                    "  {} = load i64, ptr {}, align 8\n",
+                    size, size_slot
+                ));
                 let isdir_raw = self.fresh_temp();
                 let isdir = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load i8, ptr {}, align 1\n", isdir_raw, isdir_slot));
-                self.out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", isdir, isdir_raw));
+                self.out.push_str(&format!(
+                    "  {} = load i8, ptr {}, align 1\n",
+                    isdir_raw, isdir_slot
+                ));
+                self.out
+                    .push_str(&format!("  {} = icmp ne i8 {}, 0\n", isdir, isdir_raw));
                 let isfile_raw = self.fresh_temp();
                 let isfile = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load i8, ptr {}, align 1\n", isfile_raw, isfile_slot));
-                self.out.push_str(&format!("  {} = icmp ne i8 {}, 0\n", isfile, isfile_raw));
+                self.out.push_str(&format!(
+                    "  {} = load i8, ptr {}, align 1\n",
+                    isfile_raw, isfile_slot
+                ));
+                self.out
+                    .push_str(&format!("  {} = icmp ne i8 {}, 0\n", isfile, isfile_raw));
                 let t1 = self.fresh_temp();
                 let t2 = self.fresh_temp();
                 let t3 = self.fresh_temp();
@@ -2702,7 +3299,11 @@ impl<'a> Cg<'a> {
             }
             "fs_copy" | "fs_rename" => {
                 let a = str_args(self, args, 2)?;
-                let rt = if func == "fs_copy" { "runtime_fs_copy" } else { "runtime_fs_rename" };
+                let rt = if func == "fs_copy" {
+                    "runtime_fs_copy"
+                } else {
+                    "runtime_fs_rename"
+                };
                 let (v, t) = call_bool(self, rt, &a);
                 Ok(Some((v, t)))
             }
@@ -2732,7 +3333,11 @@ impl<'a> Cg<'a> {
                 }
                 let p = str_arg(self, &args[0])?;
                 let (list_v, _) = self.codegen_expr(&args[1])?;
-                let (v, t) = call_bool(self, "runtime_fs_write_lines", &[p, self.bare_value(&list_v).to_string()]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_fs_write_lines",
+                    &[p, self.bare_value(&list_v).to_string()],
+                );
                 Ok(Some((v, t)))
             }
             // ---- list builtins (Phase C-1.2) ----
@@ -2746,13 +3351,21 @@ impl<'a> Cg<'a> {
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_list_insert(ptr sret(%LimeList) {}, ptr {}, i64 {}, i64 {})\n",
                     slot, slot, self.bare_value(&idx_v), converted
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, list_t)))
             }
             "list_set" => {
@@ -2765,13 +3378,21 @@ impl<'a> Cg<'a> {
                 let converted = self.convert_to_i64(&elem_v, &elem_t)?;
                 let tmp = self.fresh_temp();
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_list_set(ptr sret(%LimeList) {}, ptr {}, i64 {}, i64 {})\n",
                     slot, slot, self.bare_value(&idx_v), converted
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, list_t)))
             }
             "list_get" => {
@@ -2783,7 +3404,9 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i64 @runtime_list_get(%LimeList {}, i64 {})\n",
-                    tmp, self.bare_value(&list_v), self.bare_value(&idx_v)
+                    tmp,
+                    self.bare_value(&list_v),
+                    self.bare_value(&idx_v)
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
@@ -2802,26 +3425,39 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 if func == "list_clone" {
                     // void runtime_list_clone(LimeList* dest, LimeList* src)
-                    self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                    self.out
+                        .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                     self.out.push_str(&format!(
                         "  call void @{}(ptr {}, ptr {})\n",
-                        rt, slot, self.bare_value(&list_v)
+                        rt,
+                        slot,
+                        self.bare_value(&list_v)
                     ));
-                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                    self.out.push_str(&format!(
+                        "  {} = load %LimeList, ptr {}, align 8\n",
+                        tmp, slot
+                    ));
                 } else {
                     // void runtime_list_clear/sort(LimeList* list)
                     self.out.push_str(&format!(
                         "  call void @{}(ptr {})\n",
-                        rt, self.bare_value(&list_v)
+                        rt,
+                        self.bare_value(&list_v)
                     ));
-                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, self.bare_value(&list_v)));
+                    self.out.push_str(&format!(
+                        "  {} = load %LimeList, ptr {}, align 8\n",
+                        tmp,
+                        self.bare_value(&list_v)
+                    ));
                 }
                 Ok(Some((tmp, list_t)))
             }
             "list_empty" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
-                self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                self.out
+                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- map builtins (Phase C-1.2) ----
@@ -2830,13 +3466,18 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i64 @runtime_map_len({})\n",
-                    tmp, self.bare_value(&map_v)
+                    tmp,
+                    self.bare_value(&map_v)
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "map_is_empty" => {
                 let (map_v, _) = self.codegen_expr(&args[0])?;
-                let (v, t) = call_bool(self, "runtime_map_is_empty", &[self.bare_value(&map_v).to_string()]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_map_is_empty",
+                    &[self.bare_value(&map_v).to_string()],
+                );
                 Ok(Some((v, t)))
             }
             "map_insert" => {
@@ -2850,13 +3491,21 @@ impl<'a> Cg<'a> {
                 let val = self.convert_to_i64(&val_v, &val_t)?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeMap {}, ptr {}, align 8\n", self.bare_value(&map_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeMap {}, ptr {}, align 8\n",
+                    self.bare_value(&map_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_map_insert(ptr sret(%LimeMap) {}, ptr {}, i64 {}, i64 {})\n",
                     slot, slot, key, val
                 ));
-                self.out.push_str(&format!("  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeMap, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, map_t)))
             }
             "map_get" => {
@@ -2866,7 +3515,9 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i64 @runtime_map_get(ptr {}, i64 {})\n",
-                    tmp, self.bare_value(&map_v), key
+                    tmp,
+                    self.bare_value(&map_v),
+                    key
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
@@ -2876,83 +3527,143 @@ impl<'a> Cg<'a> {
                 let key = self.convert_to_i64(&key_v, &key_t)?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeMap {}, ptr {}, align 8\n", self.bare_value(&map_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeMap {}, ptr {}, align 8\n",
+                    self.bare_value(&map_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_map_remove(ptr sret(%LimeMap) {}, ptr {}, i64 {})\n",
                     slot, slot, key
                 ));
-                self.out.push_str(&format!("  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeMap, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, map_t)))
             }
             "map_contains_key" => {
                 let (map_v, _) = self.codegen_expr(&args[0])?;
                 let (key_v, key_t) = self.codegen_expr(&args[1])?;
                 let key = self.convert_to_i64(&key_v, &key_t)?;
-                let (v, t) = call_bool(self, "runtime_map_contains_key", &[self.bare_value(&map_v).to_string(), key]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_map_contains_key",
+                    &[self.bare_value(&map_v).to_string(), key],
+                );
                 Ok(Some((v, t)))
             }
             "map_clear" | "map_clone" => {
                 let (map_v, map_t) = self.codegen_expr(&args[0])?;
-                let rt = if func == "map_clear" { "runtime_map_clear" } else { "runtime_map_clone" };
+                let rt = if func == "map_clear" {
+                    "runtime_map_clear"
+                } else {
+                    "runtime_map_clone"
+                };
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeMap {}, ptr {}, align 8\n", self.bare_value(&map_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeMap {}, ptr {}, align 8\n",
+                    self.bare_value(&map_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @{}(ptr sret(%LimeMap) {}, ptr {})\n",
                     rt, slot, slot
                 ));
-                self.out.push_str(&format!("  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeMap, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, map_t)))
             }
             // ---- set builtins (Phase C-1.2) ----
             "set_len" | "set_size" => {
                 let (set_v, _) = self.codegen_expr(&args[0])?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i64 @runtime_set_len({})\n", tmp, self.bare_value(&set_v)));
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_set_len({})\n",
+                    tmp,
+                    self.bare_value(&set_v)
+                ));
                 Ok(Some((tmp, Type::Int)))
             }
             "set_is_empty" => {
                 let (set_v, _) = self.codegen_expr(&args[0])?;
-                let (v, t) = call_bool(self, "runtime_set_is_empty", &[self.bare_value(&set_v).to_string()]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_set_is_empty",
+                    &[self.bare_value(&set_v).to_string()],
+                );
                 Ok(Some((v, t)))
             }
             "set_add" | "set_remove" => {
                 let (set_v, set_t) = self.codegen_expr(&args[0])?;
                 let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
                 let elem = self.convert_to_i64(&elem_v, &elem_t)?;
-                let rt = if func == "set_add" { "runtime_set_add" } else { "runtime_set_remove" };
+                let rt = if func == "set_add" {
+                    "runtime_set_add"
+                } else {
+                    "runtime_set_remove"
+                };
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeSet {}, ptr {}, align 8\n", self.bare_value(&set_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeSet {}, ptr {}, align 8\n",
+                    self.bare_value(&set_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @{}(ptr sret(%LimeSet) {}, ptr {}, i64 {})\n",
                     rt, slot, slot, elem
                 ));
-                self.out.push_str(&format!("  {} = load %LimeSet, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeSet, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, set_t)))
             }
             "set_contains" => {
                 let (set_v, _) = self.codegen_expr(&args[0])?;
                 let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
                 let elem = self.convert_to_i64(&elem_v, &elem_t)?;
-                let (v, t) = call_bool(self, "runtime_set_contains", &[self.bare_value(&set_v).to_string(), elem]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_set_contains",
+                    &[self.bare_value(&set_v).to_string(), elem],
+                );
                 Ok(Some((v, t)))
             }
             "set_clear" | "set_clone" => {
                 let (set_v, set_t) = self.codegen_expr(&args[0])?;
-                let rt = if func == "set_clear" { "runtime_set_clear" } else { "runtime_set_clone" };
+                let rt = if func == "set_clear" {
+                    "runtime_set_clear"
+                } else {
+                    "runtime_set_clone"
+                };
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeSet {}, ptr {}, align 8\n", self.bare_value(&set_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeSet {}, ptr {}, align 8\n",
+                    self.bare_value(&set_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @{}(ptr sret(%LimeSet) {}, ptr {})\n",
                     rt, slot, slot
                 ));
-                self.out.push_str(&format!("  {} = load %LimeSet, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeSet, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, set_t)))
             }
             // ---- queue builtins (Phase C-1.2) ----
@@ -2962,13 +3673,21 @@ impl<'a> Cg<'a> {
                 let elem = self.convert_to_i64(&elem_v, &elem_t)?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_queue_push(ptr sret(%LimeList) {}, ptr {}, i64 {})\n",
                     slot, slot, elem
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, list_t)))
             }
             "queue_pop" | "queue_front" | "queue_back" => {
@@ -2982,7 +3701,9 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i64 @{}({})\n",
-                    tmp, rt, self.bare_value(&list_v)
+                    tmp,
+                    rt,
+                    self.bare_value(&list_v)
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
@@ -2991,32 +3712,47 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i64 @runtime_queue_len({})\n",
-                    tmp, self.bare_value(&list_v)
+                    tmp,
+                    self.bare_value(&list_v)
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "queue_is_empty" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
-                let (v, t) = call_bool(self, "runtime_queue_is_empty", &[self.bare_value(&list_v).to_string()]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_queue_is_empty",
+                    &[self.bare_value(&list_v).to_string()],
+                );
                 Ok(Some((v, t)))
             }
             "queue_clear" => {
                 let (list_v, list_t) = self.codegen_expr(&args[0])?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_queue_clear(ptr sret(%LimeList) {}, ptr {})\n",
                     slot, slot
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, list_t)))
             }
             "queue_empty" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
-                self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                self.out
+                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- stack builtins (Phase C-1.2) ----
@@ -3026,87 +3762,145 @@ impl<'a> Cg<'a> {
                 let elem = self.convert_to_i64(&elem_v, &elem_t)?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_stack_push(ptr sret(%LimeList) {}, ptr {}, i64 {})\n",
                     slot, slot, elem
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, list_t)))
             }
             "stack_pop" | "stack_peek" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
-                let rt = if func == "stack_pop" { "runtime_stack_pop" } else { "runtime_stack_peek" };
+                let rt = if func == "stack_pop" {
+                    "runtime_stack_pop"
+                } else {
+                    "runtime_stack_peek"
+                };
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i64 @{}({})\n", tmp, rt, self.bare_value(&list_v)));
+                self.out.push_str(&format!(
+                    "  {} = call i64 @{}({})\n",
+                    tmp,
+                    rt,
+                    self.bare_value(&list_v)
+                ));
                 Ok(Some((tmp, Type::Int)))
             }
             "stack_len" | "stack_size" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i64 @runtime_stack_len({})\n", tmp, self.bare_value(&list_v)));
+                self.out.push_str(&format!(
+                    "  {} = call i64 @runtime_stack_len({})\n",
+                    tmp,
+                    self.bare_value(&list_v)
+                ));
                 Ok(Some((tmp, Type::Int)))
             }
             "stack_is_empty" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
-                let (v, t) = call_bool(self, "runtime_stack_is_empty", &[self.bare_value(&list_v).to_string()]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_stack_is_empty",
+                    &[self.bare_value(&list_v).to_string()],
+                );
                 Ok(Some((v, t)))
             }
             "stack_clear" => {
                 let (list_v, list_t) = self.codegen_expr(&args[0])?;
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
-                self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", self.bare_value(&list_v), slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    slot
+                ));
                 self.out.push_str(&format!(
                     "  call void @runtime_stack_clear(ptr sret(%LimeList) {}, ptr {})\n",
                     slot, slot
                 ));
-                self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", tmp, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, list_t)))
             }
             "stack_empty" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
-                self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                self.out
+                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- JSON builtins ----
             "json_parse" => {
                 let a = str_arg(self, &args[0])?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_parse(i8* {})\n", tmp, a));
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_json_parse(i8* {})\n",
+                    tmp, a
+                ));
                 Ok(Some((tmp, Type::Json)))
             }
             "json_stringify" => {
                 let a = arg(self, &args[0], &Type::Json)?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_stringify(i8* {})\n", tmp, a));
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_json_stringify(i8* {})\n",
+                    tmp, a
+                ));
                 Ok(Some((tmp, Type::String)))
             }
             "json_get" => {
                 let j = arg(self, &args[0], &Type::Json)?;
                 let k = str_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_get(i8* {}, i8* {})\n", tmp, j, k));
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_json_get(i8* {}, i8* {})\n",
+                    tmp, j, k
+                ));
                 // Wrap as Option(Json): check if result is null
                 let is_null = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, tmp));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, tmp));
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeOption, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeOption, align 8\n", slot));
                 // Store has_value
                 let has_val_ptr = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr %LimeOption, %LimeOption* {}, i32 0, i32 0\n", has_val_ptr, slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr %LimeOption, %LimeOption* {}, i32 0, i32 0\n",
+                    has_val_ptr, slot
+                ));
                 let i1_flag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = xor i1 {}, true\n", i1_flag, is_null));
-                self.out.push_str(&format!("  store i1 {}, i1* {}\n", i1_flag, has_val_ptr));
+                self.out
+                    .push_str(&format!("  {} = xor i1 {}, true\n", i1_flag, is_null));
+                self.out
+                    .push_str(&format!("  store i1 {}, i1* {}\n", i1_flag, has_val_ptr));
                 // Store value
                 let val_ptr = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr %LimeOption, %LimeOption* {}, i32 0, i32 1\n", val_ptr, slot));
-                self.out.push_str(&format!("  store i8* {}, i8** {}\n", tmp, val_ptr));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr %LimeOption, %LimeOption* {}, i32 0, i32 1\n",
+                    val_ptr, slot
+                ));
+                self.out
+                    .push_str(&format!("  store i8* {}, i8** {}\n", tmp, val_ptr));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %LimeOption, %LimeOption* {}\n", loaded, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeOption, %LimeOption* {}\n",
+                    loaded, slot
+                ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::Json)))))
             }
             "json_has" => {
@@ -3124,13 +3918,19 @@ impl<'a> Cg<'a> {
                 let j = arg(self, &args[0], &Type::Json)?;
                 let i = i64_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_at(i8* {}, i64 {})\n", tmp, j, i));
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_json_at(i8* {}, i64 {})\n",
+                    tmp, j, i
+                ));
                 Ok(Some((tmp, Type::Json)))
             }
             "json_as_string" => {
                 let j = arg(self, &args[0], &Type::Json)?;
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_as_string(i8* {})\n", tmp, j));
+                self.out.push_str(&format!(
+                    "  {} = call i8* @runtime_json_as_string(i8* {})\n",
+                    tmp, j
+                ));
                 Ok(Some((tmp, Type::String)))
             }
             "json_as_int" => {
@@ -3150,17 +3950,20 @@ impl<'a> Cg<'a> {
             }
             "json_null" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_null()\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = call i8* @runtime_json_null()\n", tmp));
                 Ok(Some((tmp, Type::Json)))
             }
             "json_object" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_object()\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = call i8* @runtime_json_object()\n", tmp));
                 Ok(Some((tmp, Type::Json)))
             }
             "json_array" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = call i8* @runtime_json_array()\n", tmp));
+                self.out
+                    .push_str(&format!("  {} = call i8* @runtime_json_array()\n", tmp));
                 Ok(Some((tmp, Type::Json)))
             }
             "json_set" => {
@@ -3180,314 +3983,673 @@ impl<'a> Cg<'a> {
             "option_some" => {
                 let v = any_arg(self, &args[0])?;
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot));
-                self.out.push_str(&format!("  store i32 0, ptr {}, align 4\n", tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
+                ));
+                self.out
+                    .push_str(&format!("  store i32 0, ptr {}, align 4\n", tag_gep));
                 let payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
+                ));
                 let converted = self.convert_to_i64(&v, &Type::Unknown)?;
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", converted, payload_gep));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    converted, payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
+                ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
             }
             "option_none" => {
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot));
-                self.out.push_str(&format!("  store i32 1, ptr {}, align 4\n", tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
+                ));
+                self.out
+                    .push_str(&format!("  store i32 1, ptr {}, align 4\n", tag_gep));
                 let payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
-                self.out.push_str(&format!("  store i64 0, ptr {}, align 8\n", payload_gep));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
+                ));
+                self.out
+                    .push_str(&format!("  store i64 0, ptr {}, align 8\n", payload_gep));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, slot));
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
+                ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
             }
             "option_is_some" => {
                 let v = any_arg(self, &args[0])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let cmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
                 Ok(Some((cmp, Type::Bool)))
             }
             "option_is_none" => {
                 let v = any_arg(self, &args[0])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let cmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
                 Ok(Some((cmp, Type::Bool)))
             }
             "option_extract" => {
                 let v = any_arg(self, &args[0])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let is_none = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_none, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_none, tag));
                 let panic_bb = self.fresh_block();
                 let ok_bb = self.fresh_block();
-                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_none, panic_bb, ok_bb));
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    is_none, panic_bb, ok_bb
+                ));
                 self.out.push_str(&format!("{}:\n", panic_bb));
                 let msg = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds [31 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
-                self.out.push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds [31 x i8], ptr @.str.panic_msg, i64 0, i64 0\n",
+                    msg
+                ));
+                self.out
+                    .push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
                 self.out.push_str("  unreachable\n");
                 self.out.push_str(&format!("{}:\n", ok_bb));
                 let payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    payload,
+                    self.bare_value(&v)
+                ));
                 Ok(Some((payload, Type::Unknown)))
             }
             "option_extract_or" => {
                 let v = any_arg(self, &args[0])?;
                 let default = any_arg(self, &args[1])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let is_some = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag));
                 let payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    payload,
+                    self.bare_value(&v)
+                ));
                 let result = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", result, is_some, payload, self.bare_value(&default)));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n",
+                    result,
+                    is_some,
+                    payload,
+                    self.bare_value(&default)
+                ));
                 Ok(Some((result, Type::Int)))
             }
             "option_and" => {
                 let a = any_arg(self, &args[0])?;
                 let tag_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag_a,
+                    self.bare_value(&a)
+                ));
                 let is_some = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag_a));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag_a));
                 let b_val = any_arg(self, &args[1])?;
                 let b_tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", b_tag, self.bare_value(&b_val)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    b_tag,
+                    self.bare_value(&b_val)
+                ));
                 let b_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    b_payload,
+                    self.bare_value(&b_val)
+                ));
                 let res_slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", res_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", res_slot));
                 let res_tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    res_tag_gep, res_slot
+                ));
                 let chosen_tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i32 {}, i32 1\n", chosen_tag, is_some, b_tag));
-                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 {}, i32 1\n",
+                    chosen_tag, is_some, b_tag
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n",
+                    chosen_tag, res_tag_gep
+                ));
                 let res_payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    res_payload_gep, res_slot
+                ));
                 let chosen_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 0\n", chosen_payload, is_some, b_payload));
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 0\n",
+                    chosen_payload, is_some, b_payload
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    chosen_payload, res_payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, res_slot
+                ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
             }
             "option_or" => {
                 let a = any_arg(self, &args[0])?;
                 let tag_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag_a,
+                    self.bare_value(&a)
+                ));
                 let is_some = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag_a));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_some, tag_a));
                 let payload_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    payload_a,
+                    self.bare_value(&a)
+                ));
                 let b_val = any_arg(self, &args[1])?;
                 let b_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    b_payload,
+                    self.bare_value(&b_val)
+                ));
                 let res_slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Option, align 8\n", res_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", res_slot));
                 let res_tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    res_tag_gep, res_slot
+                ));
                 let chosen_tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i32 0, i32 1\n", chosen_tag, is_some));
-                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 0, i32 1\n",
+                    chosen_tag, is_some
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n",
+                    chosen_tag, res_tag_gep
+                ));
                 let res_payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    res_payload_gep, res_slot
+                ));
                 let chosen_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", chosen_payload, is_some, payload_a, self.bare_value(&b_payload)));
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n",
+                    chosen_payload,
+                    is_some,
+                    payload_a,
+                    self.bare_value(&b_payload)
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    chosen_payload, res_payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Option, ptr {}, align 8\n", loaded, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, res_slot
+                ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::Unknown)))))
             }
             "option_equals" => {
                 let a = any_arg(self, &args[0])?;
                 let b = any_arg(self, &args[1])?;
                 let tag_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag_a,
+                    self.bare_value(&a)
+                ));
                 let tag_b = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 0\n", tag_b, self.bare_value(&b)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 0\n",
+                    tag_b,
+                    self.bare_value(&b)
+                ));
                 let tags_eq = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, {}\n", tags_eq, tag_a, tag_b));
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i32 {}, {}\n",
+                    tags_eq, tag_a, tag_b
+                ));
                 let both_none = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", both_none, tag_a));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 1\n", both_none, tag_a));
                 let both_none_and_eq = self.fresh_temp();
-                self.out.push_str(&format!("  {} = and i1 {}, {}\n", both_none_and_eq, tags_eq, both_none));
+                self.out.push_str(&format!(
+                    "  {} = and i1 {}, {}\n",
+                    both_none_and_eq, tags_eq, both_none
+                ));
                 let payload_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    payload_a,
+                    self.bare_value(&a)
+                ));
                 let payload_b = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Option {}, 1, 0\n", payload_b, self.bare_value(&b)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Option {}, 1, 0\n",
+                    payload_b,
+                    self.bare_value(&b)
+                ));
                 let payloads_eq = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", payloads_eq, payload_a, payload_b));
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i64 {}, {}\n",
+                    payloads_eq, payload_a, payload_b
+                ));
                 let both_some = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", both_some, tag_a));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", both_some, tag_a));
                 let both_some_and_eq = self.fresh_temp();
-                self.out.push_str(&format!("  {} = and i1 {}, {}\n", both_some_and_eq, tags_eq, both_some));
+                self.out.push_str(&format!(
+                    "  {} = and i1 {}, {}\n",
+                    both_some_and_eq, tags_eq, both_some
+                ));
                 let payload_check = self.fresh_temp();
-                self.out.push_str(&format!("  {} = and i1 {}, {}\n", payload_check, both_some_and_eq, payloads_eq));
+                self.out.push_str(&format!(
+                    "  {} = and i1 {}, {}\n",
+                    payload_check, both_some_and_eq, payloads_eq
+                ));
                 let result = self.fresh_temp();
-                self.out.push_str(&format!("  {} = or i1 {}, {}\n", result, both_none_and_eq, payload_check));
+                self.out.push_str(&format!(
+                    "  {} = or i1 {}, {}\n",
+                    result, both_none_and_eq, payload_check
+                ));
                 Ok(Some((result, Type::Bool)))
             }
             // ===== Result builtins =====
             "result_success" => {
                 let v = any_arg(self, &args[0])?;
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Result, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", tag_gep, slot));
-                self.out.push_str(&format!("  store i32 0, ptr {}, align 4\n", tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
+                ));
+                self.out
+                    .push_str(&format!("  store i32 0, ptr {}, align 4\n", tag_gep));
                 let payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
+                ));
                 let converted = self.convert_to_i64(&v, &Type::Unknown)?;
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", converted, payload_gep));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    converted, payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, slot));
-                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+                self.out.push_str(&format!(
+                    "  {} = load %Result, ptr {}, align 8\n",
+                    loaded, slot
+                ));
+                Ok(Some((
+                    loaded,
+                    Type::State("Result(unknown,unknown)".to_string()),
+                )))
             }
             "result_error" => {
                 let v = any_arg(self, &args[0])?;
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Result, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", tag_gep, slot));
-                self.out.push_str(&format!("  store i32 1, ptr {}, align 4\n", tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
+                ));
+                self.out
+                    .push_str(&format!("  store i32 1, ptr {}, align 4\n", tag_gep));
                 let payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
+                ));
                 let converted = self.convert_to_i64(&v, &Type::Unknown)?;
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", converted, payload_gep));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    converted, payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, slot));
-                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+                self.out.push_str(&format!(
+                    "  {} = load %Result, ptr {}, align 8\n",
+                    loaded, slot
+                ));
+                Ok(Some((
+                    loaded,
+                    Type::State("Result(unknown,unknown)".to_string()),
+                )))
             }
             "result_is_success" => {
                 let v = any_arg(self, &args[0])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let cmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", cmp, tag));
                 Ok(Some((cmp, Type::Bool)))
             }
             "result_is_error" => {
                 let v = any_arg(self, &args[0])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let cmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 1\n", cmp, tag));
                 Ok(Some((cmp, Type::Bool)))
             }
             "result_extract" => {
                 let v = any_arg(self, &args[0])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let is_error = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_error, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp ne i32 {}, 0\n", is_error, tag));
                 let panic_bb = self.fresh_block();
                 let ok_bb = self.fresh_block();
-                self.out.push_str(&format!("  br i1 {}, label %{}, label %{}\n", is_error, panic_bb, ok_bb));
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    is_error, panic_bb, ok_bb
+                ));
                 self.out.push_str(&format!("{}:\n", panic_bb));
                 let msg = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds [31 x i8], ptr @.str.panic_msg, i64 0, i64 0\n", msg));
-                self.out.push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds [31 x i8], ptr @.str.panic_msg, i64 0, i64 0\n",
+                    msg
+                ));
+                self.out
+                    .push_str(&format!("  call void @runtime_panic(i8* {})\n", msg));
                 self.out.push_str("  unreachable\n");
                 self.out.push_str(&format!("{}:\n", ok_bb));
                 let payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    payload,
+                    self.bare_value(&v)
+                ));
                 Ok(Some((payload, Type::Unknown)))
             }
             "result_extract_or" => {
                 let v = any_arg(self, &args[0])?;
                 let default = any_arg(self, &args[1])?;
                 let tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag,
+                    self.bare_value(&v)
+                ));
                 let is_success = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag));
                 let payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload, self.bare_value(&v)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    payload,
+                    self.bare_value(&v)
+                ));
                 let result = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", result, is_success, payload, self.bare_value(&default)));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n",
+                    result,
+                    is_success,
+                    payload,
+                    self.bare_value(&default)
+                ));
                 Ok(Some((result, Type::Int)))
             }
             "result_and" => {
                 let a = any_arg(self, &args[0])?;
                 let tag_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag_a,
+                    self.bare_value(&a)
+                ));
                 let is_success = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag_a));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag_a));
                 let b_val = any_arg(self, &args[1])?;
                 let b_tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", b_tag, self.bare_value(&b_val)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    b_tag,
+                    self.bare_value(&b_val)
+                ));
                 let b_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    b_payload,
+                    self.bare_value(&b_val)
+                ));
                 let a_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", a_payload, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    a_payload,
+                    self.bare_value(&a)
+                ));
                 let res_slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", res_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Result, align 8\n", res_slot));
                 let res_tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n",
+                    res_tag_gep, res_slot
+                ));
                 let chosen_tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i32 {}, i32 {}\n", chosen_tag, is_success, b_tag, tag_a));
-                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 {}, i32 {}\n",
+                    chosen_tag, is_success, b_tag, tag_a
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n",
+                    chosen_tag, res_tag_gep
+                ));
                 let res_payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n",
+                    res_payload_gep, res_slot
+                ));
                 let chosen_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", chosen_payload, is_success, b_payload, a_payload));
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n",
+                    chosen_payload, is_success, b_payload, a_payload
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    chosen_payload, res_payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, res_slot));
-                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+                self.out.push_str(&format!(
+                    "  {} = load %Result, ptr {}, align 8\n",
+                    loaded, res_slot
+                ));
+                Ok(Some((
+                    loaded,
+                    Type::State("Result(unknown,unknown)".to_string()),
+                )))
             }
             "result_or" => {
                 let a = any_arg(self, &args[0])?;
                 let tag_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag_a,
+                    self.bare_value(&a)
+                ));
                 let is_success = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag_a));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i32 {}, 0\n", is_success, tag_a));
                 let payload_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    payload_a,
+                    self.bare_value(&a)
+                ));
                 let b_val = any_arg(self, &args[1])?;
                 let b_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", b_payload, self.bare_value(&b_val)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    b_payload,
+                    self.bare_value(&b_val)
+                ));
                 let res_slot = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %Result, align 8\n", res_slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %Result, align 8\n", res_slot));
                 let res_tag_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n", res_tag_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 0\n",
+                    res_tag_gep, res_slot
+                ));
                 let chosen_tag = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i32 0, i32 1\n", chosen_tag, is_success));
-                self.out.push_str(&format!("  store i32 {}, ptr {}, align 4\n", chosen_tag, res_tag_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i32 0, i32 1\n",
+                    chosen_tag, is_success
+                ));
+                self.out.push_str(&format!(
+                    "  store i32 {}, ptr {}, align 4\n",
+                    chosen_tag, res_tag_gep
+                ));
                 let res_payload_gep = self.fresh_temp();
-                self.out.push_str(&format!("  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n", res_payload_gep, res_slot));
+                self.out.push_str(&format!(
+                    "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n",
+                    res_payload_gep, res_slot
+                ));
                 let chosen_payload = self.fresh_temp();
-                self.out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", chosen_payload, is_success, payload_a, self.bare_value(&b_payload)));
-                self.out.push_str(&format!("  store i64 {}, ptr {}, align 8\n", chosen_payload, res_payload_gep));
+                self.out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n",
+                    chosen_payload,
+                    is_success,
+                    payload_a,
+                    self.bare_value(&b_payload)
+                ));
+                self.out.push_str(&format!(
+                    "  store i64 {}, ptr {}, align 8\n",
+                    chosen_payload, res_payload_gep
+                ));
                 let loaded = self.fresh_temp();
-                self.out.push_str(&format!("  {} = load %Result, ptr {}, align 8\n", loaded, res_slot));
-                Ok(Some((loaded, Type::State("Result(unknown,unknown)".to_string()))))
+                self.out.push_str(&format!(
+                    "  {} = load %Result, ptr {}, align 8\n",
+                    loaded, res_slot
+                ));
+                Ok(Some((
+                    loaded,
+                    Type::State("Result(unknown,unknown)".to_string()),
+                )))
             }
             "result_equals" => {
                 let a = any_arg(self, &args[0])?;
                 let b = any_arg(self, &args[1])?;
                 let tag_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag_a,
+                    self.bare_value(&a)
+                ));
                 let tag_b = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 0\n", tag_b, self.bare_value(&b)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 0\n",
+                    tag_b,
+                    self.bare_value(&b)
+                ));
                 let tags_eq = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i32 {}, {}\n", tags_eq, tag_a, tag_b));
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i32 {}, {}\n",
+                    tags_eq, tag_a, tag_b
+                ));
                 let payload_a = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload_a, self.bare_value(&a)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    payload_a,
+                    self.bare_value(&a)
+                ));
                 let payload_b = self.fresh_temp();
-                self.out.push_str(&format!("  {} = extractvalue %Result {}, 1, 0\n", payload_b, self.bare_value(&b)));
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %Result {}, 1, 0\n",
+                    payload_b,
+                    self.bare_value(&b)
+                ));
                 let payloads_eq = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp eq i64 {}, {}\n", payloads_eq, payload_a, payload_b));
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i64 {}, {}\n",
+                    payloads_eq, payload_a, payload_b
+                ));
                 let result = self.fresh_temp();
-                self.out.push_str(&format!("  {} = and i1 {}, {}\n", result, tags_eq, payloads_eq));
+                self.out.push_str(&format!(
+                    "  {} = and i1 {}, {}\n",
+                    result, tags_eq, payloads_eq
+                ));
                 Ok(Some((result, Type::Bool)))
             }
             // ===== Path operations (Phase C-1.8) =====
@@ -3496,7 +4658,8 @@ impl<'a> Cg<'a> {
                 let b = str_arg(self, &args[1])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_join(i8* {}, i8* {})\n", call, a, b
+                    "  {} = call i8* @runtime_path_join(i8* {}, i8* {})\n",
+                    call, a, b
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3504,7 +4667,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_basename(i8* {})\n", call, a
+                    "  {} = call i8* @runtime_path_basename(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3512,7 +4676,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_dirname(i8* {})\n", call, a
+                    "  {} = call i8* @runtime_path_dirname(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3520,7 +4685,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_filename(i8* {})\n", call, a
+                    "  {} = call i8* @runtime_path_filename(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3528,7 +4694,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_extension(i8* {})\n", call, a
+                    "  {} = call i8* @runtime_path_extension(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3536,7 +4703,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i32 @runtime_path_is_absolute(i8* {})\n", call, a
+                    "  {} = call i32 @runtime_path_is_absolute(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::Bool)))
             }
@@ -3544,7 +4712,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_normalize(i8* {})\n", call, a
+                    "  {} = call i8* @runtime_path_normalize(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3553,7 +4722,8 @@ impl<'a> Cg<'a> {
                 let b = str_arg(self, &args[1])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i32 @runtime_path_equals(i8* {}, i8* {})\n", call, a, b
+                    "  {} = call i32 @runtime_path_equals(i8* {}, i8* {})\n",
+                    call, a, b
                 ));
                 Ok(Some((call, Type::Bool)))
             }
@@ -3561,7 +4731,8 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_path_parent(i8* {})\n", call, a
+                    "  {} = call i8* @runtime_path_parent(i8* {})\n",
+                    call, a
                 ));
                 Ok(Some((call, Type::String)))
             }
@@ -3596,49 +4767,54 @@ impl<'a> Cg<'a> {
                 let key = str_arg(self, &args[0])?;
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_env_get(i8* {})\n", ptr_val, key
+                    "  {} = call i8* @runtime_env_get(i8* {})\n",
+                    ptr_val, key
                 ));
                 // Check if NULL -> None, else -> Some(value)
                 let is_null = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
-                ));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, ptr_val));
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = alloca %Option, align 8\n", slot
-                ));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
                 ));
                 // tag = 1 if null (None), 0 if not null (Some)
                 let zext_temp = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = zext i1 {} to i32\n", zext_temp, is_null
-                ));
+                self.out
+                    .push_str(&format!("  {} = zext i1 {} to i32\n", zext_temp, is_null));
                 // Use select: if is_null then 1 else 0
                 let tag_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                    "  {} = select i1 {}, i32 1, i32 0\n",
+                    tag_val, is_null
                 ));
                 self.out.push_str(&format!(
-                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                    "  store i32 {}, ptr {}, align 4\n",
+                    tag_val, tag_gep
                 ));
                 let payload_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
                 ));
                 // If null, store 0; otherwise store ptrtoint of the pointer
                 let ptr_as_i64 = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_as_i64, ptr_val
                 ));
                 self.out.push_str(&format!(
-                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                    "  store i64 {}, ptr {}, align 8\n",
+                    ptr_as_i64, payload_gep
                 ));
                 let loaded = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
                 ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
             }
@@ -3661,14 +4837,15 @@ impl<'a> Cg<'a> {
             "env_all" => {
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeMap, align 8\n", slot));
                 self.out.push_str(&format!(
-                    "  {} = alloca %LimeMap, align 8\n", slot
+                    "  call void @runtime_env_all(ptr sret(%LimeMap) {})\n",
+                    slot
                 ));
                 self.out.push_str(&format!(
-                    "  call void @runtime_env_all(ptr sret(%LimeMap) {})\n", slot
-                ));
-                self.out.push_str(&format!(
-                    "  {} = load %LimeMap, ptr {}, align 8\n", tmp, slot
+                    "  {} = load %LimeMap, ptr {}, align 8\n",
+                    tmp, slot
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
@@ -3677,45 +4854,50 @@ impl<'a> Cg<'a> {
                 let pat = str_arg(self, &args[0])?;
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_regex_compile(i8* {})\n", ptr_val, pat
+                    "  {} = call i8* @runtime_regex_compile(i8* {})\n",
+                    ptr_val, pat
                 ));
                 let is_null = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
-                ));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, ptr_val));
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = alloca %Option, align 8\n", slot
-                ));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
                 ));
                 let zext_temp = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = zext i1 {} to i32\n", zext_temp, is_null
-                ));
+                self.out
+                    .push_str(&format!("  {} = zext i1 {} to i32\n", zext_temp, is_null));
                 let tag_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                    "  {} = select i1 {}, i32 1, i32 0\n",
+                    tag_val, is_null
                 ));
                 self.out.push_str(&format!(
-                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                    "  store i32 {}, ptr {}, align 4\n",
+                    tag_val, tag_gep
                 ));
                 let payload_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
                 ));
                 let ptr_as_i64 = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_as_i64, ptr_val
                 ));
                 self.out.push_str(&format!(
-                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                    "  store i64 {}, ptr {}, align 8\n",
+                    ptr_as_i64, payload_gep
                 ));
                 let loaded = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
                 ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
             }
@@ -3730,41 +4912,47 @@ impl<'a> Cg<'a> {
                 let text = str_arg(self, &args[1])?;
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_regex_find(i8* {}, i8* {})\n", ptr_val, pat, text
+                    "  {} = call i8* @runtime_regex_find(i8* {}, i8* {})\n",
+                    ptr_val, pat, text
                 ));
                 let is_null = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
-                ));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, ptr_val));
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = alloca %Option, align 8\n", slot
-                ));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
                 ));
                 let tag_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                    "  {} = select i1 {}, i32 1, i32 0\n",
+                    tag_val, is_null
                 ));
                 self.out.push_str(&format!(
-                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                    "  store i32 {}, ptr {}, align 4\n",
+                    tag_val, tag_gep
                 ));
                 let payload_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
                 ));
                 let ptr_as_i64 = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_as_i64, ptr_val
                 ));
                 self.out.push_str(&format!(
-                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                    "  store i64 {}, ptr {}, align 8\n",
+                    ptr_as_i64, payload_gep
                 ));
                 let loaded = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
                 ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
             }
@@ -3860,7 +5048,8 @@ impl<'a> Cg<'a> {
                 let a1 = i64_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  call void @runtime_requests_client_builder_timeout(i8* {}, i64 {})\n", a0, a1
+                    "  call void @runtime_requests_client_builder_timeout(i8* {}, i64 {})\n",
+                    a0, a1
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
@@ -3869,7 +5058,8 @@ impl<'a> Cg<'a> {
                 let a1 = i64_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  call void @runtime_requests_client_builder_redirect_limit(i8* {}, i64 {})\n", a0, a1
+                    "  call void @runtime_requests_client_builder_redirect_limit(i8* {}, i64 {})\n",
+                    a0, a1
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
@@ -3877,7 +5067,8 @@ impl<'a> Cg<'a> {
                 let a0 = str_arg(self, &args[0])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  call void @runtime_requests_client_builder_redirect_disabled(i8* {})\n", a0
+                    "  call void @runtime_requests_client_builder_redirect_disabled(i8* {})\n",
+                    a0
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
@@ -3886,7 +5077,8 @@ impl<'a> Cg<'a> {
                 let a1 = str_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  call void @runtime_requests_client_builder_proxy(i8* {}, i8* {})\n", a0, a1
+                    "  call void @runtime_requests_client_builder_proxy(i8* {}, i8* {})\n",
+                    a0, a1
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
@@ -3895,7 +5087,8 @@ impl<'a> Cg<'a> {
                 let a1 = str_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  call void @runtime_requests_client_builder_tls_config(i8* {}, i8* {})\n", a0, a1
+                    "  call void @runtime_requests_client_builder_tls_config(i8* {}, i8* {})\n",
+                    a0, a1
                 ));
                 Ok(Some((tmp, Type::Unknown)))
             }
@@ -3910,7 +5103,11 @@ impl<'a> Cg<'a> {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
                 let a2 = str_arg(self, &args[2])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_header", &[a0, a1, a2]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_header",
+                    &[a0, a1, a2],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_headers" => {
@@ -3929,13 +5126,18 @@ impl<'a> Cg<'a> {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
                 let a1_len = i64_arg(self, &args[1])?; // placeholder
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_body_bytes", &[a0, a1, a1_len]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_body_bytes",
+                    &[a0, a1, a1_len],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_body_str" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_body_str", &[a0, a1]);
+                let (v, t) =
+                    call_bool(self, "runtime_requests_request_builder_body_str", &[a0, a1]);
                 Ok(Some((v, t)))
             }
             "requests_request_builder_json" => {
@@ -3953,7 +5155,11 @@ impl<'a> Cg<'a> {
             "requests_request_builder_multipart" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_multipart", &[a0, a1]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_multipart",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_timeout" => {
@@ -3965,25 +5171,41 @@ impl<'a> Cg<'a> {
             "requests_request_builder_redirect_limit" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = i64_arg(self, &args[1])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_redirect_limit", &[a0, a1]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_redirect_limit",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_redirect_disabled" => {
                 let a0 = str_arg(self, &args[0])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_redirect_disabled", &[a0]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_redirect_disabled",
+                    &[a0],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_basic_auth" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
                 let a2 = str_arg(self, &args[2])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_basic_auth", &[a0, a1, a2]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_basic_auth",
+                    &[a0, a1, a2],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_bearer_auth" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
-                let (v, t) = call_bool(self, "runtime_requests_request_builder_bearer_auth", &[a0, a1]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_request_builder_bearer_auth",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_send" => {
@@ -4010,41 +5232,47 @@ impl<'a> Cg<'a> {
                 let a0 = str_arg(self, &args[0])?;
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_requests_response_text(i8* {})\n", ptr_val, a0
+                    "  {} = call i8* @runtime_requests_response_text(i8* {})\n",
+                    ptr_val, a0
                 ));
                 let is_null = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
-                ));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, ptr_val));
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = alloca %Option, align 8\n", slot
-                ));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
                 ));
                 let tag_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                    "  {} = select i1 {}, i32 1, i32 0\n",
+                    tag_val, is_null
                 ));
                 self.out.push_str(&format!(
-                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                    "  store i32 {}, ptr {}, align 4\n",
+                    tag_val, tag_gep
                 ));
                 let payload_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
                 ));
                 let ptr_as_i64 = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_as_i64, ptr_val
                 ));
                 self.out.push_str(&format!(
-                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                    "  store i64 {}, ptr {}, align 8\n",
+                    ptr_as_i64, payload_gep
                 ));
                 let loaded = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
                 ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
             }
@@ -4138,41 +5366,47 @@ impl<'a> Cg<'a> {
                 let a1 = str_arg(self, &args[1])?;
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_requests_header_map_get(i8* {}, i8* {})\n", ptr_val, a0, a1
+                    "  {} = call i8* @runtime_requests_header_map_get(i8* {}, i8* {})\n",
+                    ptr_val, a0, a1
                 ));
                 let is_null = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = icmp eq i8* {}, null\n", is_null, ptr_val
-                ));
+                self.out
+                    .push_str(&format!("  {} = icmp eq i8* {}, null\n", is_null, ptr_val));
                 let slot = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = alloca %Option, align 8\n", slot
-                ));
+                self.out
+                    .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
                 let tag_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n", tag_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 0\n",
+                    tag_gep, slot
                 ));
                 let tag_val = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = select i1 {}, i32 1, i32 0\n", tag_val, is_null
+                    "  {} = select i1 {}, i32 1, i32 0\n",
+                    tag_val, is_null
                 ));
                 self.out.push_str(&format!(
-                    "  store i32 {}, ptr {}, align 4\n", tag_val, tag_gep
+                    "  store i32 {}, ptr {}, align 4\n",
+                    tag_val, tag_gep
                 ));
                 let payload_gep = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n", payload_gep, slot
+                    "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
+                    payload_gep, slot
                 ));
                 let ptr_as_i64 = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = ptrtoint i8* {} to i64\n", ptr_as_i64, ptr_val
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_as_i64, ptr_val
                 ));
                 self.out.push_str(&format!(
-                    "  store i64 {}, ptr {}, align 8\n", ptr_as_i64, payload_gep
+                    "  store i64 {}, ptr {}, align 8\n",
+                    ptr_as_i64, payload_gep
                 ));
                 let loaded = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = load %Option, ptr {}, align 8\n", loaded, slot
+                    "  {} = load %Option, ptr {}, align 8\n",
+                    loaded, slot
                 ));
                 Ok(Some((loaded, Type::Option(Box::new(Type::String)))))
             }
@@ -4206,7 +5440,11 @@ impl<'a> Cg<'a> {
                 let a2 = str_arg(self, &args[2])?;
                 let a3 = str_arg(self, &args[3])?;
                 let a4 = str_arg(self, &args[4])?;
-                let (v, t) = call_bool(self, "runtime_requests_multipart_file_with_metadata", &[a0, a1, a2, a3, a4]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_multipart_file_with_metadata",
+                    &[a0, a1, a2, a3, a4],
+                );
                 Ok(Some((v, t)))
             }
             "requests_tls_config_new" => {
@@ -4223,17 +5461,29 @@ impl<'a> Cg<'a> {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
                 let a2 = str_arg(self, &args[2])?;
-                let (v, t) = call_bool(self, "runtime_requests_tls_config_add_client_cert", &[a0, a1, a2]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_tls_config_add_client_cert",
+                    &[a0, a1, a2],
+                );
                 Ok(Some((v, t)))
             }
             "requests_tls_config_danger_accept_invalid_certs" => {
                 let a0 = str_arg(self, &args[0])?;
-                let (v, t) = call_bool(self, "runtime_requests_tls_config_danger_accept_invalid_certs", &[a0]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_tls_config_danger_accept_invalid_certs",
+                    &[a0],
+                );
                 Ok(Some((v, t)))
             }
             "requests_tls_config_danger_accept_invalid_hostnames" => {
                 let a0 = str_arg(self, &args[0])?;
-                let (v, t) = call_bool(self, "runtime_requests_tls_config_danger_accept_invalid_hostnames", &[a0]);
+                let (v, t) = call_bool(
+                    self,
+                    "runtime_requests_tls_config_danger_accept_invalid_hostnames",
+                    &[a0],
+                );
                 Ok(Some((v, t)))
             }
             "requests_cookie_jar_new" => {
@@ -4279,14 +5529,18 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_bool(self, "runtime_requests_stream_has_more", &[a0]);
                 Ok(Some((v, t)))
             }
-            "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
-            | "requests_header_map_free" | "requests_multipart_free"
-            | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
+            "requests_client_free"
+            | "requests_request_builder_free"
+            | "requests_response_free"
+            | "requests_header_map_free"
+            | "requests_multipart_free"
+            | "requests_tls_config_free"
+            | "requests_cookie_jar_free"
+            | "requests_stream_free" => {
                 let a0 = str_arg(self, &args[0])?;
                 let free_name = format!("runtime_{}", func);
-                self.out.push_str(&format!(
-                    "  call void @{}(i8* {})\n", free_name, a0
-                ));
+                self.out
+                    .push_str(&format!("  call void @{}(i8* {})\n", free_name, a0));
                 let tmp = self.fresh_temp();
                 Ok(Some((tmp, Type::Unit)))
             }
@@ -4296,29 +5550,41 @@ impl<'a> Cg<'a> {
                 Ok(Some((v, t)))
             }
             "requests_session_request" => {
-                let a0 = str_arg(self, &args[0])?;  // session
-                let a1 = str_arg(self, &args[1])?;  // method
-                let a2 = str_arg(self, &args[2])?;  // url
+                let a0 = str_arg(self, &args[0])?; // session
+                let a1 = str_arg(self, &args[1])?; // method
+                let a2 = str_arg(self, &args[2])?; // url
                 let (v, t) = call_str(self, "runtime_requests_session_request", &[a0, a1, a2]);
                 Ok(Some((v, t)))
             }
             "requests_session_free" => {
                 let a0 = str_arg(self, &args[0])?;
-                self.out.push_str(&format!("  call void @runtime_requests_session_free(i8* {})\n", a0));
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_session_free(i8* {})\n",
+                    a0
+                ));
                 Ok(Some((self.fresh_temp(), Type::Unit)))
             }
             "requests_request_builder_set_headers" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = list_arg(self, &args[1])?;
-                let (v, t) = call_i32(self, "runtime_requests_request_builder_set_headers", &[a0, a1]);
+                let (v, t) = call_i32(
+                    self,
+                    "runtime_requests_request_builder_set_headers",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_request_builder_verify" => {
                 let a0 = str_arg(self, &args[0])?;
                 let (val, _ty) = self.codegen_expr(&args[1])?;
                 let bool_val = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
-                let (v, t) = call_i32(self, "runtime_requests_request_builder_verify", &[a0, bool_val]);
+                self.out
+                    .push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
+                let (v, t) = call_i32(
+                    self,
+                    "runtime_requests_request_builder_verify",
+                    &[a0, bool_val],
+                );
                 Ok(Some((v, t)))
             }
             "requests_response_headers_list" => {
@@ -4343,7 +5609,11 @@ impl<'a> Cg<'a> {
             "requests_cookie_jar_get_cookie_header" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
-                let (v, t) = call_str(self, "runtime_requests_cookie_jar_get_cookie_header", &[a0, a1]);
+                let (v, t) = call_str(
+                    self,
+                    "runtime_requests_cookie_jar_get_cookie_header",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_cookie_jar_get_all" => {
@@ -4361,13 +5631,21 @@ impl<'a> Cg<'a> {
             "requests_session_set_default_headers" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = list_arg(self, &args[1])?;
-                let (v, t) = call_i32(self, "runtime_requests_session_set_default_headers", &[a0, a1]);
+                let (v, t) = call_i32(
+                    self,
+                    "runtime_requests_session_set_default_headers",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_session_set_default_params" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = list_arg(self, &args[1])?;
-                let (v, t) = call_i32(self, "runtime_requests_session_set_default_params", &[a0, a1]);
+                let (v, t) = call_i32(
+                    self,
+                    "runtime_requests_session_set_default_params",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_session_set_timeout" => {
@@ -4380,22 +5658,32 @@ impl<'a> Cg<'a> {
                 let a0 = str_arg(self, &args[0])?;
                 let (val, _ty) = self.codegen_expr(&args[1])?;
                 let bool_val = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
+                self.out
+                    .push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
                 let (v, t) = call_i32(self, "runtime_requests_session_set_verify", &[a0, bool_val]);
                 Ok(Some((v, t)))
             }
             "requests_session_set_redirect_limit" => {
                 let a0 = str_arg(self, &args[0])?;
                 let a1 = str_arg(self, &args[1])?;
-                let (v, t) = call_i32(self, "runtime_requests_session_set_redirect_limit", &[a0, a1]);
+                let (v, t) = call_i32(
+                    self,
+                    "runtime_requests_session_set_redirect_limit",
+                    &[a0, a1],
+                );
                 Ok(Some((v, t)))
             }
             "requests_session_set_disable_redirects" => {
                 let a0 = str_arg(self, &args[0])?;
                 let (val, _ty) = self.codegen_expr(&args[1])?;
                 let bool_val = self.fresh_temp();
-                self.out.push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
-                let (v, t) = call_i32(self, "runtime_requests_session_set_disable_redirects", &[a0, bool_val]);
+                self.out
+                    .push_str(&format!("  {} = icmp ne i32 {}, 0\n", bool_val, val));
+                let (v, t) = call_i32(
+                    self,
+                    "runtime_requests_session_set_disable_redirects",
+                    &[a0, bool_val],
+                );
                 Ok(Some((v, t)))
             }
             "requests_session_cookies" => {
@@ -4423,7 +5711,10 @@ impl<'a> Cg<'a> {
             }
             "requests_redirect_history_free" => {
                 let a0 = str_arg(self, &args[0])?;
-                self.out.push_str(&format!("  call void @runtime_requests_redirect_history_free(i8* {})\n", a0));
+                self.out.push_str(&format!(
+                    "  call void @runtime_requests_redirect_history_free(i8* {})\n",
+                    a0
+                ));
                 Ok(Some((self.fresh_temp(), Type::Unit)))
             }
             "requests_response_redirect_history" => {
@@ -4472,16 +5763,24 @@ impl<'a> Cg<'a> {
     }
 
     /// Phase 3: field access codegen (extractvalue)
-    fn codegen_field_access(&mut self, object: &Expr, field: &str) -> Result<(String, Type), String> {
+    fn codegen_field_access(
+        &mut self,
+        object: &Expr,
+        field: &str,
+    ) -> Result<(String, Type), String> {
         let (obj_v, obj_t) = self.codegen_expr(object)?;
         match obj_t {
             Type::Struct(ref sname) => {
-                let sdef = self.defs.structs.get(sname).ok_or_else(|| {
-                    format!("unknown struct '{}'", sname)
-                })?;
-                let field_idx = sdef.fields.iter().position(|(fn_, _)| fn_ == field).ok_or_else(|| {
-                    format!("unknown field '{}' on struct '{}'", field, sname)
-                })?;
+                let sdef = self
+                    .defs
+                    .structs
+                    .get(sname)
+                    .ok_or_else(|| format!("unknown struct '{}'", sname))?;
+                let field_idx = sdef
+                    .fields
+                    .iter()
+                    .position(|(fn_, _)| fn_ == field)
+                    .ok_or_else(|| format!("unknown field '{}' on struct '{}'", field, sname))?;
                 let field_type = type_from_str(&sdef.fields[field_idx].1, self.defs);
                 let llvm_struct_type = format!("%{}", sname);
                 let _llvm_field_type = llvm_type_name(&field_type);
@@ -4504,12 +5803,15 @@ impl<'a> Cg<'a> {
         args: &[Expr],
     ) -> Result<(String, Type), String> {
         let llvm_type = format!("%{}", state_name);
-        let variants = self.defs.states.get(state_name).ok_or_else(|| {
-            format!("unknown state '{}'", state_name)
-        })?;
-        let tag = variants.iter().position(|v| v == variant).ok_or_else(|| {
-            format!("variant '{}' not in state '{}'", variant, state_name)
-        })?;
+        let variants = self
+            .defs
+            .states
+            .get(state_name)
+            .ok_or_else(|| format!("unknown state '{}'", state_name))?;
+        let tag = variants
+            .iter()
+            .position(|v| v == variant)
+            .ok_or_else(|| format!("variant '{}' not in state '{}'", variant, state_name))?;
 
         let tmp_alloca = self.fresh_temp();
         self.out.push_str(&format!(
@@ -4562,7 +5864,8 @@ impl<'a> Cg<'a> {
                     v.to_string()
                 };
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = bitcast {} to i64\n", tmp, src));
+                self.out
+                    .push_str(&format!("  {} = bitcast {} to i64\n", tmp, src));
                 Ok(tmp)
             }
             Type::Bool => {
@@ -4572,7 +5875,8 @@ impl<'a> Cg<'a> {
                     v.to_string()
                 };
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = zext {} to i64\n", tmp, src));
+                self.out
+                    .push_str(&format!("  {} = zext {} to i64\n", tmp, src));
                 Ok(tmp)
             }
             Type::String => {
@@ -4582,7 +5886,8 @@ impl<'a> Cg<'a> {
                     v.to_string()
                 };
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = ptrtoint {} to i64\n", tmp, src));
+                self.out
+                    .push_str(&format!("  {} = ptrtoint {} to i64\n", tmp, src));
                 Ok(tmp)
             }
             _ => Err(format!(
@@ -4711,7 +6016,9 @@ impl<'a> Cg<'a> {
         // LLVM level (see emit_aggregate_decls), so normalize the dual type
         // form before looking up the state's variants.
         let ty = match ty {
-            Type::Option(inner) => Type::State(format!("Option({})", crate::type_to_string(&inner))),
+            Type::Option(inner) => {
+                Type::State(format!("Option({})", crate::type_to_string(&inner)))
+            }
             other => other,
         };
         match ty {
@@ -4719,9 +6026,11 @@ impl<'a> Cg<'a> {
                 // Generic states are registered under their base name
                 // (e.g. `Option` for `Option(int)`); look up by base.
                 let base = crate::struct_base(state_name);
-                let variants = self.defs.states.get(&base).ok_or_else(|| {
-                    format!("unknown state '{}'", base)
-                })?;
+                let variants = self
+                    .defs
+                    .states
+                    .get(&base)
+                    .ok_or_else(|| format!("unknown state '{}'", base))?;
                 let llvm_state = format!("%{}", base);
 
                 let tag = self.fresh_temp();
@@ -4733,10 +6042,8 @@ impl<'a> Cg<'a> {
                 let merge_b = self.fresh_block();
                 let arm_blocks: Vec<String> = (0..arms.len()).map(|_| self.fresh_block()).collect();
 
-                self.out.push_str(&format!(
-                    "  switch i32 {}, label %{} [\n",
-                    tag, merge_b
-                ));
+                self.out
+                    .push_str(&format!("  switch i32 {}, label %{} [\n", tag, merge_b));
                 for (i, (pattern, _)) in arms.iter().enumerate() {
                     if let Pattern::Variant { name: pname, .. } = pattern {
                         if let Some(vidx) = variants.iter().position(|v| v == pname) {
@@ -4753,8 +6060,19 @@ impl<'a> Cg<'a> {
                     self.out.push_str(&format!("{}:\n", arm_blocks[i]));
                     self.current_block = arm_blocks[i].clone();
 
-                    if let Pattern::Variant { name: pname, bindings } = pattern {
+                    if let Pattern::Variant {
+                        name: pname,
+                        bindings,
+                    } = pattern
+                    {
                         if let Some(vidx) = variants.iter().position(|v| v == pname) {
+                            // Look up variant field types for payload binding.
+                            let field_types: Vec<String> = self
+                                .defs
+                                .variant_fields
+                                .get(pname)
+                                .map(|f| f.iter().map(|(_, t)| t.clone()).collect())
+                                .unwrap_or_default();
                             for (j, binding) in bindings.iter().enumerate() {
                                 if binding != "Ignore" {
                                     let payload = self.fresh_temp();
@@ -4762,16 +6080,39 @@ impl<'a> Cg<'a> {
                                         "  {} = extractvalue {} {}, 1, {}\n",
                                         payload, llvm_state, val, j
                                     ));
+                                    let fld_ty =
+                                        field_types.get(j).map(|s| s.as_str()).unwrap_or("int");
+                                    let is_str_payload = fld_ty == "str";
                                     let ptr = self.fresh_temp();
-                                    self.out.push_str(&format!(
-                                        "  {} = alloca i64, align 8\n",
-                                        ptr
-                                    ));
-                                    self.out.push_str(&format!(
-                                        "  store i64 {}, i64* {}, align 8\n",
-                                        payload, ptr
-                                    ));
-                                    self.env.insert(binding.clone(), Type::Int);
+                                    if is_str_payload {
+                                        // String payload: extractvalue gives i64 but
+                                        // the actual value is an i8* pointer. Bitcast.
+                                        self.out.push_str(&format!(
+                                            "  {} = alloca i8*, align 8\n",
+                                            ptr
+                                        ));
+                                        let casted = self.fresh_temp();
+                                        self.out.push_str(&format!(
+                                            "  {} = inttoptr i64 {} to i8*\n",
+                                            casted, payload
+                                        ));
+                                        self.out.push_str(&format!(
+                                            "  store i8* {}, i8** {}\n",
+                                            casted, ptr
+                                        ));
+                                        self.env.insert(binding.clone(), Type::String);
+                                    } else {
+                                        // Int/bool/float payload: store as i64.
+                                        self.out.push_str(&format!(
+                                            "  {} = alloca i64, align 8\n",
+                                            ptr
+                                        ));
+                                        self.out.push_str(&format!(
+                                            "  store i64 {}, ptr {}\n",
+                                            payload, ptr
+                                        ));
+                                        self.env.insert(binding.clone(), Type::Int);
+                                    }
                                     self.named.insert(binding.clone(), ptr);
                                 }
                             }
@@ -4802,7 +6143,12 @@ impl<'a> Cg<'a> {
     }
 
     // Phase 5: int method codegen (chr -> single-char owned string)
-    fn codegen_int_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
+    fn codegen_int_method(
+        &mut self,
+        obj: &str,
+        method: &str,
+        args: &[Expr],
+    ) -> Result<(String, Type), String> {
         match method {
             "chr" => {
                 if args.len() != 0 {
@@ -4822,14 +6168,17 @@ impl<'a> Cg<'a> {
 
     // Phase 5: string literal -> global constant pointer
     fn codegen_string_lit(&mut self, s: &str) -> Result<(String, Type), String> {
-        let global_name = self.string_literals.get(s).ok_or_else(|| {
-            format!("string literal '{}' not found in globals", s)
-        })?;
+        let global_name = self
+            .string_literals
+            .get(s)
+            .ok_or_else(|| format!("string literal '{}' not found in globals", s))?;
         let len = s.len() as i64; // bytes (excludes NUL); capacity for runtime_str_new
         let gsrc = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = getelementptr inbounds [{} x i8], ptr @{}, i64 0, i64 0\n",
-            gsrc, len + 1, global_name
+            gsrc,
+            len + 1,
+            global_name
         ));
         // OPT-002: emit every string literal as an OWNED, header-backed string
         // (via runtime_str_new) so it carries the OWNED marker. This makes
@@ -4841,7 +6190,9 @@ impl<'a> Cg<'a> {
         ));
         self.out.push_str(&format!(
             "  call void @llvm.memcpy.p0.p0.i64(i8* {}, i8* {}, i64 {}, i1 false)\n",
-            owned, gsrc, len + 1
+            owned,
+            gsrc,
+            len + 1
         ));
         Ok((owned, Type::String))
     }
@@ -4854,10 +6205,15 @@ impl<'a> Cg<'a> {
             // rather than hand-rolling a runtime_alloc(8) + insertvalue. This keeps
             // the data pointer NULL so grow_list's first realloc behaves correctly.
             let tmp = self.fresh_temp();
-            self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
-            self.out.push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+            self.out
+                .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+            self.out
+                .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
             let loaded = self.fresh_temp();
-            self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", loaded, tmp));
+            self.out.push_str(&format!(
+                "  {} = load %LimeList, ptr {}, align 8\n",
+                loaded, tmp
+            ));
             return Ok((loaded, Type::List(Box::new(Type::Unknown))));
         }
         let mut elem_values: Vec<(String, Type)> = Vec::new();
@@ -4874,7 +6230,8 @@ impl<'a> Cg<'a> {
         let arr_ptr = self.fresh_temp();
         self.out.push_str(&format!(
             "  {} = call i8* @runtime_alloc(i64 {}, i64 8)\n",
-            arr_ptr, (arr_size as i64) * 8
+            arr_ptr,
+            (arr_size as i64) * 8
         ));
 
         for (i, (v, t)) in elem_values.iter().enumerate() {
@@ -4913,7 +6270,12 @@ impl<'a> Cg<'a> {
     }
 
     // Phase 5/7: method call dispatch by object type
-    fn codegen_method_call(&mut self, object: &Expr, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
+    fn codegen_method_call(
+        &mut self,
+        object: &Expr,
+        method: &str,
+        args: &[Expr],
+    ) -> Result<(String, Type), String> {
         // Phase B.1: if `object` is a length-tracked string variable and the
         // method is a length query, return the tracked length directly instead
         // of calling strlen.
@@ -4927,10 +6289,8 @@ impl<'a> Cg<'a> {
             if let Expr::Ident(name) = object {
                 if let Some(len_ptr) = self.string_len_trackers.get(name).cloned() {
                     let loaded = self.fresh_temp();
-                    self.out.push_str(&format!(
-                        "  {} = load i64, i64* {}\n",
-                        loaded, len_ptr
-                    ));
+                    self.out
+                        .push_str(&format!("  {} = load i64, i64* {}\n", loaded, len_ptr));
                     return Ok((loaded, Type::Int));
                 }
             }
@@ -4955,17 +6315,19 @@ impl<'a> Cg<'a> {
                 self.codegen_list_method(&obj_v, method, args, elem, rebind_slot)
             }
             // Phase 7: struct method call -> direct LLVM function call
-            Type::Struct(ref sname) => {
-                self.codegen_struct_method_call(sname, &obj_v, method, args)
-            }
+            Type::Struct(ref sname) => self.codegen_struct_method_call(sname, &obj_v, method, args),
             // Phase 7: interface dispatch stub (concrete type unknown at compile time)
             Type::Interface(ref iface, _) => {
-                let idef = self.defs.interfaces.get(iface).ok_or_else(|| {
-                    format!("unknown interface '{}'", iface)
-                })?;
-                let im = idef.methods.iter().find(|m| m.name == method).ok_or_else(|| {
-                    format!("unknown method '{}.{}'", iface, method)
-                })?;
+                let idef = self
+                    .defs
+                    .interfaces
+                    .get(iface)
+                    .ok_or_else(|| format!("unknown interface '{}'", iface))?;
+                let im = idef
+                    .methods
+                    .iter()
+                    .find(|m| m.name == method)
+                    .ok_or_else(|| format!("unknown method '{}.{}'", iface, method))?;
                 // Stub: emit zero value of the interface method's return type
                 let ret_type = match &im.return_type {
                     Some(rt) => {
@@ -4996,12 +6358,15 @@ impl<'a> Cg<'a> {
         method: &str,
         args: &[Expr],
     ) -> Result<(String, Type), String> {
-        let sdef = self.defs.structs.get(sname).ok_or_else(|| {
-            format!("unknown struct '{}'", sname)
-        })?;
-        let mdef = sdef.methods.get(method).ok_or_else(|| {
-            format!("unknown method '{}.{}'", sname, method)
-        })?;
+        let sdef = self
+            .defs
+            .structs
+            .get(sname)
+            .ok_or_else(|| format!("unknown struct '{}'", sname))?;
+        let mdef = sdef
+            .methods
+            .get(method)
+            .ok_or_else(|| format!("unknown method '{}.{}'", sname, method))?;
         let method_func = format!("{}_{}", sname, method);
         let mut call_args = vec![self.fmt_call_arg(obj_v, &Type::Struct(sname.to_string()))];
         for (arg, (_, ptype)) in args.iter().zip(&mdef.params) {
@@ -5034,7 +6399,12 @@ impl<'a> Cg<'a> {
     }
 
     // Phase 5: string method codegen (len, byte_len, slice, chars, bytes, byte)
-    fn codegen_string_method(&mut self, obj: &str, method: &str, args: &[Expr]) -> Result<(String, Type), String> {
+    fn codegen_string_method(
+        &mut self,
+        obj: &str,
+        method: &str,
+        args: &[Expr],
+    ) -> Result<(String, Type), String> {
         match method {
             "len" | "byte_len" | "length" => {
                 let tmp = self.fresh_temp();
@@ -5043,10 +6413,8 @@ impl<'a> Cg<'a> {
                 } else {
                     obj.to_string()
                 };
-                self.out.push_str(&format!(
-                    "  {} = call i64 @strlen({})\n",
-                    tmp, obj_arg
-                ));
+                self.out
+                    .push_str(&format!("  {} = call i64 @strlen({})\n", tmp, obj_arg));
                 Ok((tmp, Type::Int))
             }
             "byte" => {
@@ -5110,7 +6478,8 @@ impl<'a> Cg<'a> {
             "chars" => {
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
                     "  call void @runtime_str_chars(ptr sret(%LimeList) {}, ptr {})\n",
                     slot, obj
@@ -5124,7 +6493,8 @@ impl<'a> Cg<'a> {
             "bytes" => {
                 let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out.push_str(&format!(
                     "  call void @runtime_str_bytes(ptr sret(%LimeList) {}, ptr {})\n",
                     slot, obj
@@ -5151,10 +6521,8 @@ impl<'a> Cg<'a> {
         match method {
             "len" => {
                 let tmp = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = extractvalue %LimeList {}, 1\n",
-                    tmp, obj
-                ));
+                self.out
+                    .push_str(&format!("  {} = extractvalue %LimeList {}, 1\n", tmp, obj));
                 Ok((tmp, Type::Int))
             }
             "get" => {
@@ -5172,14 +6540,14 @@ impl<'a> Cg<'a> {
                 }
                 let (idx_v, _) = self.codegen_expr(&args[0])?;
                 let data = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = extractvalue %LimeList {}, 0\n",
-                    data, obj
-                ));
+                self.out
+                    .push_str(&format!("  {} = extractvalue %LimeList {}, 0\n", data, obj));
                 let elem_ptr = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = getelementptr inbounds i64, ptr {}, i64 {}\n",
-                    elem_ptr, data, self.bare_value(&idx_v)
+                    elem_ptr,
+                    data,
+                    self.bare_value(&idx_v)
                 ));
                 let val = self.fresh_temp();
                 self.out.push_str(&format!(
@@ -5201,22 +6569,38 @@ impl<'a> Cg<'a> {
                 // the alloca/store/load/store round-trip that otherwise makes
                 // hot collection loops (e.g. set_ops) slower than needed.
                 if let Some(slot) = rebind_slot {
-                    self.out.push_str(&format!("  call void @runtime_list_add(ptr {}, i64 {})\n", slot, converted));
+                    self.out.push_str(&format!(
+                        "  call void @runtime_list_add(ptr {}, i64 {})\n",
+                        slot, converted
+                    ));
                     let result = self.fresh_temp();
-                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, slot));
+                    self.out.push_str(&format!(
+                        "  {} = load %LimeList, ptr {}, align 8\n",
+                        result, slot
+                    ));
                     Ok((result, Type::List(Box::new(elem_t))))
                 } else {
                     let arg_slot = self.fresh_temp();
                     let result = self.fresh_temp();
-                    self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
-                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
+                    self.out
+                        .push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
+                    self.out.push_str(&format!(
+                        "  store %LimeList {}, ptr {}, align 8\n",
+                        obj, arg_slot
+                    ));
                     self.out.push_str(&format!(
                         "  call void @runtime_list_add(ptr {}, i64 {})\n",
                         arg_slot, converted
                     ));
-                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
+                    self.out.push_str(&format!(
+                        "  {} = load %LimeList, ptr {}, align 8\n",
+                        result, arg_slot
+                    ));
                     if let Some(slot) = rebind_slot {
-                        self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", result, slot));
+                        self.out.push_str(&format!(
+                            "  store %LimeList {}, ptr {}, align 8\n",
+                            result, slot
+                        ));
                     }
                     Ok((result, Type::List(Box::new(elem_t))))
                 }
@@ -5234,19 +6618,30 @@ impl<'a> Cg<'a> {
                 if let Some(slot) = rebind_slot {
                     self.out.push_str(&format!(
                         "  call void @runtime_list_set(ptr {}, i64 {}, i64 {})\n",
-                        slot, self.bare_value(&idx_v), converted
+                        slot,
+                        self.bare_value(&idx_v),
+                        converted
                     ));
                     Ok((String::new(), Type::Unit))
                 } else {
                     let arg_slot = self.fresh_temp();
                     let result = self.fresh_temp();
-                    self.out.push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
-                    self.out.push_str(&format!("  store %LimeList {}, ptr {}, align 8\n", obj, arg_slot));
+                    self.out
+                        .push_str(&format!("  {} = alloca %LimeList, align 8\n", arg_slot));
+                    self.out.push_str(&format!(
+                        "  store %LimeList {}, ptr {}, align 8\n",
+                        obj, arg_slot
+                    ));
                     self.out.push_str(&format!(
                         "  call void @runtime_list_set(ptr {}, i64 {}, i64 {})\n",
-                        arg_slot, self.bare_value(&idx_v), converted
+                        arg_slot,
+                        self.bare_value(&idx_v),
+                        converted
                     ));
-                    self.out.push_str(&format!("  {} = load %LimeList, ptr {}, align 8\n", result, arg_slot));
+                    self.out.push_str(&format!(
+                        "  {} = load %LimeList, ptr {}, align 8\n",
+                        result, arg_slot
+                    ));
                     Ok((result, Type::List(Box::new(elem_t))))
                 }
             }
@@ -5268,18 +6663,30 @@ fn body_supported(stmts: &[Stmt]) -> bool {
 fn stmt_supported(s: &Stmt) -> bool {
     match s {
         Stmt::Let { value, .. } => expr_supported(value),
-        Stmt::Return { explicit_type: _, value } => match value {
+        Stmt::Return {
+            explicit_type: _,
+            value,
+        } => match value {
             Some(e) => expr_supported(e),
             None => true,
         },
         Stmt::Expr(e) => expr_supported(e),
         Stmt::Assign { value, .. } => expr_supported(value),
-        Stmt::If { cond, then_branch, else_branch } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             expr_supported(cond)
                 && body_supported(then_branch)
-                && else_branch.as_ref().map(|b| body_supported(b)).unwrap_or(true)
+                && else_branch
+                    .as_ref()
+                    .map(|b| body_supported(b))
+                    .unwrap_or(true)
         }
         Stmt::While { cond, body } => expr_supported(cond) && body_supported(body),
+        // Iteration 34 PH2: for-in loop is now natively supported.
+        Stmt::For { iterable, body, .. } => expr_supported(iterable) && body_supported(body),
         // Phase 4: match (supports all arms if expr and bodies are supported)
         Stmt::Match { expr, arms } => {
             expr_supported(expr) && arms.iter().all(|(_, body)| body_supported(body))
@@ -5292,7 +6699,9 @@ fn expr_supported(e: &Expr) -> bool {
     match e {
         Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => true,
         Expr::StringLit(_) => true,
-        Expr::BinOp { left, op, right, .. } => {
+        Expr::BinOp {
+            left, op, right, ..
+        } => {
             let ok_op = matches!(
                 op.as_str(),
                 "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "and" | "or"
@@ -5314,12 +6723,23 @@ fn expr_supported(e: &Expr) -> bool {
         Expr::Array(items) => items.iter().all(|a| expr_supported(a)),
         Expr::Await(inner) => expr_supported(inner),
         Expr::FnDef { params: _, body } => body_supported(body),
+        // Iteration 34 PH1: tuples are natively lowerable (i64-slot aggregate)
+        Expr::Tuple(items) => items.iter().all(|a| expr_supported(a)),
+        Expr::TupleAccess { tuple, .. } => expr_supported(tuple),
         _ => false,
     }
 }
 
 /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・(Step 1-7) 縺ｦ繧､繝ｳ繝・・ｽ・ｽ繝医ｒ髢峨�ｸｦ縺ｧ繧｢蜷阪→。
-pub fn codegen_function(defs: &Defs, memory: &HashMap<String, MemoryPlace>, string_literals: &HashMap<String, String>, mono_name_map: &HashMap<String, String>, mono_fdefs: &HashMap<String, FunctionDef>, name: &str, fdef: &FunctionDef) -> (String, Vec<String>) {
+pub fn codegen_function(
+    defs: &Defs,
+    memory: &HashMap<String, MemoryPlace>,
+    string_literals: &HashMap<String, String>,
+    mono_name_map: &HashMap<String, String>,
+    mono_fdefs: &HashMap<String, FunctionDef>,
+    name: &str,
+    fdef: &FunctionDef,
+) -> (String, Vec<String>) {
     let mut cg = Cg::new(defs, memory, string_literals, mono_name_map, mono_fdefs);
     let ir = cg.codegen_function(name, fdef);
     (ir, cg.warnings)

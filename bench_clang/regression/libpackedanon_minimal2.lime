@@ -1,0 +1,5 @@
+extern fn pka_make() -> Opaque(PackedAnon) "lime_make_PackedAnon"
+
+fn main():
+    let p = pka_make()
+    print("MAKE_OK\n")

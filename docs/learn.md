@@ -810,42 +810,51 @@ functions were removed.
 
 ## Compiler errors
 
-Errors are printed with the failing line and column. There are four kinds:
+Errors are printed with error codes, file locations, and source snippets.
+There are four main categories:
 
-**Lexer errors** — the source cannot be tokenized:
-
-```
-Lexer error: Unexpected character '#' at 1:1
-```
-
-**Parser errors** — the tokens do not form valid syntax:
+**Lexer errors** (`error[E0001]`) — the source cannot be tokenized:
 
 ```
-Parser error: Expected Colon, got Ident("println") (at line 11, col 7)
+error[E0001] hello.lime: Invalid integer literal: 999999999999999999999
 ```
 
-**Type errors** — the program is well-formed but does not type-check. These
-include "did you mean" suggestions for misspelled variables:
+**Parser errors** (`error[E0101]`) — the tokens do not form valid syntax:
 
 ```
-Type error: undefined variable 'e'
-  did you mean 'b'?
+error[E0101] hello.lime: Expected variable name, got Assign (at line 2, col 5)
+```
+
+**Type errors** (`error[E02xx]`) — the program is well-formed but does not
+type-check. These include source snippets with caret pointers:
+
+```
+error[E0201] hello.lime:2:1
+  |
+2 | println(xyz)
+  | ^
+Type error: undefined variable 'xyz'
+  = help: did you mean 'x'?
 ```
 
 and type mismatches, which print the expected and received types:
 
 ```
+error[E0208] hello.lime:3:1
+  |
+3 | let y = x + "s"
+  | ^
 Type error: binary '+' type mismatch
 
 expected:
     int
 
 received:
-    float
+    str
 ```
 
-**Runtime errors** — the interpreter hits a problem while executing (for
-example, `Undefined variable: Nothing`).
+**Runtime errors** (`error[E0601]`) — the interpreter hits a problem while
+executing (for example, `Undefined variable: Nothing`).
 
 `lime check` reports whether a file type-checks cleanly:
 

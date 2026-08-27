@@ -1,0 +1,18 @@
+{
+  "library": "libptrtypedef (ABI fixture, Iteration-27 shape)",
+  "version": "0.1.0",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "functions": [
+    { "name": "ptd_make", "params": ["Int"], "ret": "Int", "symbol": "ptd_make" },
+    { "name": "ptd_get", "params": ["Opaque(void)"], "ret": "Int", "symbol": "ptd_get" },
+    { "name": "ptd_set", "params": ["Int", "Int"], "ret": "Unit", "symbol": "ptd_set" },
+    { "name": "ptd_sum", "params": ["Int", "Int"], "ret": "Int", "symbol": "ptd_sum" },
+    { "name": "ptd_obj_make", "params": ["Int"], "ret": "Opaque(PTObj_)", "symbol": "ptd_obj_make" },
+    { "name": "ptd_obj_get", "params": ["Opaque(PTObj_)"], "ret": "Int", "symbol": "ptd_obj_get" },
+    { "name": "ptd_link_anchor", "params": [], "ret": "Int", "symbol": "ptd_link_anchor" }
+  ],
+  "required_symbols": [
+    "ptd_make", "ptd_get", "ptd_obj_make", "ptd_obj_get"
+  ]
+}

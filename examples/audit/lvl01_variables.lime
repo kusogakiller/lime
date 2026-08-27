@@ -1,0 +1,10 @@
+// Level 1: literals / variables
+fn main():
+    let name = "lime"
+    let age = 3
+    let price = 19.5
+    let flag = true
+    println(name)
+    println(age)
+    println(price)
+    println(flag)

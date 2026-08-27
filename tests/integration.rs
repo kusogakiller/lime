@@ -34,7 +34,17 @@ fn lime_cmd(subcmd: &str, toml: &str, extra: &[&str]) -> String {
 fn stdlib_string_math() {
     let out = lime_run("examples/stdlib_demo");
     for expected in [
-        "true", "true", "true", "spaced", "hello lime", "[hello, world]", "42", "7", "3", "4", "1024",
+        "true",
+        "true",
+        "true",
+        "spaced",
+        "hello lime",
+        "[hello, world]",
+        "42",
+        "7",
+        "3",
+        "4",
+        "1024",
     ] {
         assert!(
             out.contains(expected),
@@ -150,7 +160,11 @@ fn unified_pipeline_legacy_shorthand_runs() {
 /// reports how many functions it removed.
 #[test]
 fn unified_pipeline_runs_dce() {
-    let out = lime_cmd("build", "examples/pipeline_demo/citrus.toml", &["--emit-ll"]);
+    let out = lime_cmd(
+        "build",
+        "examples/pipeline_demo/citrus.toml",
+        &["--emit-ll"],
+    );
     assert!(
         out.contains("optimizer: removed"),
         "expected DCE to report removed functions\n--- full output ---\n{}",
@@ -176,20 +190,50 @@ fn backend_demo() {
     );
     let ir = std::fs::read_to_string("examples/backend_demo.ll").unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output to be generated");
-    // Arith
-    assert!(ir.contains("add i64"), "expected integer addition\n--- ir ---\n{}", ir);
+    // Arith — Iteration 33: integer adds now carry nuw/nsw overflow flags,
+    // so the meaningful assertion is the flagged add (a bare `add i64` no
+    // longer appears in generated IR).
+    assert!(
+        ir.contains("add nuw nsw i64"),
+        "expected integer addition\n--- ir ---\n{}",
+        ir
+    );
     // Struct constructor
-    assert!(ir.contains("insertvalue %Point"), "expected struct ctor\n--- ir ---\n{}", ir);
+    assert!(
+        ir.contains("insertvalue %Point"),
+        "expected struct ctor\n--- ir ---\n{}",
+        ir
+    );
     // Struct field extract
-    assert!(ir.contains("extractvalue %Point"), "expected struct field extract\n--- ir ---\n{}", ir);
+    assert!(
+        ir.contains("extractvalue %Point"),
+        "expected struct field extract\n--- ir ---\n{}",
+        ir
+    );
     // If / branch
-    assert!(ir.contains("br i1"), "expected conditional branch\n--- ir ---\n{}", ir);
+    assert!(
+        ir.contains("br i1"),
+        "expected conditional branch\n--- ir ---\n{}",
+        ir
+    );
     // While loop -> icmp + br
-    assert!(ir.contains("icmp"), "expected comparison in loop\n--- ir ---\n{}", ir);
+    assert!(
+        ir.contains("icmp"),
+        "expected comparison in loop\n--- ir ---\n{}",
+        ir
+    );
     // Function call
-    assert!(ir.contains("call i64 @add"), "expected call to add function\n--- ir ---\n{}", ir);
+    assert!(
+        ir.contains("call i64 @add"),
+        "expected call to add function\n--- ir ---\n{}",
+        ir
+    );
     // C runtime main wrapper
-    assert!(ir.contains("@main()"), "expected C main wrapper\n--- ir ---\n{}", ir);
+    assert!(
+        ir.contains("@main()"),
+        "expected C main wrapper\n--- ir ---\n{}",
+        ir
+    );
 }
 
 /// Phase 11: the unified pipeline runs package-manager side effects even for
@@ -229,8 +273,7 @@ fn emit_llvm_smoke() {
         .expect("failed to run lime");
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let ll_path = "sandbox/lltest.ll";
-    let ir = std::fs::read_to_string(ll_path)
-        .unwrap_or_default();
+    let ir = std::fs::read_to_string(ll_path).unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output to be generated");
     // return-type-less `add` must be inferred to i64, not void.
     assert!(
@@ -404,11 +447,7 @@ fn main():
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
 
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -439,12 +478,29 @@ fn main():
     )
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
-    let _ = fs::remove_dir_all(dir);
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
+
+    // Iteration 33 P2: bare variants must also EXECUTE (interpreter AND
+    // native) — regression for the gap where check accepted `Red` but both
+    // execution paths rejected it.
+    let run_out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
+        run_out.contains("red") && run_out.contains("ok"),
+        "bare variant interpreter run mismatch:\n{}",
+        run_out
     );
+    if std::env::var("LLVM_SYS_221_PREFIX").is_ok() || std::env::var("LIME_LLVM_PREFIX").is_ok() {
+        let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
+        assert!(
+            build_out.contains("ok:"),
+            "bare variant native build failed:\n{}",
+            build_out
+        );
+        let exe = format!("{}.exe", dir);
+        let run = Command::new(&exe).output().unwrap();
+        let native_out = String::from_utf8_lossy(&run.stdout).replace("\r", "");
+        assert_eq!(native_out.trim(), "red\nok");
+    }
 }
 
 #[test]
@@ -473,11 +529,7 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -507,11 +559,7 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -540,12 +588,30 @@ fn main():
     )
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
-    let _ = fs::remove_dir_all(dir);
+
+    // Iteration 33: match exhaustiveness IS enforced. A match over a
+    // 3-variant enum handling only Red/Green must be REJECTED, naming the
+    // missing variant.
     assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
+        out.contains("not exhaustive") && out.contains("Blue"),
+        "expected exhaustiveness error naming 'Blue', got:\n{}",
         out
     );
+
+    // The exhaustive form of the same program checks cleanly.
+    let fixed_source = source.replace(
+        "    println(\"ok\")",
+        "        Blue:\n            println(\"blue\")\n    println(\"ok\")",
+    );
+    fs::write(format!("{}/main.lime", dir), fixed_source).unwrap();
+    let out2 = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
+    assert!(
+        out2.contains("ok"),
+        "exhaustive match must check cleanly, got:\n{}",
+        out2
+    );
+
+    let _ = fs::remove_dir_all(dir);
 }
 
 // === Phase B-3: Type System Regression Tests ===
@@ -658,12 +724,18 @@ fn closure_abi_no_capture() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["42"], "closure abi no capture failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["42"],
+        "closure abi no capture failed\nfull:\n{}",
+        out
+    );
 }
 
 #[test]
@@ -680,12 +752,18 @@ fn closure_abi_single_capture() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["8"], "closure abi single capture failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["8"],
+        "closure abi single capture failed\nfull:\n{}",
+        out
+    );
 }
 
 #[test]
@@ -702,12 +780,18 @@ fn closure_abi_multiple_captures() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["6"], "closure abi multiple captures failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["6"],
+        "closure abi multiple captures failed\nfull:\n{}",
+        out
+    );
 }
 
 #[test]
@@ -724,7 +808,8 @@ fn closure_abi_nested() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
@@ -746,12 +831,18 @@ fn closure_abi_closure_as_arg() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["10"], "closure abi closure as arg failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["10"],
+        "closure abi closure as arg failed\nfull:\n{}",
+        out
+    );
 }
 
 // === Phase B-3: Runtime Safety Tests ===
@@ -770,12 +861,18 @@ fn safety_null_closure_check() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["safety test passed"], "safety null closure check failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["safety test passed"],
+        "safety null closure check failed\nfull:\n{}",
+        out
+    );
 }
 
 #[test]
@@ -792,12 +889,18 @@ fn safety_list_bounds() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["3"], "safety list bounds check failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["3"],
+        "safety list bounds check failed\nfull:\n{}",
+        out
+    );
 }
 
 #[test]
@@ -814,17 +917,19 @@ fn safety_string_concat() {
     )
     .unwrap();
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, ["hello world"], "safety string concat check failed\nfull:\n{}", out);
+    assert_eq!(
+        interp,
+        ["hello world"],
+        "safety string concat check failed\nfull:\n{}",
+        out
+    );
 }
-
-
-
-
 
 /// Phase B-1 Step 1: interpreter parity for the `option` / `result` stdlib
 /// helpers. The same program is used by the native codegen regression test
@@ -849,22 +954,9 @@ fn stdlib_option_result_interp() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
     let expected = [
-        "true",
-        "false",
-        "5",
-        "0",
-        "5",
-        "true",
-        "false",
-        "true",
-        "10",
-        "0",
-        "10",
+        "true", "false", "5", "0", "5", "true", "false", "true", "10", "0", "10",
     ];
-    let stdout: Vec<&str> = out
-        .lines()
-        .filter(|l| !l.starts_with("warning:"))
-        .collect();
+    let stdout: Vec<&str> = out.lines().filter(|l| !l.starts_with("warning:")).collect();
     assert!(
         stdout == expected,
         "option/result interp output mismatch\nexpected: {:?}\ngot: {:?}\n--- full output ---\n{}",
@@ -1070,11 +1162,7 @@ fn tuple_match_basic_checks() {
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1098,11 +1186,7 @@ fn tuple_match_nested_checks() {
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1126,11 +1210,7 @@ fn tuple_match_wildcard_checks() {
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1186,11 +1266,7 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1250,11 +1326,7 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1282,11 +1354,7 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1313,11 +1381,7 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }
 
 #[test]
@@ -1352,9 +1416,5 @@ fn main():
     .unwrap();
     let out = lime_cmd("check", &format!("{}/citrus.toml", dir), &[]);
     let _ = fs::remove_dir_all(dir);
-    assert!(
-        out.contains("ok"),
-        "Expected 'ok' in output, got:\n{}",
-        out
-    );
+    assert!(out.contains("ok"), "Expected 'ok' in output, got:\n{}", out);
 }

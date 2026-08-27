@@ -1,0 +1,95 @@
+// Iteration 28/29 regression: PACKED outer struct + NESTED ANONYMOUS struct,
+// and packed + nested anonymous BITFIELD struct (libpackedanon corpus).
+// Proves the flattened anonymous members (head/x/y/tail, lead/a/b/trail) are
+// addressable end-to-end through Charger's generic flattening + accessor
+// shims: Lime set -> C shim writes real C layout (pragma pack(1)) -> read back.
+//
+// NOTE (Lime baseline limitation, recorded): hexadecimal integer literals
+// (0x..) are not accepted by the Lime frontend ("unknown function" type
+// errors at call sites); this smoke uses decimal literals.
+// NOTE (Charger CURRENT ISSUE, recorded): raw C setters taking `unsigned char`
+// by value (pka_set_head/x/tail...) are mis-typed as `Opaque(unsigned)` in the
+// iface and routed to lime_val_* shims that are not emitted — do NOT call them
+// here; use the generated lime_get_/lime_set_ accessors (they are the ABI the
+// gate covers).
+
+extern fn lime_make_PackedAnon() -> Opaque(PackedAnon) "lime_make_PackedAnon"
+extern fn lime_get_PackedAnon_head(Opaque(PackedAnon): a0) -> Int "lime_get_PackedAnon_head"
+extern fn lime_set_PackedAnon_head(Opaque(PackedAnon): a0, Int: a1) "lime_set_PackedAnon_head"
+extern fn lime_get_PackedAnon_x(Opaque(PackedAnon): a0) -> Int "lime_get_PackedAnon_x"
+extern fn lime_set_PackedAnon_x(Opaque(PackedAnon): a0, Int: a1) "lime_set_PackedAnon_x"
+extern fn lime_get_PackedAnon_y(Opaque(PackedAnon): a0) -> Int "lime_get_PackedAnon_y"
+extern fn lime_set_PackedAnon_y(Opaque(PackedAnon): a0, Int: a1) "lime_set_PackedAnon_y"
+extern fn lime_get_PackedAnon_tail(Opaque(PackedAnon): a0) -> Int "lime_get_PackedAnon_tail"
+extern fn lime_set_PackedAnon_tail(Opaque(PackedAnon): a0, Int: a1) "lime_set_PackedAnon_tail"
+
+extern fn lime_make_PackedAnonBit() -> Opaque(PackedAnonBit) "lime_make_PackedAnonBit"
+extern fn lime_get_PackedAnonBit_lead(Opaque(PackedAnonBit): a0) -> Int "lime_get_PackedAnonBit_lead"
+extern fn lime_set_PackedAnonBit_lead(Opaque(PackedAnonBit): a0, Int: a1) "lime_set_PackedAnonBit_lead"
+extern fn lime_get_PackedAnonBit_a(Opaque(PackedAnonBit): a0) -> Int "lime_get_PackedAnonBit_a"
+extern fn lime_set_PackedAnonBit_a(Opaque(PackedAnonBit): a0, Int: a1) "lime_set_PackedAnonBit_a"
+extern fn lime_get_PackedAnonBit_b(Opaque(PackedAnonBit): a0) -> Int "lime_get_PackedAnonBit_b"
+extern fn lime_set_PackedAnonBit_b(Opaque(PackedAnonBit): a0, Int: a1) "lime_set_PackedAnonBit_b"
+extern fn lime_get_PackedAnonBit_trail(Opaque(PackedAnonBit): a0) -> Int "lime_get_PackedAnonBit_trail"
+extern fn lime_set_PackedAnonBit_trail(Opaque(PackedAnonBit): a0, Int: a1) "lime_set_PackedAnonBit_trail"
+
+// NOTE: do NOT call the raw `int pka_link_anchor(void)` directly here — direct
+// calls to real C fns returning sub-8-byte ints read undefined RAX upper bits
+// on Win64 (only generated accessor shims widen returns to long long).
+
+fn main():
+    // --- PackedAnon: pragma pack(1), nested anonymous struct {x;y;} ---
+    let p = lime_make_PackedAnon()
+    lime_set_PackedAnon_head(p, 17)
+    lime_set_PackedAnon_x(p, 34)
+    lime_set_PackedAnon_y(p, 13124)
+    lime_set_PackedAnon_tail(p, 85)
+    if lime_get_PackedAnon_head(p) == 17:
+        print("PA_L1\n")
+    else:
+        print("HEAD_FAIL\n")
+        return
+    if lime_get_PackedAnon_x(p) == 34:
+        print("PA_L2\n")
+    else:
+        print("X_FAIL\n")
+        return
+    if lime_get_PackedAnon_y(p) == 13124:
+        print("PA_L3\n")
+    else:
+        print("Y_FAIL\n")
+        return
+    if lime_get_PackedAnon_tail(p) == 85:
+        print("PA_L4\n")
+    else:
+        print("TAIL_FAIL\n")
+        return
+
+    // --- PackedAnonBit: pack(1) + nested anonymous bitfield {a:3;b:12;} ---
+    let b = lime_make_PackedAnonBit()
+    lime_set_PackedAnonBit_lead(b, 170)
+    lime_set_PackedAnonBit_a(b, 5)
+    lime_set_PackedAnonBit_b(b, 2748)
+    lime_set_PackedAnonBit_trail(b, 187)
+    if lime_get_PackedAnonBit_lead(b) == 170:
+        print("PA_L5\n")
+    else:
+        print("LEAD_FAIL\n")
+        return
+    if lime_get_PackedAnonBit_a(b) == 5:
+        print("PA_L6\n")
+    else:
+        print("A_FAIL\n")
+        return
+    if lime_get_PackedAnonBit_b(b) == 2748:
+        print("PA_L7\n")
+    else:
+        print("B_FAIL\n")
+        return
+    if lime_get_PackedAnonBit_trail(b) == 187:
+        print("PA_L8\n")
+    else:
+        print("TRAIL2_FAIL\n")
+        return
+
+    print("PACKED_ANON_OK\n")

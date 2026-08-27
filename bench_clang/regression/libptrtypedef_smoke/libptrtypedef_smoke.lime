@@ -1,0 +1,36 @@
+// Iteration 29 regression: pointer typedef whose pointee is a SCALAR typedef
+// (`typedef unsigned char byte_t; typedef byte_t *bytep;`). This shape made
+// Charger recurse forever at install (SCALAR_TYPEDEFS self-loop fed into the
+// Iteration-27 pointer-alias parse_c_type call) — measured crash on libpng /
+// libjpeg-turbo before the fix. The fixture keeps the edge under gate cover.
+// Signatures mirror the generated iface verbatim (bytep surfaces as an
+// address-sized scalar / Opaque handle per the current generic mapping).
+
+extern fn ptd_make(Int: init) -> Int "ptd_make"
+extern fn ptd_set(Int: p, Int: v) -> Unit "ptd_set"
+extern fn ptd_get(Opaque(void): p) -> Int "ptd_get"
+extern fn ptd_obj_make(Int: v) -> Opaque(PTObj_) "ptd_obj_make"
+extern fn ptd_obj_get(Opaque(PTObj_): o) -> Int "ptd_obj_get"
+extern fn ptd_link_anchor() -> Int "ptd_link_anchor"
+
+fn main():
+    let anchor = ptd_link_anchor()
+    if anchor == 42:
+        print("PTD_L1\n")
+    else:
+        print("ANCHOR_FAIL\n")
+        return
+    let p = ptd_make(7)
+    ptd_set(p, 9)
+    let g = ptd_get(p)
+    if g == 9:
+        print("PTD_L2\n")
+    else:
+        print("GET_FAIL\n")
+        return
+    let o = ptd_obj_make(1234)
+    let ov = ptd_obj_get(o)
+    if ov == 1234:
+        print("PTR_TYPEDEFS_OK\n")
+    else:
+        print("OBJ_FAIL\n")

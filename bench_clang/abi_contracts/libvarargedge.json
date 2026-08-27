@@ -1,0 +1,15 @@
+{
+  "library": "libvarargedge (ABI fixture, shaped-variadic family)",
+  "version": "0.1.0",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "functions": [
+    { "name": "vae_handle", "params": [], "ret": "Opaque(VarDummy)", "symbol": "vae_handle" },
+    { "name": "vae_dbl_ptr", "params": ["Float", "Float", "Opaque(VarDummy)"], "ret": "Float", "symbol": "vae_dbl_ptr" },
+    { "name": "vae_sum", "params": ["Int", "Int"], "ret": "Int", "symbol": "lime_vae_sum_v1" },
+    { "name": "vae_sum", "params": ["Int", "Int", "Int", "Int"], "ret": "Int", "symbol": "lime_vae_sum_v3" }
+  ],
+  "required_symbols": [
+    "vae_handle", "vae_dbl_ptr", "lime_vae_sum_v1", "lime_vae_sum_v3"
+  ]
+}

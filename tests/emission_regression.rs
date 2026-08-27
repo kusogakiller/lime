@@ -16,7 +16,6 @@
 //!   emitted as bare LLVM operands (e.g. `add i64 %t, 1`, `store i64 5,
 //!   i64* %t`), never as `add i64 %t, i64 1` or `store i64 i64 5, ...`.
 
-
 fn unique_test_dir(name: &str) -> &'static str {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -198,8 +197,9 @@ fn emit_object_option_result_runs() {
         "result.unwrap.int",
     ] {
         assert!(
-            ir.lines().any(|l| l.contains(&format!("@{}", helper))
-                || l.contains(&format!("@{}.", helper))),
+            ir.lines().any(
+                |l| l.contains(&format!("@{}", helper)) || l.contains(&format!("@{}.", helper))
+            ),
             "IR must emit a mangled helper for {}\n--- ir ---\n{}",
             helper,
             ir
@@ -231,17 +231,7 @@ fn emit_object_option_result_runs() {
     let stdout = String::from_utf8_lossy(&run.stdout).to_string();
     let lines: Vec<&str> = stdout.lines().collect();
     let expected = [
-        "true",
-        "false",
-        "5",
-        "0",
-        "5",
-        "true",
-        "false",
-        "true",
-        "10",
-        "0",
-        "10",
+        "true", "false", "5", "0", "5", "true", "false", "true", "10", "0", "10",
     ];
     assert!(
         lines == expected,
@@ -249,7 +239,7 @@ fn emit_object_option_result_runs() {
         expected,
         lines,
         String::from_utf8_lossy(&run.stderr)
-);
+    );
 }
 
 /// Phase B-1 Step 3: str() on Option and Result must produce display
@@ -278,12 +268,7 @@ fn emit_object_str_option_result() {
     let run = Command::new(&exe).output().unwrap();
     let stdout = String::from_utf8_lossy(&run.stdout).to_string();
     let lines: Vec<&str> = stdout.lines().collect();
-    let expected = [
-        "Some(5)",
-        "None",
-        "Success(10)",
-        "Error(42)",
-    ];
+    let expected = ["Some(5)", "None", "Success(10)", "Error(42)"];
     assert!(
         lines == expected,
         "str(option/result) native output mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
@@ -296,7 +281,12 @@ fn emit_object_str_option_result() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let stdout: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     assert!(
         stdout == expected,
@@ -325,7 +315,12 @@ fn emit_object_nested_generic_mangling() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let stdout: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     assert!(
         stdout == ["5", "5"],
@@ -383,7 +378,13 @@ fn emit_object_repeated_build_is_symbol_stable() {
         let mut v: Vec<String> = ir
             .lines()
             .filter(|l| l.contains("define "))
-            .map(|l| l.split_whitespace().skip(2).next().unwrap_or("").to_string())
+            .map(|l| {
+                l.split_whitespace()
+                    .skip(2)
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
             .filter(|s| !s.is_empty())
             .collect();
         v.sort();
@@ -429,7 +430,12 @@ fn emit_object_math_floor_ceil_round_negatives() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let interp: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     let expected = [
         "1", "-2", "2", "-1", "2", "-2", "3", "-3", "1", "-1", "1", "-2",
@@ -456,7 +462,8 @@ fn emit_object_math_floor_ceil_round_negatives() {
     let stdout_lossy = String::from_utf8_lossy(&run.stdout);
     let native: Vec<&str> = stdout_lossy.lines().collect();
     assert_eq!(
-        native, expected,
+        native,
+        expected,
         "native floor/ceil/round mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
         expected,
         native,
@@ -492,13 +499,25 @@ fn emit_object_math_new_builtins_trig_exp_log_constants() {
         })
         .collect();
     let expected = [
-        "3", "-3", "0",
-        "1", "2.718281828459045",
-        "0", "1",
-        "2", "0",
-        "0", "1", "0",
-        "0", "0", "0",
-        "true", "true", "true", "true",
+        "3",
+        "-3",
+        "0",
+        "1",
+        "2.718281828459045",
+        "0",
+        "1",
+        "2",
+        "0",
+        "0",
+        "1",
+        "0",
+        "0",
+        "0",
+        "0",
+        "true",
+        "true",
+        "true",
+        "true",
     ];
     assert_eq!(
         interp, expected,
@@ -512,7 +531,10 @@ fn emit_object_math_new_builtins_trig_exp_log_constants() {
     }
     let build_out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
     if !build_out.contains("ok:") || !std::path::Path::new(&format!("{}.exe", dir)).exists() {
-        eprintln!("native build skipped (pre-existing runtime_read_line issue): {}", build_out);
+        eprintln!(
+            "native build skipped (pre-existing runtime_read_line issue): {}",
+            build_out
+        );
         return;
     }
     let exe = format!("{}.exe", dir);
@@ -520,7 +542,8 @@ fn emit_object_math_new_builtins_trig_exp_log_constants() {
     let stdout_lossy = String::from_utf8_lossy(&run.stdout);
     let native: Vec<&str> = stdout_lossy.lines().collect();
     assert_eq!(
-        native, expected,
+        native,
+        expected,
         "native new math builtins mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
         expected,
         native,
@@ -550,7 +573,12 @@ fn emit_object_display_println_option_result() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let interp: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     let expected = [
         "Some(1)",
@@ -583,7 +611,8 @@ fn emit_object_display_println_option_result() {
     let stdout_lossy = String::from_utf8_lossy(&run.stdout);
     let native: Vec<&str> = stdout_lossy.lines().collect();
     assert_eq!(
-        native, expected,
+        native,
+        expected,
         "native display mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
         expected,
         native,
@@ -614,7 +643,12 @@ fn emit_object_unwrap_panic_and_fallback() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let interp: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     // First five lines must succeed.
     assert!(
@@ -660,7 +694,8 @@ fn emit_object_unwrap_panic_and_fallback() {
     let native_stderr = String::from_utf8_lossy(&run.stderr);
     // The native process must have aborted with a panic message on stderr.
     assert!(
-        native_stderr.contains("Lime runtime panic") && native_stderr.contains("test_panic_message"),
+        native_stderr.contains("Lime runtime panic")
+            && native_stderr.contains("test_panic_message"),
         "native must show panic message\n--- stderr ---\n{}",
         native_stderr
     );
@@ -691,7 +726,12 @@ fn emit_object_unwrap_or_parity() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let interp: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     assert_eq!(
         interp, expected,
@@ -715,7 +755,8 @@ fn emit_object_unwrap_or_parity() {
     let stdout_lossy = String::from_utf8_lossy(&run.stdout);
     let native: Vec<&str> = stdout_lossy.lines().collect();
     assert_eq!(
-        native, expected,
+        native,
+        expected,
         "unwrap_or parity (native) mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
         expected,
         native,
@@ -744,28 +785,33 @@ fn emit_object_stdlib_all_packages_smoke() {
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
     let interp: Vec<&str> = out
         .lines()
-        .filter(|l| !l.starts_with("warning") && !l.starts_with("unused variable") && !l.starts_with("In function") && !l.starts_with("error[type]"))
+        .filter(|l| {
+            !l.starts_with("warning")
+                && !l.starts_with("unused variable")
+                && !l.starts_with("In function")
+                && !l.starts_with("error[type]")
+        })
         .collect();
     let expected = [
-        "5",       // string.len
-        "x",       // string.trim
-        "ABC",     // string.to_upper
-        "true",    // string.contains
-        "3",       // math.abs
-        "3",       // math.sqrt
-        "2",       // math.floor
-        "3",       // math.ceil
-        "3",       // math.round
-        "true",    // option.is_some
-        "42",      // option.unwrap_or
-        "true",    // result.is_ok
-        "99",      // result.unwrap_or
-        "true",    // time.now().secs >= 0.0
-        "io_ok",   // io.println
-        "true",    // fs.write
-        "hi",      // fs.read
-        "true",    // fs.exists
-        "true",    // fs.remove
+        "5",     // string.len
+        "x",     // string.trim
+        "ABC",   // string.to_upper
+        "true",  // string.contains
+        "3",     // math.abs
+        "3",     // math.sqrt
+        "2",     // math.floor
+        "3",     // math.ceil
+        "3",     // math.round
+        "true",  // option.is_some
+        "42",    // option.unwrap_or
+        "true",  // result.is_ok
+        "99",    // result.unwrap_or
+        "true",  // time.now().secs >= 0.0
+        "io_ok", // io.println
+        "true",  // fs.write
+        "hi",    // fs.read
+        "true",  // fs.exists
+        "true",  // fs.remove
     ];
     assert_eq!(
         interp, expected,
@@ -789,7 +835,8 @@ fn emit_object_stdlib_all_packages_smoke() {
     let stdout_lossy = String::from_utf8_lossy(&run.stdout);
     let native: Vec<&str> = stdout_lossy.lines().collect();
     assert_eq!(
-        native, expected,
+        native,
+        expected,
         "stdlib smoke test (native) mismatch\nexpected: {:?}\ngot: {:?}\n--- stderr ---\n{}",
         expected,
         native,
@@ -1001,7 +1048,7 @@ fn emit_object_let_literal_runs() {
         ir
     );
     assert!(
-        ir.contains("add i64"),
+        ir.contains("add nuw nsw i64"),
         "a + 1 must emit an add\n--- ir ---\n{}",
         ir
     );
@@ -1044,7 +1091,10 @@ fn emit_object_let_literal_runs() {
 fn emit_object_let_literal_binop_runs() {
     use std::fs;
     let dir = unique_test_dir("emit_let_literal_binop");
-    write_project(dir, "fn main():\n    let x = 10\n    println(x + 20)\n    return\n");
+    write_project(
+        dir,
+        "fn main():\n    let x = 10\n    println(x + 20)\n    return\n",
+    );
 
     let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-ll"]);
     let ll = format!("{}.ll", dir);
@@ -1056,7 +1106,7 @@ fn emit_object_let_literal_binop_runs() {
         ir
     );
     assert!(
-        ir.contains("add i64"),
+        ir.contains("add nuw nsw i64"),
         "x + 20 must emit an add\n--- ir ---\n{}",
         ir
     );
@@ -1105,12 +1155,12 @@ fn emit_object_nested_literal_binop_runs() {
     let ir = fs::read_to_string(&ll).unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
     assert!(
-        ir.contains("add i64 1, 2"),
+        ir.contains("add nuw nsw i64 1, 2"),
         "literal-only add must emit bare operands\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("mul i64"),
+        ir.contains("mul nuw nsw i64"),
         "nested product must emit a mul\n--- ir ---\n{}",
         ir
     );
@@ -1218,7 +1268,7 @@ fn emit_object_reassignment_runs() {
         ir
     );
     assert!(
-        ir.contains("add i64"),
+        ir.contains("add nuw nsw i64"),
         "x = x + 1 must emit an add\n--- ir ---\n{}",
         ir
     );
@@ -1303,7 +1353,7 @@ fn emit_object_await_int_runs() {
         ir
     );
     assert!(
-        ir.contains("add i64"),
+        ir.contains("add nuw nsw i64"),
         "add1 body must contain the add instruction\n--- ir ---\n{}",
         ir
     );
@@ -1436,7 +1486,7 @@ fn emit_object_await_nested_runs() {
         ir
     );
     assert!(
-        ir.contains("mul i64"),
+        ir.contains("mul nuw nsw i64"),
         "inner body must contain the multiply instruction\n--- ir ---\n{}",
         ir
     );
@@ -1592,7 +1642,11 @@ fn emit_object_fn_reference_native() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "7", "fn reference (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "7",
+        "fn reference (native) mismatch"
+    );
 }
 
 /// Phase B-2.2: anonymous function — native parity.
@@ -1630,7 +1684,11 @@ fn emit_object_anonymous_fn_native() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "30\n10", "anonymous fn (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "30\n10",
+        "anonymous fn (native) mismatch"
+    );
 }
 
 /// Phase B-2.3: untyped anonymous function params — fn(x) syntax.
@@ -1736,7 +1794,11 @@ fn emit_object_closure_return_native() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "8\n17\n105", "closure capture (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "8\n17\n105",
+        "closure capture (native) mismatch"
+    );
 }
 
 /// Phase B-2.4: nested closures — inner closure captures outer parameter, with native capture.
@@ -1772,7 +1834,11 @@ fn emit_object_nested_closure_native() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "15\n10", "nested closure (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "15\n10",
+        "nested closure (native) mismatch"
+    );
 }
 
 /// Phase B-2.3: repeat build symbol stability — same source produces identical IR.
@@ -1785,7 +1851,10 @@ fn emit_object_closure_symbol_stability() {
     );
     let out1 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
     let out2 = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-llvm"]);
-    assert_eq!(out1, out2, "closure symbol stability failed: repeated builds produce different IR");
+    assert_eq!(
+        out1, out2,
+        "closure symbol stability failed: repeated builds produce different IR"
+    );
 }
 
 /// Phase C-1.1: string stdlib is_empty — runtime + native parity.
@@ -1821,7 +1890,11 @@ fn emit_object_string_is_empty() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "true\nfalse", "string is_empty (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "true\nfalse",
+        "string is_empty (native) mismatch"
+    );
 }
 
 /// Phase C-1.1: string stdlib find — runtime + native parity.
@@ -1857,7 +1930,11 @@ fn emit_object_string_find() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "2\n-1", "string find (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "2\n-1",
+        "string find (native) mismatch"
+    );
 }
 
 /// Phase C-1.1: string stdlib count — runtime + native parity.
@@ -1893,7 +1970,11 @@ fn emit_object_string_count() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "2\n0", "string count (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "2\n0",
+        "string count (native) mismatch"
+    );
 }
 
 /// Phase C-1.1: string stdlib trim_start/trim_end — runtime + native parity.
@@ -1929,7 +2010,11 @@ fn emit_object_string_trim_start_end() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "abc  \n  abc", "string trim_start/end (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "abc  \n  abc",
+        "string trim_start/end (native) mismatch"
+    );
 }
 
 /// Phase C-1.1: string stdlib join — runtime + native parity.
@@ -1965,7 +2050,11 @@ fn emit_object_string_join() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "a-b-c", "string join (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "a-b-c",
+        "string join (native) mismatch"
+    );
 }
 
 /// Phase C-1.1: string stdlib to_int/to_float — runtime + native parity.
@@ -2001,7 +2090,11 @@ fn emit_object_string_to_int_float() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "42\n0\n3.14\n0", "string to_int/to_float (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "42\n0\n3.14\n0",
+        "string to_int/to_float (native) mismatch"
+    );
 }
 
 /// Phase C-1.1: string stdlib equals/compare — runtime + native parity.
@@ -2037,7 +2130,11 @@ fn emit_object_string_equals_compare() {
     assert!(fs::metadata(&exe).is_ok(), "expected executable at {}", exe);
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), "true\nfalse\n-1\n1\n0", "string equals/compare (native) mismatch");
+    assert_eq!(
+        native_out.replace("\r", ""),
+        "true\nfalse\n-1\n1\n0",
+        "string equals/compare (native) mismatch"
+    );
 }
 
 /// Phase C-1.2: list builtin operations — interpreter + native parity.
@@ -2185,7 +2282,10 @@ fn emit_object_fs_copy_rename_isfile_isdir_rmdir() {
         .collect();
     assert_eq!(
         interp,
-        ["true", "copy me", "true", "true", "true", "false", "false", "true", "false", "copy me", "true", "true", "false"],
+        [
+            "true", "copy me", "true", "true", "true", "false", "false", "true", "false",
+            "copy me", "true", "true", "false"
+        ],
         "fs copy/rename/isfile/isdir/rmdir (interpreter) mismatch\nfull output:\n{}",
         out
     );
@@ -2362,9 +2462,11 @@ fn emit_object_json_type_and_builtins() {
     let stdout_lossy = String::from_utf8_lossy(&run.stdout);
     let native: Vec<&str> = stdout_lossy.lines().collect();
     assert_eq!(
-        native, expected,
+        native,
+        expected,
         "native json builtins mismatch\nexpected: {:?}\ngot: {:?}\nstderr: {}",
-        expected, native,
+        expected,
+        native,
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(
@@ -2511,16 +2613,37 @@ fn emit_object_option_result_builtins_comprehensive() {
         })
         .collect();
     let expected = [
-        "true", "false", "false", "true",   // option predicates: is_some(Some(5)), is_none(Some(5)), is_some(None), is_none(None)
-        "5", "5", "42",                       // option extraction
-        "true", "false", "false", "true",     // option equality
-        "Some(2)", "None", "None",            // option and
-        "Some(99)", "Some(5)",                // option or
-        "true", "false", "false", "true",     // result predicates: is_ok(Success(10)), is_err(Success(10)), is_ok(Error), is_err(Error)
-        "10", "10", "42",                     // result extraction
-        "true", "false", "false", "true",     // result equality
-        "Success(2)", "Error(1)",             // result and
-        "Success(99)", "Success(5)",          // result or
+        "true",
+        "false",
+        "false",
+        "true", // option predicates: is_some(Some(5)), is_none(Some(5)), is_some(None), is_none(None)
+        "5",
+        "5",
+        "42", // option extraction
+        "true",
+        "false",
+        "false",
+        "true", // option equality
+        "Some(2)",
+        "None",
+        "None", // option and
+        "Some(99)",
+        "Some(5)", // option or
+        "true",
+        "false",
+        "false",
+        "true", // result predicates: is_ok(Success(10)), is_err(Success(10)), is_ok(Error), is_err(Error)
+        "10",
+        "10",
+        "42", // result extraction
+        "true",
+        "false",
+        "false",
+        "true", // result equality
+        "Success(2)",
+        "Error(1)", // result and
+        "Success(99)",
+        "Success(5)", // result or
     ];
     assert_eq!(
         interp, expected,
@@ -2537,11 +2660,7 @@ fn emit_object_path_builtins() {
         "fn main():\n    println(path.join(\"foo\", \"bar\"))\n    println(path.join(\"foo/\", \"bar\"))\n    println(path.basename(\"/foo/bar.txt\"))\n    println(path.basename(\"foo/\"))\n    println(path.dirname(\"/foo/bar.txt\"))\n    println(path.dirname(\"bar.txt\"))\n    println(path.filename(\"/foo/bar.txt\"))\n    println(path.filename(\"/foo/bar.tar.gz\"))\n    println(path.extension(\"/foo/bar.txt\"))\n    println(path.extension(\"/foo/bar.tar.gz\"))\n    println(path.extension(\"/foo/bar\"))\n    println(path.is_absolute(\"/foo/bar\"))\n    println(path.is_absolute(\"foo/bar\"))\n    println(path.normalize(\"/foo/./bar/../baz.txt\"))\n    println(path.normalize(\"foo//bar\"))\n    println(path.normalize(\"a/b/../c\"))\n    println(path.equals(\"/foo/./bar\", \"/foo/bar\"))\n    println(path.equals(\"foo\", \"bar\"))\n    println(path.parent(\"/foo/bar.txt\"))\n    println(path.parent(\"bar.txt\"))\n    println(path.parent(\"/\"))\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_path_builtins/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_path_builtins/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2550,27 +2669,27 @@ fn emit_object_path_builtins() {
         .filter(|l| !l.starts_with("error["))
         .collect();
     let expected = [
-        "foo/bar",           // join("foo", "bar")
-        "foo/bar",           // join("foo/", "bar")
-        "bar.txt",           // basename("/foo/bar.txt")
-        "foo",               // basename("foo/")
-        "/foo",              // dirname("/foo/bar.txt")
-        ".",                 // dirname("bar.txt")
-        "bar",               // filename("/foo/bar.txt")
-        "bar.tar",           // filename("/foo/bar.tar.gz")
-        ".txt",              // extension("/foo/bar.txt")
-        ".gz",               // extension("/foo/bar.tar.gz")
-        "",                  // extension("/foo/bar")
-        "true",              // is_absolute("/foo/bar")
-        "false",             // is_absolute("foo/bar")
-        "/foo/baz.txt",      // normalize("/foo/./bar/../baz.txt")
-        "foo/bar",           // normalize("foo//bar")
-        "a/c",               // normalize("a/b/../c")
-        "true",              // equals("/foo/./bar", "/foo/bar")
-        "false",             // equals("foo", "bar")
-        "/foo",              // parent("/foo/bar.txt")
-        "",                  // parent("bar.txt")
-        "/",                 // parent("/")
+        "foo/bar",      // join("foo", "bar")
+        "foo/bar",      // join("foo/", "bar")
+        "bar.txt",      // basename("/foo/bar.txt")
+        "foo",          // basename("foo/")
+        "/foo",         // dirname("/foo/bar.txt")
+        ".",            // dirname("bar.txt")
+        "bar",          // filename("/foo/bar.txt")
+        "bar.tar",      // filename("/foo/bar.tar.gz")
+        ".txt",         // extension("/foo/bar.txt")
+        ".gz",          // extension("/foo/bar.tar.gz")
+        "",             // extension("/foo/bar")
+        "true",         // is_absolute("/foo/bar")
+        "false",        // is_absolute("foo/bar")
+        "/foo/baz.txt", // normalize("/foo/./bar/../baz.txt")
+        "foo/bar",      // normalize("foo//bar")
+        "a/c",          // normalize("a/b/../c")
+        "true",         // equals("/foo/./bar", "/foo/bar")
+        "false",        // equals("foo", "bar")
+        "/foo",         // parent("/foo/bar.txt")
+        "",             // parent("bar.txt")
+        "/",            // parent("/")
     ];
     assert_eq!(
         interp, expected,
@@ -2587,11 +2706,7 @@ fn emit_object_os_builtins() {
         "fn main():\n    println(os.name())\n    println(os.arch())\n    println(os.platform())\n    let cwd = os.cwd()\n    println(len(cwd) > 0)\n    println(os.set_cwd(os.cwd()))\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_os_builtins/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_os_builtins/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2599,12 +2714,37 @@ fn emit_object_os_builtins() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 4, "os builtins: expected at least 4 outputs, got {:?}\nfull output:\n{}", interp, out);
-    assert_eq!(interp[0], "windows", "os.name() should be 'windows' on Windows\nfull output:\n{}", out);
-    assert!(!interp[1].is_empty(), "os.arch() should be non-empty\nfull output:\n{}", out);
-    assert!(!interp[2].is_empty(), "os.platform() should be non-empty\nfull output:\n{}", out);
-    assert_eq!(interp[3], "true", "os.cwd() length check\nfull output:\n{}", out);
-    assert_eq!(interp[4], "true", "os.set_cwd(os.cwd()) should succeed\nfull output:\n{}", out);
+    assert!(
+        interp.len() >= 4,
+        "os builtins: expected at least 4 outputs, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
+    assert_eq!(
+        interp[0], "windows",
+        "os.name() should be 'windows' on Windows\nfull output:\n{}",
+        out
+    );
+    assert!(
+        !interp[1].is_empty(),
+        "os.arch() should be non-empty\nfull output:\n{}",
+        out
+    );
+    assert!(
+        !interp[2].is_empty(),
+        "os.platform() should be non-empty\nfull output:\n{}",
+        out
+    );
+    assert_eq!(
+        interp[3], "true",
+        "os.cwd() length check\nfull output:\n{}",
+        out
+    );
+    assert_eq!(
+        interp[4], "true",
+        "os.set_cwd(os.cwd()) should succeed\nfull output:\n{}",
+        out
+    );
 }
 
 /// Phase C-1.9: ENV builtins — interpreter parity.
@@ -2615,11 +2755,7 @@ fn emit_object_env_builtins() {
         "fn main():\n    env.set(\"LIME_TEST_ENV_VAR\", \"hello_lime\")\n    println(env.has(\"LIME_TEST_ENV_VAR\"))\n    let val = env.get(\"LIME_TEST_ENV_VAR\")\n    println(val)\n    println(env.remove(\"LIME_TEST_ENV_VAR\"))\n    println(env.has(\"LIME_TEST_ENV_VAR\"))\n    println(env.has(\"PATH\"))\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_env_builtins/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_env_builtins/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2643,11 +2779,7 @@ fn emit_object_regex_builtins() {
         "fn main():\n    println(regex.is_match(\"[0-9]+\", \"abc123\"))\n    println(regex.is_match(\"[0-9]+\", \"abc\"))\n    println(regex.find(\"[0-9]+\", \"abc123\"))\n    let all = regex.find_all(\"[0-9]+\", \"a1 b2 c3\")\n    println(len(all))\n    println(all[0])\n    println(all[1])\n    println(all[2])\n    println(regex.replace(\"[0-9]+\", \"abc123\", \"X\"))\n    println(regex.replace_all(\"[0-9]+\", \"a1 b2 c3\", \"X\"))\n    let parts = regex.split(\"[ ,]+\", \"hello, world  foo\")\n    println(len(parts))\n    println(parts[0])\n    println(parts[1])\n    println(parts[2])\n    println(regex.is_match(\"[\", \"test\"))\n    println(regex.is_match(\"^hello$\", \"hello\"))\n    println(regex.is_match(\"^hello$\", \"hello world\"))\n    println(regex.find(\"[a-z]+\", \"abc123\"))\n    println(regex.is_match(\"[a-z]+\\\\d*\", \"abc123\"))\n    println(regex.replace_all(\"a\", \"banana\", \"o\"))\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_regex_builtins/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_regex_builtins/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2656,23 +2788,56 @@ fn emit_object_regex_builtins() {
         .filter(|l| !l.starts_with("error["))
         .collect();
     // Expected outputs:
-    assert!(interp.len() >= 16, "regex builtins: expected at least 16 outputs, got {:?}\nfull output:\n{}", interp, out);
-    assert_eq!(interp[0], "true", "is_match digit pattern\nfull output:\n{}", out);
-    assert_eq!(interp[1], "false", "is_match no match\nfull output:\n{}", out);
-    assert_eq!(interp[2], "Some(123)", "find digit pattern\nfull output:\n{}", out);
+    assert!(
+        interp.len() >= 16,
+        "regex builtins: expected at least 16 outputs, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
+    assert_eq!(
+        interp[0], "true",
+        "is_match digit pattern\nfull output:\n{}",
+        out
+    );
+    assert_eq!(
+        interp[1], "false",
+        "is_match no match\nfull output:\n{}",
+        out
+    );
+    assert_eq!(
+        interp[2], "Some(123)",
+        "find digit pattern\nfull output:\n{}",
+        out
+    );
     assert_eq!(interp[3], "3", "find_all count\nfull output:\n{}", out);
     assert_eq!(interp[4], "1", "find_all[0]\nfull output:\n{}", out);
     assert_eq!(interp[5], "2", "find_all[1]\nfull output:\n{}", out);
     assert_eq!(interp[6], "3", "find_all[2]\nfull output:\n{}", out);
-    assert_eq!(interp[7], "abcX", "replace first match\nfull output:\n{}", out);
-    assert_eq!(interp[8], "aX bX cX", "replace all matches\nfull output:\n{}", out);
+    assert_eq!(
+        interp[7], "abcX",
+        "replace first match\nfull output:\n{}",
+        out
+    );
+    assert_eq!(
+        interp[8], "aX bX cX",
+        "replace all matches\nfull output:\n{}",
+        out
+    );
     assert_eq!(interp[9], "3", "split count\nfull output:\n{}", out);
     assert_eq!(interp[10], "hello", "split[0]\nfull output:\n{}", out);
     assert_eq!(interp[11], "world", "split[1]\nfull output:\n{}", out);
     assert_eq!(interp[12], "foo", "split[2]\nfull output:\n{}", out);
-    assert_eq!(interp[13], "false", "invalid pattern\nfull output:\n{}", out);
+    assert_eq!(
+        interp[13], "false",
+        "invalid pattern\nfull output:\n{}",
+        out
+    );
     assert_eq!(interp[14], "true", "anchor match\nfull output:\n{}", out);
-    assert_eq!(interp[15], "false", "anchor no match\nfull output:\n{}", out);
+    assert_eq!(
+        interp[15], "false",
+        "anchor no match\nfull output:\n{}",
+        out
+    );
 }
 
 #[test]
@@ -2682,11 +2847,7 @@ fn emit_object_process_builtins() {
         "fn main():\n    let args = process_args()\n    println(args)\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_process_builtins/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_process_builtins/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2695,7 +2856,12 @@ fn emit_object_process_builtins() {
         .filter(|l| !l.starts_with("error["))
         .collect();
     // process_args returns a list of strings
-    assert!(interp.len() >= 1, "process builtins: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "process builtins: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2709,11 +2875,7 @@ fn emit_object_requests_builtins() {
         "fn main():\n    let client = requests_client_new()\n    println(typeof(client))\n    let builder = requests_request_builder_new(client, \"GET\", \"http://example.com\")\n    println(typeof(builder))\n    let headers = requests_header_map_new()\n    println(typeof(headers))\n    let mp = requests_multipart_new()\n    println(typeof(mp))\n    let tls = requests_tls_config_new()\n    println(typeof(tls))\n    let jar = requests_cookie_jar_new()\n    println(typeof(jar))\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_builtins/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_builtins/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2722,7 +2884,12 @@ fn emit_object_requests_builtins() {
         .filter(|l| !l.starts_with("error["))
         .collect();
     // requests functions return opaque handles
-    assert!(interp.len() >= 6, "requests builtins: expected at least 6 outputs, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 6,
+        "requests builtins: expected at least 6 outputs, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2734,11 +2901,7 @@ fn emit_object_requests_send() {
         "fn main():\n    let resp = requests_send(requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\"))\n    if requests_response_is_success(resp):\n        println(requests_response_status(resp))\n    else:\n        println(\"error\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_send/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_send/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2747,7 +2910,12 @@ fn emit_object_requests_send() {
         .filter(|l| !l.starts_with("error["))
         .collect();
     // Should print status code (200) or error
-    assert!(interp.len() >= 1, "requests send: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests send: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2757,11 +2925,7 @@ fn emit_object_requests_session() {
         "fn main():\n    let s = requests_session_new()\n    let b = requests_session_request(s, \"GET\", \"http://example.com\")\n    requests_session_free(s)\n    println(\"ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_session/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_session/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2769,7 +2933,12 @@ fn emit_object_requests_session() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests session: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests session: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2779,11 +2948,7 @@ fn emit_object_requests_set_headers() {
         "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://example.com\")\n    let hdrs = [\"Authorization\", \"Bearer test123\"]\n    requests_request_builder_set_headers(b, hdrs)\n    println(\"ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_set_headers/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_set_headers/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2791,7 +2956,12 @@ fn emit_object_requests_set_headers() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests set_headers: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests set_headers: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2801,11 +2971,7 @@ fn emit_object_requests_verify() {
         "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://example.com\")\n    requests_request_builder_verify(b, false)\n    requests_request_builder_verify(b, true)\n    println(\"ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_verify/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_verify/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2813,7 +2979,12 @@ fn emit_object_requests_verify() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests verify: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests verify: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2823,11 +2994,7 @@ fn emit_object_requests_basic_auth() {
         "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://example.com\")\n    requests_request_builder_basic_auth(b, \"user\", \"pass\")\n    println(\"ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_basic_auth/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_basic_auth/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2835,7 +3002,12 @@ fn emit_object_requests_basic_auth() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests basic_auth: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests basic_auth: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2857,7 +3029,12 @@ fn emit_object_requests_session_config() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests session_config: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests session_config: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2867,11 +3044,7 @@ fn emit_object_requests_cookie_jar() {
         "fn main():\n    let jar = requests_cookie_jar_new()\n    requests_cookie_jar_add(jar, \"session=abc123\")\n    let hdr = requests_cookie_jar_get_cookie_header(jar, \"http://example.com\")\n    let val = requests_cookie_jar_get(jar, \"session\")\n    requests_cookie_jar_free(jar)\n    println(\"ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_cookie_jar/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_cookie_jar/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2879,7 +3052,12 @@ fn emit_object_requests_cookie_jar() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests cookie_jar: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests cookie_jar: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2901,7 +3079,12 @@ fn emit_object_requests_redirect_history() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests redirect_history: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests redirect_history: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2923,7 +3106,12 @@ fn emit_object_requests_session_cookies() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests session_cookies: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests session_cookies: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2933,11 +3121,7 @@ fn emit_object_requests_stream_read() {
         "fn main():\n    let resp = requests_send(requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\"))\n    let stream = requests_response_stream(resp)\n    if requests_stream_has_more(stream):\n        let chunk = requests_stream_read(stream, 5)\n        println(\"read ok\")\n    else:\n        println(\"no data\")\n    requests_stream_free(stream)\n    requests_response_free(resp)\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_stream_read/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_stream_read/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2945,7 +3129,12 @@ fn emit_object_requests_stream_read() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests stream_read: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests stream_read: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2955,11 +3144,7 @@ fn emit_object_requests_form_body() {
         "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"POST\", \"http://httpbin.org/post\")\n    let b2 = requests_request_builder_form(b, [\"key\", \"value\"])\n    println(\"form ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_form_body/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_form_body/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -2967,7 +3152,12 @@ fn emit_object_requests_form_body() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests form_body: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests form_body: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2989,7 +3179,12 @@ fn emit_object_requests_client_builder_fields() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests client_builder_fields: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests client_builder_fields: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -2999,11 +3194,7 @@ fn emit_object_requests_bearer_auth() {
         "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\")\n    let b2 = requests_request_builder_bearer_auth(b, \"mytoken\")\n    println(\"bearer ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_bearer_auth/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_bearer_auth/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -3011,7 +3202,12 @@ fn emit_object_requests_bearer_auth() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests bearer_auth: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests bearer_auth: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }
 
 #[test]
@@ -3021,11 +3217,7 @@ fn emit_object_requests_query_params() {
         "fn main():\n    let b = requests_request_builder_new(requests_client_new(), \"GET\", \"http://httpbin.org/get\")\n    let b2 = requests_request_builder_query(b, [\"foo\", \"bar\"])\n    println(\"query ok\")\n    return\n",
     );
 
-    let out = lime_cmd(
-        "run",
-        "target/test_requests_query_params/citrus.toml",
-        &[],
-    );
+    let out = lime_cmd("run", "target/test_requests_query_params/citrus.toml", &[]);
     let interp: Vec<&str> = out
         .lines()
         .filter(|l| !l.starts_with("warning"))
@@ -3033,5 +3225,10 @@ fn emit_object_requests_query_params() {
         .filter(|l| !l.starts_with("In function"))
         .filter(|l| !l.starts_with("error["))
         .collect();
-    assert!(interp.len() >= 1, "requests query_params: expected at least 1 output, got {:?}\nfull output:\n{}", interp, out);
+    assert!(
+        interp.len() >= 1,
+        "requests query_params: expected at least 1 output, got {:?}\nfull output:\n{}",
+        interp,
+        out
+    );
 }

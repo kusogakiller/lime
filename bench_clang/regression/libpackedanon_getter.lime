@@ -1,0 +1,4 @@
+extern fn pka_get_head(Opaque(PackedAnon): a0) -> Int "pka_get_head"
+
+fn main():
+    print("GETTER_TEST\n")

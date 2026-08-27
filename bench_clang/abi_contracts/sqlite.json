@@ -1,0 +1,13 @@
+{
+  "library": "SQLite",
+  "version": "3.45.1",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "sqlite",
+  "functions": [
+    { "name": "sqlite3_libversion_number", "params": [], "ret": "Int", "symbol": "sqlite3_libversion_number" },
+    { "name": "sqlite3_threadsafe", "params": [], "ret": "Int", "symbol": "sqlite3_threadsafe" },
+    { "name": "sqlite3_open", "params": ["String"], "ret": "Opaque(sqlite3)", "symbol": "lime_out_sqlite3_open" }
+  ],
+  "required_symbols": ["sqlite3_libversion_number", "sqlite3_open", "lime_out_sqlite3_open"]
+}

@@ -1,0 +1,28 @@
+// Level 9: enum ? bare variants + int payload variant (mixed enum)
+// NOTE: printing an enum VALUE directly (println(a)) is not lowerable in
+// native codegen yet ? inspect variants through match instead.
+enum State:
+    Todo
+    Running
+    Done
+    Failed(int)
+fn label(State: s):
+    match s:
+        Todo:
+            println("Todo")
+        Running:
+            println("Running")
+        Done:
+            println("Done")
+        Failed(code):
+            println("Failed")
+            println(code)
+fn main():
+    let a = Todo
+    let b = Running
+    let c = Done
+    let d = Failed(503)
+    label(a)
+    label(b)
+    label(c)
+    label(d)

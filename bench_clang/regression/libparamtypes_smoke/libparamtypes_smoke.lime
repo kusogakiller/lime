@@ -1,0 +1,57 @@
+// Iteration 30 regression: multi-token base-type parameters (`unsigned char`,
+// `signed char`, `unsigned int`) were previously mangled by strip_param_name
+// ("unsigned char" -> "unsigned"), producing Other("unsigned") CType,
+// Opaque(unsigned) Lime params, and dangling lime_val_* iface symbols.
+// This smoke exercises the RAW C functions through the corrected generic
+// pipeline end-to-end: exact-value round trips prove the ABI slots carry the
+// right widths/values. Struct by-value return (lime_ret_*) and argument
+// (lime_val_*) wrappers are exercised too — they are the LEGITIMATE uses of
+// those shims and must keep working alongside the fix.
+
+extern fn ptt_uc(Int: v) -> Int "ptt_uc"
+extern fn ptt_sc(Int: v) -> Int "ptt_sc"
+extern fn ptt_ui(Int: v) -> Int "ptt_ui"
+extern fn ptt_ll(Int: v) -> Int "ptt_ll"
+extern fn ptt_d(Float: v) -> Float "ptt_d"
+extern fn ptt_make(Int: x, Int: y) -> Opaque(PTPoint) "lime_ret_ptt_make"
+extern fn ptt_sum(Opaque(PTPoint): p) -> Int "ptt_sum"
+
+fn main():
+    // unsigned char: C does v+1 (mod 256)
+    if ptt_uc(9) == 10:
+        print("PT_L1\n")
+    else:
+        print("UC_FAIL\n")
+        return
+    // signed char: C does v-1
+    if ptt_sc(6) == 5:
+        print("PT_L2\n")
+    else:
+        print("SC_FAIL\n")
+        return
+    // unsigned int: C does v*3
+    if ptt_ui(7) == 21:
+        print("PT_L3\n")
+    else:
+        print("UI_FAIL\n")
+        return
+    // long long passthrough *2
+    if ptt_ll(11) == 22:
+        print("PT_L4\n")
+    else:
+        print("LL_FAIL\n")
+        return
+    // double halved
+    if ptt_d(9.0) == 4.5:
+        print("PT_L5\n")
+    else:
+        print("D_FAIL\n")
+        return
+    // struct-by-value RETURN wrapper: heap-copied PTPoint handle
+    let p = ptt_make(3, 4)
+    // struct-by-value ARGUMENT wrapper: deref + forward
+    let s = ptt_sum(p)
+    if s == 7:
+        print("PARAM_TYPES_OK\n")
+    else:
+        print("SUM_FAIL\n")

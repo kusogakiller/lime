@@ -1,0 +1,13 @@
+{
+  "library": "curl",
+  "version": "8.10.1",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "curl",
+  "functions": [
+    { "name": "curl_version", "params": [], "ret": "String", "symbol": "curl_version" },
+    { "name": "curl_easy_init", "params": [], "ret": "Opaque(CURL)", "symbol": "curl_easy_init" },
+    { "name": "curl_easy_cleanup", "params": ["Opaque(CURL)"], "ret": "Unit", "symbol": "curl_easy_cleanup" }
+  ],
+  "required_symbols": ["curl_version", "curl_easy_init", "curl_easy_cleanup"]
+}

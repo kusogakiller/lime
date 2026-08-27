@@ -1,0 +1,12 @@
+// EXPECT: check FAILS ? match on 3-variant enum missing `Blue`
+enum Color:
+    Red
+    Green
+    Blue
+fn main():
+    let c = Red
+    match c:
+        Red:
+            println("red")
+        Green:
+            println("green")

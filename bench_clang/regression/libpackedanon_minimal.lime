@@ -1,0 +1,5 @@
+extern fn pka_link_anchor() -> Int "pka_link_anchor"
+
+fn main():
+    let result = pka_link_anchor()
+    print("ANCHOR_OK\n")

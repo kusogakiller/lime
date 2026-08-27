@@ -1,0 +1,12 @@
+{
+  "library": "FFmpeg libavutil API slice",
+  "version": "60.26.102",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "ffmpeg_avutil_version",
+  "functions": [
+    { "name": "avutil_version", "params": [], "ret": "Int", "symbol": "avutil_version" },
+    { "name": "av_version_info", "params": [], "ret": "String", "symbol": "av_version_info" }
+  ],
+  "required_symbols": ["avutil_version", "av_version_info"]
+}

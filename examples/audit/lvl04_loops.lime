@@ -1,0 +1,15 @@
+// Level 4: loops (accumulator + counting + iteration)
+fn main():
+    let mut i = 1
+    let mut sum = 0
+    while i <= 5:
+        sum = sum + i
+        i = i + 1
+    println(sum)
+    for n in [2, 4, 6]:
+        println(n)
+    let words = ["alpha", "beta"]
+    let mut idx = 0
+    while idx < words.len():
+        println(words.get(idx))
+        idx = idx + 1

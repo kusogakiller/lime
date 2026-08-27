@@ -1,12 +1,17 @@
+use lime::{
+    CompileMode, CompileOptions, CompileReport, abiverify, charger, compile_pipeline,
+    format_lime_source,
+};
 use std::env;
 use std::fs;
-use lime::{charger, compile_pipeline, CompileMode, CompileOptions, CompileReport, format_lime_source};
 
 fn print_usage() {
     eprintln!("Lime compiler");
     eprintln!("Usage:");
     eprintln!("  lime build <path> [--emit-ll] [--emit-object] [--release]  Build to binary");
-    eprintln!("  lime run   <path> [--emit-ll]                              Execute via interpreter (deprecated)");
+    eprintln!(
+        "  lime run   <path> [--emit-ll]                              Execute via interpreter (deprecated)"
+    );
     eprintln!("  lime check <path>                                          Type-check only");
     eprintln!("  lime fmt   <file.lime> [--write]                           Format source");
     eprintln!("  lime <path> [--emit-ll] [--verbose|-v]                     Shorthand for `run`");
@@ -22,7 +27,10 @@ fn print_usage() {
 fn cli_target(rest: &[String]) -> Option<(String, bool, bool)> {
     let emit_ll = rest.iter().any(|a| a == "--emit-ll");
     let verbose = rest.iter().any(|a| a == "--verbose" || a == "-v");
-    let path = rest.iter().find(|a| !a.starts_with("--") && a != &"-v").cloned()?;
+    let path = rest
+        .iter()
+        .find(|a| !a.starts_with("--") && a != &"-v")
+        .cloned()?;
     Some((path, emit_ll, verbose))
 }
 
@@ -126,9 +134,27 @@ fn cli_fmt(path: &str, write: bool) {
 }
 
 // Detect the LLVM toolchain bindir from the environment or a known location.
+// This mirrors the logic in lib.rs::llvm_bindir but returns a String (fallback ".").
 fn llvm_bindir() -> String {
     if let Ok(p) = std::env::var("LIME_LLVM_BIN") {
         return p;
+    }
+    // Check explicit prefix env vars.
+    for var in &["LLVM_SYS_221_PREFIX", "LIME_LLVM_PREFIX"] {
+        if let Ok(prefix) = std::env::var(var) {
+            let bindir = std::path::Path::new(&prefix).join("bin");
+            if bindir.join("opt.exe").exists() || bindir.join("opt").exists() {
+                return bindir.to_str().unwrap().to_string();
+            }
+        }
+    }
+    // Check if opt/llc are directly on PATH.
+    if let Ok(paths) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            if dir.join("opt.exe").exists() || dir.join("opt").exists() {
+                return dir.to_str().unwrap().to_string();
+            }
+        }
     }
     // Fallback: derive from `clang` on PATH if present.
     ".".to_string()
@@ -146,7 +172,11 @@ fn cli_charger(sub: &str, rest: &[String]) {
             };
             match charger::install(&source, &llvm_bindir()) {
                 Ok(r) => {
-                    println!("charger: installed '{}' -> {}", r.lib_name, r.store_path.display());
+                    println!(
+                        "charger: installed '{}' -> {}",
+                        r.lib_name,
+                        r.store_path.display()
+                    );
                     println!("  functions: {}", r.api.functions.len());
                     println!("  structs:   {}", r.api.structs.len());
                 }
@@ -185,7 +215,9 @@ fn cli_charger(sub: &str, rest: &[String]) {
                         println!(
                             "  [{}] {} : expected={} measured={}",
                             if c.pass { "PASS" } else { "FAIL" },
-                            c.item, c.expected, c.measured
+                            c.item,
+                            c.expected,
+                            c.measured
                         );
                     }
                     if all_pass {
@@ -219,11 +251,15 @@ fn cli_charger(sub: &str, rest: &[String]) {
                         println!(
                             "  [{}] {} : {}",
                             if c.pass { "PASS" } else { "FAIL" },
-                            c.item, c.detail
+                            c.item,
+                            c.detail
                         );
                     }
                     if checks.is_empty() {
-                        println!("verify-semantics: no semantic metadata for '{}' (all unknown — correct)", lib);
+                        println!(
+                            "verify-semantics: no semantic metadata for '{}' (all unknown — correct)",
+                            lib
+                        );
                     } else if all_pass {
                         println!("verify-semantics: ALL {} CHECKS PASS", checks.len());
                     } else {
@@ -235,6 +271,28 @@ fn cli_charger(sub: &str, rest: &[String]) {
                     eprintln!("charger verify-semantics failed: {}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+        "verify-contract" => {
+            // Iteration 31: permanent ABI CONTRACT gate. Compares a
+            // human-reviewed frozen contract (bench_clang/abi_contracts/<lib>.json)
+            // against the generated lime-iface.lime + manifest.toml of the
+            // newest store entry. Detects signature drift, dangling shim
+            // references, platform drift, and forbidden regression shapes.
+            let libs: Vec<String> = rest
+                .iter()
+                .filter(|a| !a.starts_with("--"))
+                .cloned()
+                .collect();
+            if libs.is_empty() {
+                eprintln!("charger verify-contract <library> [library ...]");
+                std::process::exit(1);
+            }
+            let refs: Vec<&str> = libs.iter().map(|s| s.as_str()).collect();
+            let (pass, fail, _fns, _refs, _syms) = abiverify::verify_all(&refs);
+            println!("verify-contract: PASS={} FAIL={}", pass, fail);
+            if fail > 0 {
+                std::process::exit(1);
             }
         }
         other => {
@@ -258,23 +316,35 @@ fn main() {
             let emit_object = args.iter().any(|a| a == "--emit-object");
             let release = args.iter().any(|a| a == "--release");
             let verbose = args.iter().any(|a| a == "--verbose" || a == "-v");
-            let path = args[2..].iter().find(|a| !a.starts_with("--") && a != &"-v").cloned();
+            let path = args[2..]
+                .iter()
+                .find(|a| !a.starts_with("--") && a != &"-v")
+                .cloned();
             match path {
                 Some(p) => cli_build(&p, emit_ll, emit_object, release, verbose),
-                None => { print_usage(); return; }
+                None => {
+                    print_usage();
+                    return;
+                }
             }
         }
         "run" => {
             let (path, emit_ll, verbose) = match cli_target(&args[2..]) {
                 Some(t) => t,
-                None => { print_usage(); return; }
+                None => {
+                    print_usage();
+                    return;
+                }
             };
             cli_run(&path, emit_ll, verbose);
         }
         "check" => {
             let (path, _, verbose) = match cli_target(&args[2..]) {
                 Some(t) => t,
-                None => { print_usage(); return; }
+                None => {
+                    print_usage();
+                    return;
+                }
             };
             cli_check(&path, verbose);
         }
@@ -283,7 +353,10 @@ fn main() {
             let path = args[2..].iter().find(|a| !a.starts_with("--")).cloned();
             match path {
                 Some(p) => cli_fmt(&p, write),
-                None => { print_usage(); return; }
+                None => {
+                    print_usage();
+                    return;
+                }
             }
         }
         "charger" => {
@@ -291,7 +364,10 @@ fn main() {
             let rest = if args.len() > 3 { &args[3..] } else { &[] };
             match sub {
                 Some(s) => cli_charger(s, rest),
-                None => { print_usage(); return; }
+                None => {
+                    print_usage();
+                    return;
+                }
             }
         }
         "-h" | "--help" | "help" => {

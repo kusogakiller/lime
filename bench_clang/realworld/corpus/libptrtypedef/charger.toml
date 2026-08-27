@@ -1,0 +1,4 @@
+[charger]
+api_header = "libptrtypedef.h"
+build_flags = []
+deps = []

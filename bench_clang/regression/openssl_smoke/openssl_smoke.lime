@@ -1,0 +1,70 @@
+// Regression smoke — OpenSSL 3.3.2 (libcrypto).
+// Strict minimal slice proving the OpenSSL native-execution gate on every
+// change. Exercises libcrypto init + an EVP SHA-256 digest (no allocators
+// beyond the EVP_MD_CTX managed internally by OpenSSL). Symbols matched by
+// name against the store manifest; no library-specific Charger logic.
+//
+// Verified against the real clang AST of openssl/evp.h:
+//   OPENSSL_init_crypto(uint64_t, const OPENSSL_INIT_SETTINGS*) -> int
+//   OPENSSL_cleanse(void*, size_t) -> void
+//   EVP_MD_CTX_new(void) -> EVP_MD_CTX*
+//   EVP_sha256(void) -> const EVP_MD*
+//   EVP_DigestInit_ex(EVP_MD_CTX*, const EVP_MD*, ENGINE*) -> int
+//   EVP_DigestUpdate(EVP_MD_CTX*, const void*, size_t) -> int
+//   EVP_DigestFinal_ex(EVP_MD_CTX*, unsigned char*, unsigned int*) -> int
+//   EVP_MD_CTX_free(EVP_MD_CTX*) -> void
+//
+// Gate: every call must return 1 (success). Lime passes integer 0 for a NULL
+// opaque pointer; the digest data is passed as a `String` (char*).
+
+// OPENSSL_init_crypto(uint64_t opts, const OPENSSL_INIT_SETTINGS* settings) -> int.
+// opts=0, settings=NULL performs a no-op load of the default provider.
+extern fn OPENSSL_init_crypto(Int: opts, Opaque(OPENSSL_INIT_SETTINGS): settings) -> Int "OPENSSL_init_crypto"
+
+// OPENSSL_cleanse(void* ptr, size_t len) -> void.
+extern fn OPENSSL_cleanse(Opaque(Any): ptr, Int: len) -> Unit "OPENSSL_cleanse"
+
+// EVP_MD_CTX_new() -> EVP_MD_CTX* (opaque context).
+extern fn EVP_MD_CTX_new() -> Opaque(EVP_MD_CTX) "EVP_MD_CTX_new"
+
+// EVP_sha256() -> const EVP_MD* (opaque algorithm).
+extern fn EVP_sha256() -> Opaque(EVP_MD) "EVP_sha256"
+
+// EVP_DigestInit_ex(EVP_MD_CTX*, const EVP_MD*, ENGINE*) -> int.
+extern fn EVP_DigestInit_ex(Opaque(EVP_MD_CTX): ctx, Opaque(EVP_MD): md, Opaque(Any): engine) -> Int "EVP_DigestInit_ex"
+
+// EVP_DigestUpdate(EVP_MD_CTX*, const void*, size_t) -> int.
+extern fn EVP_DigestUpdate(Opaque(EVP_MD_CTX): ctx, String: data, Int: len) -> Int "EVP_DigestUpdate"
+
+// EVP_DigestFinal_ex(EVP_MD_CTX*, unsigned char*, unsigned int*) -> int.
+extern fn EVP_DigestFinal_ex(Opaque(EVP_MD_CTX): ctx, Opaque(Any): md, Opaque(Int): len) -> Int "EVP_DigestFinal_ex"
+
+// EVP_MD_CTX_free(EVP_MD_CTX*) -> void.
+extern fn EVP_MD_CTX_free(Opaque(EVP_MD_CTX): ctx) -> Unit "EVP_MD_CTX_free"
+
+fn main():
+    // Initialize libcrypto. opts=OPENSSL_INIT_LOAD_CONFIG (2) ensures the
+    // default provider + config are loaded so legacy EVP_MD dispatch tables
+    // (e.g. EVP_sha256's meth) are wired up.
+    let rc = OPENSSL_init_crypto(2, 0)
+    print(rc)
+    print("\n")
+
+    // Allocate + run an EVP SHA-256 over the byte string "abc".
+    let ctx = EVP_MD_CTX_new()
+    let md = EVP_sha256()
+    let init_rc = EVP_DigestInit_ex(ctx, md, 0)
+    print(init_rc)
+    print("\n")
+
+    // "abc" -> SHA-256 = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+    let upd_rc = EVP_DigestUpdate(ctx, "abc", 3)
+    print(upd_rc)
+    print("\n")
+
+    // Finalize; we only assert the call returns 1 (success) for the smoke gate.
+    let final_rc = EVP_DigestFinal_ex(ctx, 0, 0)
+    print(final_rc)
+    print("\n")
+
+    EVP_MD_CTX_free(ctx)

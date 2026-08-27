@@ -1,0 +1,13 @@
+// Level 12: strings / formatting over structured data
+struct Task:
+    int: id
+    str: title
+    int: priority
+fn format_task(Task: t):
+    return "TASK[" + str(t.id) + "] " + t.title + " prio=" + str(t.priority)
+fn main():
+    let t = Task(7, "ship release", 9)
+    println(format_task(t))
+    println(("ab" + "cd") == "abcd")
+    println("report".len())
+    println(str(42) + "!")

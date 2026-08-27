@@ -1,0 +1,4 @@
+[charger]
+api_header = "libparamtypes.h"
+build_flags = []
+deps = []

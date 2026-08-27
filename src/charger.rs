@@ -26,12 +26,12 @@
 //     artifacts into the existing link step.
 //   * The same store entry is never rebuilt for identical inputs.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::cell::RefCell;
 
 /// Module-level set of struct type names known to the current adapter
 /// generation pass. Populated by `gen_adapter_c_source` (which has the full
@@ -96,12 +96,12 @@ pub enum CType {
     Char(bool),  // (signed)
     Short(bool), // (signed)
     Void,
-    String,        // char* / const char*
+    String, // char* / const char*
     Pointer(Box<CType>),
     Function(Vec<CType>, Box<CType>), // function pointer: fn(params) -> ret
-    Struct(String), // named struct/class
-    Opaque(String), // typedef / named but fields unknown
-    Other(String),  // fallback: raw C type text
+    Struct(String),                   // named struct/class
+    Opaque(String),                   // typedef / named but fields unknown
+    Other(String),                    // fallback: raw C type text
     // A width-critical typedef (`size_t`, `ssize_t`, `ptrdiff_t`, `uintptr_t`,
     // `intptr_t`, `uintmax_t`, ...). These resolve to `unsigned long long` /
     // `long long` / etc. on the target platform, but the C ABI spelling in the
@@ -190,7 +190,6 @@ fn is_pointer_like(ty: &CType) -> bool {
     )
 }
 
-
 #[derive(Debug, Clone)]
 pub struct CParam {
     pub name: String,
@@ -211,9 +210,9 @@ pub struct CParam {
 
 #[derive(Debug, Clone)]
 pub struct CFunction {
-    pub name: String,        // source name (e.g. "add", "Widget::area")
-    pub symbol: String,      // mangled/linkable symbol (e.g. "add",
-                              //   "?area@Widget@@QEBAHXZ")
+    pub name: String,   // source name (e.g. "add", "Widget::area")
+    pub symbol: String, // mangled/linkable symbol (e.g. "add",
+    //   "?area@Widget@@QEBAHXZ")
     pub params: Vec<CParam>,
     pub ret: CType,
     pub is_method: bool,
@@ -381,11 +380,17 @@ fn extract_ast_json(
     let clang = if clang.exists() {
         clang
     } else {
-        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp { "clang++" } else { "clang" })
+        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp {
+            "clang++"
+        } else {
+            "clang"
+        })
     };
 
     let mut cmd = Command::new(&clang);
-    cmd.arg("-Xclang").arg("-ast-dump=json").arg("-fsyntax-only");
+    cmd.arg("-Xclang")
+        .arg("-ast-dump=json")
+        .arg("-fsyntax-only");
     // Phase 1 Iteration 8: the AST parse must use the SAME include dirs and
     // build flags as the native compile. A header that pulls sibling headers
     // (`#include "zutil.h"`) or depends on a library build macro
@@ -400,7 +405,9 @@ fn extract_ast_json(
         cmd.arg(f);
     }
     cmd.arg(header);
-    let out = cmd.output().map_err(|e| format!("AST extraction failed: clang launch error: {}", e))?;
+    let out = cmd
+        .output()
+        .map_err(|e| format!("AST extraction failed: clang launch error: {}", e))?;
     if !out.status.success() {
         return Err(format!(
             "AST extraction failed: clang exited with {}\nstderr:\n{}",
@@ -409,8 +416,7 @@ fn extract_ast_json(
         ));
     }
     let json_text = String::from_utf8_lossy(&out.stdout);
-    serde_json::from_str(json_text.trim())
-        .map_err(|e| format!("AST JSON parse error: {}", e))
+    serde_json::from_str(json_text.trim()).map_err(|e| format!("AST JSON parse error: {}", e))
 }
 
 /// Extract a non-default calling convention from a clang `qualType` spelling.
@@ -421,8 +427,17 @@ fn extract_ast_json(
 /// is inferred from `AbiMeta.default_calling_convention`.
 fn extract_calling_convention(qual_type: &str) -> String {
     let known = [
-        "stdcall", "cdecl", "fastcall", "vectorcall", "thiscall",
-        "regcall", "pascal", "win64", "sysv64", "aapcs", "aapcs-vfp",
+        "stdcall",
+        "cdecl",
+        "fastcall",
+        "vectorcall",
+        "thiscall",
+        "regcall",
+        "pascal",
+        "win64",
+        "sysv64",
+        "aapcs",
+        "aapcs-vfp",
     ];
     for tok in known {
         // Match `__attribute__((stdcall))` or a bare `stdcall` qualifier.
@@ -468,12 +483,15 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
             // because SCALAR_TYPEDEFS is empty while parsing, collapsing e.g.
             // `double *` to a bare scalar. Generic — no library-specific names.
             let mut prepass_typedefs: Vec<(String, String)> = Vec::new();
-            let mut typedef_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            let mut typedef_map: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
             for node in arr {
                 if node.get("kind").and_then(|k| k.as_str()) == Some("TypedefDecl") {
                     if let (Some(name), Some(ut)) = (
                         node.get("name").and_then(|v| v.as_str()),
-                        node.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()),
+                        node.get("type")
+                            .and_then(|t| t.get("qualType"))
+                            .and_then(|v| v.as_str()),
                     ) {
                         prepass_typedefs.push((name.to_string(), ut.to_string()));
                         typedef_map.insert(name.to_string(), ut.to_string());
@@ -502,10 +520,16 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
             // underlying type (e.g. `typedef struct {...} Point` -> `struct Point`).
             if stripped == tname && !api.structs.iter().any(|s| &s.name == tname) {
                 if let Some(fields) = &ctx.anon_struct {
-                    let all_8 = fields.iter().all(|f| matches!(
-                        f.ty,
-                        CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
-                    ));
+                    let all_8 = fields.iter().all(|f| {
+                        matches!(
+                            f.ty,
+                            CType::Long
+                                | CType::Double
+                                | CType::Pointer(_)
+                                | CType::Function(..)
+                                | CType::Opaque(_)
+                        )
+                    });
                     let has_fp = fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
                     api.structs.push(CStruct {
                         name: tname.clone(),
@@ -545,9 +569,8 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
         .iter()
         .map(|(n, u)| (n.clone(), u.trim().to_string()))
         .collect();
-    let resolve_scalar_spelling = |name: &str| -> Option<String> {
-        resolve_scalar_spelling(name, &typedef_map)
-    };
+    let resolve_scalar_spelling =
+        |name: &str| -> Option<String> { resolve_scalar_spelling(name, &typedef_map) };
     let scalar_spellings: std::collections::HashMap<String, String> = ctx
         .typedefs
         .iter()
@@ -569,21 +592,31 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
         // correctly. Generic — driven by the AST typedef table; no library names.
         let is_char_family = |spelling: &str| -> bool {
             let c = spelling.trim();
-            c == "char" || c == "unsigned char" || c == "signed char"
-                || c.ends_with("unsigned char") || c.ends_with("signed char")
+            c == "char"
+                || c == "unsigned char"
+                || c == "signed char"
+                || c.ends_with("unsigned char")
+                || c.ends_with("signed char")
                 || c == "char*"
         };
         for f in &mut api.functions {
             for p in &mut f.params {
                 match &p.ty {
                     CType::Other(n) => {
-                        if let Some(t) = scalar_aliases.get(n) { p.ty = t.clone(); }
+                        if let Some(t) = scalar_aliases.get(n) {
+                            p.ty = t.clone();
+                        }
                     }
                     CType::Opaque(n) => {
                         if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
-                            if is_char_family(sp) { p.ty = CType::String; }
-                            else if let Some(t) = scalar_aliases.get(n) { p.ty = t.clone(); }
-                        } else if let Some(t) = scalar_aliases.get(n) { p.ty = t.clone(); }
+                            if is_char_family(sp) {
+                                p.ty = CType::String;
+                            } else if let Some(t) = scalar_aliases.get(n) {
+                                p.ty = t.clone();
+                            }
+                        } else if let Some(t) = scalar_aliases.get(n) {
+                            p.ty = t.clone();
+                        }
                     }
                     CType::Pointer(inner) => {
                         if let CType::Opaque(n) = inner.as_ref() {
@@ -600,18 +633,30 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
                 }
             }
             match &f.ret {
-                CType::Other(n) => { if let Some(t) = scalar_aliases.get(n) { f.ret = t.clone(); } }
-                CType::Opaque(n) => {
-                        if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
-                            if is_char_family(sp) { f.ret = CType::String; }
-                            else if let Some(t) = scalar_aliases.get(n) { f.ret = t.clone(); }
-                        } else if let Some(t) = scalar_aliases.get(n) { f.ret = t.clone(); }
+                CType::Other(n) => {
+                    if let Some(t) = scalar_aliases.get(n) {
+                        f.ret = t.clone();
                     }
+                }
+                CType::Opaque(n) => {
+                    if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
+                        if is_char_family(sp) {
+                            f.ret = CType::String;
+                        } else if let Some(t) = scalar_aliases.get(n) {
+                            f.ret = t.clone();
+                        }
+                    } else if let Some(t) = scalar_aliases.get(n) {
+                        f.ret = t.clone();
+                    }
+                }
                 CType::Pointer(inner) => {
                     if let CType::Opaque(n) = inner.as_ref() {
                         if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
-                            if is_char_family(sp) { f.ret = CType::String; }
-                            else if let Some(t) = scalar_aliases.get(n) { f.ret = CType::Pointer(Box::new(t.clone())); }
+                            if is_char_family(sp) {
+                                f.ret = CType::String;
+                            } else if let Some(t) = scalar_aliases.get(n) {
+                                f.ret = CType::Pointer(Box::new(t.clone()));
+                            }
                         }
                     }
                 }
@@ -621,18 +666,30 @@ fn normalize(ast: &serde_json::Value, lang: ApiKind, src_root: &std::path::Path)
         for s in &mut api.structs {
             for f in &mut s.fields {
                 match &f.ty {
-                    CType::Other(n) => { if let Some(t) = scalar_aliases.get(n) { f.ty = t.clone(); } }
+                    CType::Other(n) => {
+                        if let Some(t) = scalar_aliases.get(n) {
+                            f.ty = t.clone();
+                        }
+                    }
                     CType::Opaque(n) => {
                         if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
-                            if is_char_family(sp) { f.ty = CType::String; }
-                            else if let Some(t) = scalar_aliases.get(n) { f.ty = t.clone(); }
-                        } else if let Some(t) = scalar_aliases.get(n) { f.ty = t.clone(); }
+                            if is_char_family(sp) {
+                                f.ty = CType::String;
+                            } else if let Some(t) = scalar_aliases.get(n) {
+                                f.ty = t.clone();
+                            }
+                        } else if let Some(t) = scalar_aliases.get(n) {
+                            f.ty = t.clone();
+                        }
                     }
                     CType::Pointer(inner) => {
                         if let CType::Opaque(n) = inner.as_ref() {
                             if let Some(sp) = scalar_spellings_for_rewrite.get(n) {
-                                if is_char_family(sp) { f.ty = CType::String; }
-                                else if let Some(t) = scalar_aliases.get(n) { f.ty = CType::Pointer(Box::new(t.clone())); }
+                                if is_char_family(sp) {
+                                    f.ty = CType::String;
+                                } else if let Some(t) = scalar_aliases.get(n) {
+                                    f.ty = CType::Pointer(Box::new(t.clone()));
+                                }
                             }
                         }
                     }
@@ -838,7 +895,12 @@ fn widest_member(fields: Vec<CParam>) -> Vec<CParam> {
             best_w = w;
         }
     }
-    vec![CParam { name: best.name.clone(), ty: best.ty.clone(), nullable: Nullability::Unknown, bit_width: None }]
+    vec![CParam {
+        name: best.name.clone(),
+        ty: best.ty.clone(),
+        nullable: Nullability::Unknown,
+        bit_width: None,
+    }]
 }
 
 /// Scan a C header source for simple integer object-like macros of the form
@@ -847,7 +909,9 @@ fn widest_member(fields: Vec<CParam>) -> Vec<CParam> {
 /// only recovery path. Non-integer macros (e.g. function-like macros, string
 /// literals) are intentionally skipped — they cannot be surfaced as Lime consts.
 fn extract_macro_constants(header: &Path, out: &mut Vec<(String, i64)>) {
-    let Ok(src) = std::fs::read_to_string(header) else { return; };
+    let Ok(src) = std::fs::read_to_string(header) else {
+        return;
+    };
     // Avoid re-adding a constant already discovered via EnumConstantDecl / VarDecl.
     let mut known: std::collections::HashSet<String> = out.iter().map(|(n, _)| n.clone()).collect();
     for line in src.lines() {
@@ -859,7 +923,9 @@ fn extract_macro_constants(header: &Path, out: &mut Vec<(String, i64)>) {
         let rest = &line["#define".len()..];
         let mut parts = rest.split_whitespace();
         let Some(name) = parts.next() else { continue };
-        let Some(val_str) = parts.next() else { continue };
+        let Some(val_str) = parts.next() else {
+            continue;
+        };
         // Only object-like macros with a single integer value.
         if name.contains('(') || parts.next().is_some() {
             continue;
@@ -951,11 +1017,7 @@ fn parse_c_type(qual: &str) -> CType {
                     // C. A bare handle (qualType has no `*`) is 1 level; a
                     // starred spelling keeps its literal depth (so `FILE**` is
                     // 2 levels, the classic out-param idiom).
-                    if depth == 0 {
-                        1
-                    } else {
-                        depth
-                    }
+                    if depth == 0 { 1 } else { depth }
                 }
             }
             CType::Struct(_) => {
@@ -1027,10 +1089,8 @@ fn parse_c_type(qual: &str) -> CType {
         // Preserve the exact spelling (rendered verbatim in adapter C) so the
         // generated signature matches the header ABI. The Lime side sees them as
         // `Int` scalars. Generic — applies to any library using these typedefs.
-        "size_t" | "ssize_t" | "ptrdiff_t" | "uintptr_t" | "intptr_t"
-        | "uintmax_t" | "intmax_t" | "wchar_t" | "sig_atomic_t" => {
-            CType::WidthTypedef(q.to_string())
-        }
+        "size_t" | "ssize_t" | "ptrdiff_t" | "uintptr_t" | "intptr_t" | "uintmax_t"
+        | "intmax_t" | "wchar_t" | "sig_atomic_t" => CType::WidthTypedef(q.to_string()),
         // clang's internal typedef spellings leak `__size_t` / `__intN` into the
         // AST `qualType`. These are the canonical C types under different names;
         // normalize them so they get correct scalar ABI (not `CType::Other`,
@@ -1041,7 +1101,9 @@ fn parse_c_type(qual: &str) -> CType {
         "__int64" | "unsigned __int64" => CType::Long,
         "__int32" | "unsigned __int32" => CType::Int,
         "__int16" | "unsigned __int16" => CType::Int,
-        "__int8" | "unsigned __int8" | "__int128" | "unsigned __int128" => CType::Other(q.to_string()),
+        "__int8" | "unsigned __int8" | "__int128" | "unsigned __int128" => {
+            CType::Other(q.to_string())
+        }
         "__builtin_va_list" => CType::Opaque("va_list".to_string()),
         "int" | "unsigned int" | "int32_t" | "uint32_t" => CType::Int,
         "short" | "unsigned short" => {
@@ -1051,8 +1113,9 @@ fn parse_c_type(qual: &str) -> CType {
                 CType::Short(true)
             }
         }
-        "long" | "unsigned long" | "long long" | "unsigned long long"
-        | "int64_t" | "uint64_t" => CType::Long,
+        "long" | "unsigned long" | "long long" | "unsigned long long" | "int64_t" | "uint64_t" => {
+            CType::Long
+        }
         "float" => CType::Float,
         "double" => CType::Double,
         "bool" | "_Bool" => CType::Bool,
@@ -1098,7 +1161,9 @@ fn parse_c_type(qual: &str) -> CType {
             // typedef (`uLong`, `Bytef`, `png_uint_32`, ...) collapses to its
             // canonical scalar so width-critical types get the right ABI slot
             // (e.g. `unsigned long` is 4 bytes on LLP64, not an 8-byte opaque).
-            if let Some(spelling) = SCALAR_TYPEDEFS.with(|st| st.borrow().as_ref().and_then(|m| m.get(s).cloned())) {
+            if let Some(spelling) =
+                SCALAR_TYPEDEFS.with(|st| st.borrow().as_ref().and_then(|m| m.get(s).cloned()))
+            {
                 return parse_c_type(&spelling);
             }
             CType::Other(s.to_string())
@@ -1163,12 +1228,19 @@ fn field_bit_width(f: &serde_json::Value) -> Option<u64> {
     if let Some(bw) = f.get("bitWidth").and_then(|v| v.as_u64()) {
         return Some(bw);
     }
-    if f.get("isBitfield").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if f.get("isBitfield")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         // width lives in a nested ConstantExpr: inner[0].value (string like "3")
         if let Some(inner) = f.get("inner").and_then(|v| v.as_array()) {
             for c in inner {
                 if c.get("kind").and_then(|k| k.as_str()) == Some("ConstantExpr") {
-                    if let Some(v) = c.get("value").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok()) {
+                    if let Some(v) = c
+                        .get("value")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
                         return Some(v);
                     }
                 }
@@ -1217,7 +1289,12 @@ fn is_anon_member_spelling(qual: &str) -> bool {
 fn type_width_bytes(ty: &CType) -> usize {
     match ty {
         CType::Int | CType::Float | CType::Bool => 4,
-        CType::Long | CType::Double | CType::Pointer(_) | CType::Opaque(_) | CType::String | CType::Function(..) => 8,
+        CType::Long
+        | CType::Double
+        | CType::Pointer(_)
+        | CType::Opaque(_)
+        | CType::String
+        | CType::Function(..) => 8,
         CType::Struct(_) | CType::Other(_) => 8, // opaque/named record -> pointer-sized
         CType::Array(elem, size) => {
             let elem_w = type_width_bytes(elem);
@@ -1263,14 +1340,40 @@ fn is_fn_ptr_array(ty: &CType) -> bool {
 /// library knowledge, not library-specific code.
 fn is_stdlib_opaque(name: &str) -> bool {
     const SET: &[&str] = &[
-        "jmp_buf", "sigjmp_buf", "va_list", "__builtin_va_list",
-        "FILE", "fpos_t", "__locale_t", "locale_t", "DIR",
-        "pthread_mutex_t", "pthread_mutexattr_t", "pthread_cond_t",
-        "pthread_condattr_t", "pthread_rwlock_t", "pthread_t", "pthread_attr_t",
-        "pthread_key_t", "pthread_once_t", "mbstate_t", "_Mbstatet",
-        "time_t", "clock_t", "struct_tm", "tm", "tm_zone",
-        "div_t", "ldiv_t", "lldiv_t", "imaxdiv_t",
-        "sigset_t", "size_t", "ptrdiff_t", "wchar_t", "max_align_t",
+        "jmp_buf",
+        "sigjmp_buf",
+        "va_list",
+        "__builtin_va_list",
+        "FILE",
+        "fpos_t",
+        "__locale_t",
+        "locale_t",
+        "DIR",
+        "pthread_mutex_t",
+        "pthread_mutexattr_t",
+        "pthread_cond_t",
+        "pthread_condattr_t",
+        "pthread_rwlock_t",
+        "pthread_t",
+        "pthread_attr_t",
+        "pthread_key_t",
+        "pthread_once_t",
+        "mbstate_t",
+        "_Mbstatet",
+        "time_t",
+        "clock_t",
+        "struct_tm",
+        "tm",
+        "tm_zone",
+        "div_t",
+        "ldiv_t",
+        "lldiv_t",
+        "imaxdiv_t",
+        "sigset_t",
+        "size_t",
+        "ptrdiff_t",
+        "wchar_t",
+        "max_align_t",
     ];
     SET.contains(&name)
 }
@@ -1284,12 +1387,36 @@ fn is_stdlib_opaque(name: &str) -> bool {
 /// Generic — driven purely by C standard-library knowledge, no library names.
 fn is_stdlib_struct_tag(name: &str) -> bool {
     const SET: &[&str] = &[
-        "tm", "timeval", "timespec", "timezone", "itimerspec", "itimbuf",
-        "div_t", "ldiv_t", "lldiv_t", "imaxdiv_t",
-        "drand48_data", "random_data", "fd_set", "sigset_t", "sigaction",
-        "rusage", "utimbuf", "tm_zone", "sched_param", "sockaddr",
-        "in_addr", "hostent", "servent", "protoent", "netent",
-        "passwd", "group", "stat", "dirent", "tm_",
+        "tm",
+        "timeval",
+        "timespec",
+        "timezone",
+        "itimerspec",
+        "itimbuf",
+        "div_t",
+        "ldiv_t",
+        "lldiv_t",
+        "imaxdiv_t",
+        "drand48_data",
+        "random_data",
+        "fd_set",
+        "sigset_t",
+        "sigaction",
+        "rusage",
+        "utimbuf",
+        "tm_zone",
+        "sched_param",
+        "sockaddr",
+        "in_addr",
+        "hostent",
+        "servent",
+        "protoent",
+        "netent",
+        "passwd",
+        "group",
+        "stat",
+        "dirent",
+        "tm_",
     ];
     SET.contains(&name)
 }
@@ -1302,7 +1429,12 @@ fn is_stdlib_struct_tag(name: &str) -> bool {
 /// was simply dropped by clang's AST — so it must be treated as a pointer
 /// handle, not by-value. Generic: driven by the extracted record set.
 fn is_complete_record(name: &str) -> bool {
-    KNOWN_RECORDS.with(|r| r.borrow().as_ref().map(|s| s.contains(name)).unwrap_or(false))
+    KNOWN_RECORDS.with(|r| {
+        r.borrow()
+            .as_ref()
+            .map(|s| s.contains(name))
+            .unwrap_or(false)
+    })
 }
 
 /// Extract the record name from a struct/other CType (for completeness gating).
@@ -1314,7 +1446,13 @@ fn record_name_of(ty: &CType) -> Option<String> {
 }
 /// spelling (not collapse to `int`). Used so adapter C matches the real ABI.
 fn is_stdlib_scalar(name: &str) -> bool {
-    const SET: &[&str] = &["time_t", "clock_t", "clockid_t", "suseconds_t", "useconds_t"];
+    const SET: &[&str] = &[
+        "time_t",
+        "clock_t",
+        "clockid_t",
+        "suseconds_t",
+        "useconds_t",
+    ];
     SET.contains(&name)
 }
 
@@ -1335,23 +1473,43 @@ fn decl_file(node: &serde_json::Value) -> Option<String> {
     if let Some(f) = loc.and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
         return Some(f.to_string());
     }
-    if let Some(f) = loc.and_then(|l| l.get("includedFrom")).and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+    if let Some(f) = loc
+        .and_then(|l| l.get("includedFrom"))
+        .and_then(|l| l.get("file"))
+        .and_then(|v| v.as_str())
+    {
         return Some(f.to_string());
     }
-    if let Some(f) = loc.and_then(|l| l.get("spellingLoc")).and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+    if let Some(f) = loc
+        .and_then(|l| l.get("spellingLoc"))
+        .and_then(|l| l.get("file"))
+        .and_then(|v| v.as_str())
+    {
         return Some(f.to_string());
     }
-    if let Some(f) = loc.and_then(|l| l.get("expansionLoc")).and_then(|l| l.get("file")).and_then(|v| v.as_str()) {
+    if let Some(f) = loc
+        .and_then(|l| l.get("expansionLoc"))
+        .and_then(|l| l.get("file"))
+        .and_then(|v| v.as_str())
+    {
         return Some(f.to_string());
     }
     let rbeg = node.get("range").and_then(|r| r.get("begin"));
     if let Some(f) = rbeg.and_then(|b| b.get("file")).and_then(|v| v.as_str()) {
         return Some(f.to_string());
     }
-    if let Some(f) = rbeg.and_then(|b| b.get("spellingLoc")).and_then(|b| b.get("file")).and_then(|v| v.as_str()) {
+    if let Some(f) = rbeg
+        .and_then(|b| b.get("spellingLoc"))
+        .and_then(|b| b.get("file"))
+        .and_then(|v| v.as_str())
+    {
         return Some(f.to_string());
     }
-    if let Some(f) = rbeg.and_then(|b| b.get("expansionLoc")).and_then(|b| b.get("file")).and_then(|v| v.as_str()) {
+    if let Some(f) = rbeg
+        .and_then(|b| b.get("expansionLoc"))
+        .and_then(|b| b.get("file"))
+        .and_then(|v| v.as_str())
+    {
         return Some(f.to_string());
     }
     None
@@ -1369,9 +1527,7 @@ fn decl_in_own_tree(node: &serde_json::Value, root: &std::path::Path) -> bool {
     // `file`, `spellingLoc`, or `expansionLoc`) is a transitive include pulled in
     // from a deeper system header we cannot see directly (e.g. `freopen_s` via
     // <stdio.h> through pngconf.h). Reject it — it is not the library's own API.
-    let only_included_from = loc
-        .and_then(|l| l.get("includedFrom"))
-        .is_some()
+    let only_included_from = loc.and_then(|l| l.get("includedFrom")).is_some()
         && loc.and_then(|l| l.get("file")).is_none()
         && loc.and_then(|l| l.get("spellingLoc")).is_none()
         && loc.and_then(|l| l.get("expansionLoc")).is_none();
@@ -1507,8 +1663,15 @@ fn classify_node(
 
     match kind {
         "RecordDecl" => {
-            let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let is_implicit = node.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+            let name = node
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let is_implicit = node
+                .get("isImplicit")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let tag_used = node.get("tagUsed").and_then(|v| v.as_str()).unwrap_or("");
             let is_union = tag_used == "union";
             let mut fields = Vec::new();
@@ -1516,10 +1679,16 @@ fn classify_node(
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for f in inner {
                     if f.get("kind").and_then(|v| v.as_str()) == Some("FieldDecl") {
-                        let fname = f.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let fty = f.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
-                        if fname == "aParam" {
-                        }
+                        let fname = f
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let fty = f
+                            .get("type")
+                            .map(type_from_json)
+                            .unwrap_or(CType::Other("?".to_string()));
+                        if fname == "aParam" {}
                         // A bitfield member carries `isBitfield` (clang 22) or
                         // `bitWidth`. Record the width and flag the struct.
                         let bw = field_bit_width(f);
@@ -1539,9 +1708,20 @@ fn classify_node(
                             if is_union_field(&fty) || is_anon_record_field(&fty) {
                                 // skip — union field stays opaque inside its C struct
                             } else {
-                                fields.push(CParam { name: fname, ty: fty, nullable: Nullability::Unknown, bit_width: bw });
+                                fields.push(CParam {
+                                    name: fname,
+                                    ty: fty,
+                                    nullable: Nullability::Unknown,
+                                    bit_width: bw,
+                                });
                             }
-                        } else if f.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()).map(is_anon_record_spelling).unwrap_or(false) {
+                        } else if f
+                            .get("type")
+                            .and_then(|t| t.get("qualType"))
+                            .and_then(|v| v.as_str())
+                            .map(is_anon_record_spelling)
+                            .unwrap_or(false)
+                        {
                             // Anonymous nested record (`struct { ... } anon;` or
                             // `union { ... } u;`) used as a field. clang emits it
                             // as a FieldDecl with no name whose type is an
@@ -1557,19 +1737,22 @@ fn classify_node(
                             //     value-type width and let Lime write through the
                             //     wrong field). Generic — no library-specific name
                             //     filtering.
-                            let rec = f.get("inner").and_then(|v| v.as_array())
-                                .and_then(|arr| arr.iter().find(|c| c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl")));
+                            let rec = f.get("inner").and_then(|v| v.as_array()).and_then(|arr| {
+                                arr.iter().find(|c| {
+                                    c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl")
+                                })
+                            });
                             if let Some(rec) = rec {
                                 // Flatten the anonymous record's members into this
                                 // struct (recursive via flatten_anon). `seen` seeds
                                 // from already-collected named fields so duplicates
                                 // are skipped at the flatten boundary. Generic.
-                                let mut seen: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                                let mut seen: Vec<String> =
+                                    fields.iter().map(|f| f.name.clone()).collect();
                                 flatten_anon(rec, &mut seen, &mut fields);
                             }
                         }
                     }
-
                 }
             }
             // Flatten anonymous nested records (`union Parent::(anonymous at ...)`
@@ -1588,7 +1771,10 @@ fn classify_node(
                 for c in inner {
                     if c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl") {
                         let cn = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let cn_implicit = c.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let cn_implicit = c
+                            .get("isImplicit")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         if !(cn.is_empty() && !cn_implicit) {
                             continue; // named record or implicit decl: handled elsewhere
                         }
@@ -1605,8 +1791,15 @@ fn classify_node(
                         // FieldDecl whose spelling points at this record.
                         let has_anon_field = inner.iter().any(|f| {
                             f.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")
-                                && f.get("name").and_then(|v| v.as_str()).map(|n| n.is_empty()).unwrap_or(true)
-                                && f.get("type").and_then(|t| t.get("qualType")).and_then(|v| v.as_str()).map(is_anon_record_spelling).unwrap_or(false)
+                                && f.get("name")
+                                    .and_then(|v| v.as_str())
+                                    .map(|n| n.is_empty())
+                                    .unwrap_or(true)
+                                && f.get("type")
+                                    .and_then(|t| t.get("qualType"))
+                                    .and_then(|v| v.as_str())
+                                    .map(is_anon_record_spelling)
+                                    .unwrap_or(false)
                         });
                         if !has_anon_field {
                             continue; // named-member body (e.g. `union {...} u;`): not flattenable
@@ -1626,17 +1819,33 @@ fn classify_node(
             // struct spelling so the value-type ABI width matches (a union's size
             // is its largest member). Keep the widest scalar/ptr member; fall back
             // to the last field if nothing obvious stands out.
-            if !name.is_empty() && !is_implicit && !is_reserved_name(&name) && !is_stdlib_opaque(&name) {
+            if !name.is_empty()
+                && !is_implicit
+                && !is_reserved_name(&name)
+                && !is_stdlib_opaque(&name)
+            {
                 // A union is surfaced as an opaque handle with accessor shims
                 // (Lime cannot model overlapping members or sub-8-byte fields),
                 // so keep ALL members for the shim generator rather than
                 // collapsing to the widest member.
-                let kept_fields = if is_union { fields.clone() } else { fields.clone() };
-                let all_8 = kept_fields.iter().all(|f| matches!(
-                    f.ty,
-                    CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
-                ));
-                let has_fp = kept_fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
+                let kept_fields = if is_union {
+                    fields.clone()
+                } else {
+                    fields.clone()
+                };
+                let all_8 = kept_fields.iter().all(|f| {
+                    matches!(
+                        f.ty,
+                        CType::Long
+                            | CType::Double
+                            | CType::Pointer(_)
+                            | CType::Function(..)
+                            | CType::Opaque(_)
+                    )
+                });
+                let has_fp = kept_fields
+                    .iter()
+                    .any(|f| matches!(f.ty, CType::Function(..)));
                 let is_packed = record_is_packed(node);
                 api.structs.push(CStruct {
                     name: name.clone(),
@@ -1669,7 +1878,10 @@ fn classify_node(
                     // and pollute `ctx.anon_struct` with a stale body). Generic.
                     if c.get("kind").and_then(|k| k.as_str()) == Some("RecordDecl") {
                         let cn = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let cn_implicit = c.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let cn_implicit = c
+                            .get("isImplicit")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         if cn.is_empty() && !cn_implicit {
                             continue;
                         }
@@ -1679,7 +1891,8 @@ fn classify_node(
                     // up into THIS record — that invents a bogus `jpeg_error_mgr.s`
                     // field and the accessor shim fails to compile. Skip recursing
                     // into the union members. Generic — no library names.
-                    let is_union_field = c.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")
+                    let is_union_field = c.get("kind").and_then(|k| k.as_str())
+                        == Some("FieldDecl")
                         && c.get("type")
                             .and_then(|t| t.get("qualType"))
                             .and_then(|q| q.as_str())
@@ -1702,7 +1915,11 @@ fn classify_node(
             if let Some(inner) = node.get("inner").and_then(|v| v.as_array()) {
                 for e in inner {
                     if e.get("kind").and_then(|v| v.as_str()) == Some("EnumConstantDecl") {
-                        let ename = e.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let ename = e
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         if ename.is_empty() || is_reserved_name(&ename) {
                             continue;
                         }
@@ -1727,7 +1944,12 @@ fn classify_node(
                                     return Some(v);
                                 }
                             }
-                            for c in n.get("inner").and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+                            for c in n
+                                .get("inner")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.as_slice())
+                                .unwrap_or(&[])
+                            {
                                 if let Some(v) = const_expr_value(c, depth + 1) {
                                     return Some(v);
                                 }
@@ -1762,16 +1984,25 @@ fn classify_node(
             //     is externally linkable — that would be an ABI lie).
             // Thread-local storage (`_Thread_local` / `thread_local`) is recorded
             // in `tls` so the accessor can be generated correctly if needed.
-            let vname = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let vname = node
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if vname.is_empty() {
                 return;
             }
             // Phase 1 Iteration 8: ignore compiler-internal / reserved globals
             // (e.g. `__builtin_*` synthetic vars) — never part of a public ABI.
-            if vname.starts_with("__") || vname.starts_with("__builtin") || is_reserved_name(&vname) {
+            if vname.starts_with("__") || vname.starts_with("__builtin") || is_reserved_name(&vname)
+            {
                 return;
             }
-            let storage = node.get("storageClass").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let storage = node
+                .get("storageClass")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let ty = type_from_json(node.get("type").unwrap_or(&serde_json::Value::Null));
             let qual = node
                 .get("type")
@@ -1787,7 +2018,11 @@ fn classify_node(
             if storage == "static" && is_const {
                 if let Some(init) = node.get("inner").and_then(|v| v.as_array()) {
                     for i in init {
-                        if let Some(v) = i.get("value").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()) {
+                        if let Some(v) = i
+                            .get("value")
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| s.parse::<i64>().ok())
+                        {
                             api.constants.push((vname.clone(), v));
                             break;
                         }
@@ -1816,7 +2051,11 @@ fn classify_node(
             });
         }
         "TypedefDecl" => {
-            let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = node
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let underlying = node
                 .get("type")
                 .and_then(|t| t.get("qualType"))
@@ -1851,10 +2090,16 @@ fn classify_node(
                             || underlying.starts_with("union "))
                     {
                         let is_union_typedef = underlying.contains("union");
-                        let all_8 = fields.iter().all(|f| matches!(
-                            f.ty,
-                            CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
-                        ));
+                        let all_8 = fields.iter().all(|f| {
+                            matches!(
+                                f.ty,
+                                CType::Long
+                                    | CType::Double
+                                    | CType::Pointer(_)
+                                    | CType::Function(..)
+                                    | CType::Opaque(_)
+                            )
+                        });
                         let has_fp = fields.iter().any(|f| matches!(f.ty, CType::Function(..)));
                         api.structs.push(CStruct {
                             name: name.clone(),
@@ -1873,7 +2118,11 @@ fn classify_node(
             }
         }
         "FunctionDecl" => {
-            let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = node
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if name.is_empty() {
                 return;
             }
@@ -1914,7 +2163,10 @@ fn classify_node(
                             .unwrap_or_default();
                         if targeted.is_empty() {
                             for p in params.iter_mut() {
-                                if matches!(p.ty, CType::Pointer(_) | CType::Opaque(_) | CType::String) {
+                                if matches!(
+                                    p.ty,
+                                    CType::Pointer(_) | CType::Opaque(_) | CType::String
+                                ) {
                                     p.nullable = Nullability::NonNull;
                                 }
                             }
@@ -1931,7 +2183,8 @@ fn classify_node(
                 for c in inner {
                     if c.get("kind").and_then(|k| k.as_str()) == Some("NonNullAttr") {
                         for p in params.iter_mut() {
-                            if matches!(p.ty, CType::Pointer(_) | CType::Opaque(_) | CType::String) {
+                            if matches!(p.ty, CType::Pointer(_) | CType::Opaque(_) | CType::String)
+                            {
                                 p.nullable = Nullability::NonNull;
                             }
                         }
@@ -1946,11 +2199,11 @@ fn classify_node(
             // from the function's qualType spelling. clang prints explicit
             // conventions as `int (...) __attribute__((stdcall))`; when present
             // (and not the platform default), record it as metadata.
-            let calling_convention =
-                ftype.get("qualType")
-                    .and_then(|v| v.as_str())
-                    .map(extract_calling_convention)
-                    .unwrap_or_default();
+            let calling_convention = ftype
+                .get("qualType")
+                .and_then(|v| v.as_str())
+                .map(extract_calling_convention)
+                .unwrap_or_default();
             let symbol = node
                 .get("mangledName")
                 .and_then(|v| v.as_str())
@@ -1974,7 +2227,10 @@ fn classify_node(
                 ret: ret_ty,
                 is_method,
                 is_constructor: is_ctor,
-                is_const: node.get("isConst").and_then(|v| v.as_bool()).unwrap_or(false),
+                is_const: node
+                    .get("isConst")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
                 self_ty: None,
                 variadic,
                 calling_convention,
@@ -1991,7 +2247,8 @@ fn classify_node(
                     // compile (`no member named 's'`). Treat the union field as
                     // an opaque blob: classify the field itself but do not recurse
                     // into its union members. Generic — no library names.
-                    let is_union_field = c.get("kind").and_then(|k| k.as_str()) == Some("FieldDecl")
+                    let is_union_field = c.get("kind").and_then(|k| k.as_str())
+                        == Some("FieldDecl")
                         && c.get("type")
                             .and_then(|t| t.get("qualType"))
                             .and_then(|q| q.as_str())
@@ -2087,11 +2344,7 @@ fn fn_sig_normalize(ty: &CType) -> CType {
 ///
 /// NOTE: the *named* record case (`union U { int i; }`-style, with a tag) is NOT
 /// anonymous and is handled by the caller's normal named-record path, not here.
-fn flatten_anon(
-    rec: &serde_json::Value,
-    seen: &mut Vec<String>,
-    out: &mut Vec<CParam>,
-) {
+fn flatten_anon(rec: &serde_json::Value, seen: &mut Vec<String>, out: &mut Vec<CParam>) {
     let sub_union = rec.get("tagUsed").and_then(|t| t.as_str()) == Some("union");
     // clang's `-ast-dump=json` emits an anonymous nested record's BODY as a
     // SIBLING `RecordDecl` node (name == null) among this record's children —
@@ -2114,7 +2367,10 @@ fn flatten_anon(
             return None;
         }
         let nm = c.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let implicit = c.get("isImplicit").and_then(|v| v.as_bool()).unwrap_or(false);
+        let implicit = c
+            .get("isImplicit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if !nm.is_empty() || implicit {
             return None; // named/implicit decls are handled by the normal path
         }
@@ -2146,17 +2402,29 @@ fn flatten_anon(
                         }
                     }
                     Some("FieldDecl") => {
-                        let mn = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let mn = c
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         if mn.is_empty() {
                             continue;
                         }
-                        let mt = c.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+                        let mt = c
+                            .get("type")
+                            .map(type_from_json)
+                            .unwrap_or(CType::Other("?".to_string()));
                         let w = type_width_bytes(&mt);
                         let surfacable = !matches!(&mt, CType::Other(s) if s == ANON_RECORD_MARKER);
                         let score = (true, w, surfacable);
                         if best.is_none() || score > *best_score {
                             *best_score = score;
-                            *best = Some(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
+                            *best = Some(CParam {
+                                name: mn,
+                                ty: mt,
+                                nullable: Nullability::Unknown,
+                                bit_width: None,
+                            });
                         }
                     }
                     _ => {}
@@ -2184,14 +2452,26 @@ fn flatten_anon(
             if c.get("kind").and_then(|k| k.as_str()) != Some("FieldDecl") {
                 continue; // IndirectFieldDecl / other bookkeeping nodes
             }
-            let mn = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mn = c
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if mn.is_empty() {
                 continue; // unnamed FieldDecl of an anon record: body handled above
             }
-            let mt = c.get("type").map(type_from_json).unwrap_or(CType::Other("?".to_string()));
+            let mt = c
+                .get("type")
+                .map(type_from_json)
+                .unwrap_or(CType::Other("?".to_string()));
             if !seen.contains(&mn) {
                 seen.push(mn.clone());
-                out.push(CParam { name: mn, ty: mt, nullable: Nullability::Unknown, bit_width: None });
+                out.push(CParam {
+                    name: mn,
+                    ty: mt,
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                });
             }
         }
     }
@@ -2339,7 +2619,17 @@ fn strip_param_name(p: &str) -> String {
         let last = *parts.last().unwrap();
         let known = matches!(
             last,
-            "*" | "&" | "const" | "volatile" | "restrict" | "struct" | "class" | "enum" | "unsigned" | "signed" | "long" | "short"
+            "*" | "&"
+                | "const"
+                | "volatile"
+                | "restrict"
+                | "struct"
+                | "class"
+                | "enum"
+                | "unsigned"
+                | "signed"
+                | "long"
+                | "short"
         );
         if !known {
             // Only drop if the remaining parts still form a plausible type.
@@ -2374,7 +2664,9 @@ fn sanitize_opaque_name(name: &str) -> String {
 
 fn lime_type_name(t: &CType) -> String {
     match t {
-        CType::Int | CType::Long | CType::Bool | CType::Char(_) | CType::Short(_) => "Int".to_string(),
+        CType::Int | CType::Long | CType::Bool | CType::Char(_) | CType::Short(_) => {
+            "Int".to_string()
+        }
         // Width-critical typedefs (`size_t`, ...) are ABI-compatible scalars on
         // the Lime side — surfaced as `Int` (i64). The exact C spelling is
         // preserved separately by `c_type_text`.
@@ -2393,8 +2685,14 @@ fn lime_type_name(t: &CType) -> String {
         // handle/struct pointers in function signatures. Generic: driven purely
         // by pointee kind, no library-specific names.
         CType::Pointer(inner) => match &**inner {
-            CType::Int | CType::Long | CType::Bool | CType::Float | CType::Double
-            | CType::WidthTypedef(_) | CType::Void | CType::String => "Opaque(ScalarPtr)".to_string(),
+            CType::Int
+            | CType::Long
+            | CType::Bool
+            | CType::Float
+            | CType::Double
+            | CType::WidthTypedef(_)
+            | CType::Void
+            | CType::String => "Opaque(ScalarPtr)".to_string(),
             _ => lime_type_name(inner),
         },
         CType::Function(_, _) => "Callback".to_string(), // opaque C fn pointer, ABI = i8*
@@ -2431,7 +2729,11 @@ fn lime_type_name(t: &CType) -> String {
 /// array member contributes 0 — its real size comes from the clang layout).
 fn field_width(t: &CType) -> usize {
     match t {
-        CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_) => 8,
+        CType::Long
+        | CType::Double
+        | CType::Pointer(_)
+        | CType::Function(..)
+        | CType::Opaque(_) => 8,
         CType::Int | CType::Float | CType::Bool => 4,
         CType::Char(_) => 1,
         CType::Short(_) => 2,
@@ -2592,17 +2894,20 @@ fn is_out_param(t: &CType) -> Option<String> {
 /// `String` (`char*`) fields are rendered as `char*` (a real pointer).
 fn c_field_c_type(t: &CType, structs: &[CStruct]) -> String {
     // A name Charger modeled as a record, and whether that record has a body.
-    let is_record = |name: &str| -> bool {
-        structs.iter().any(|st| st.name == name)
-    };
+    let is_record = |name: &str| -> bool { structs.iter().any(|st| st.name == name) };
     let is_complete = |name: &str| -> bool {
-        structs.iter().any(|st| st.name == name && !st.fields.is_empty())
+        structs
+            .iter()
+            .any(|st| st.name == name && !st.fields.is_empty())
     };
-    let is_union_name = |name: &str| -> bool {
-        structs.iter().any(|st| st.name == name && st.is_union)
-    };
+    let is_union_name =
+        |name: &str| -> bool { structs.iter().any(|st| st.name == name && st.is_union) };
     let record_tag = |name: &str| -> &'static str {
-        if is_union_name(name) { "union" } else { "struct" }
+        if is_union_name(name) {
+            "union"
+        } else {
+            "struct"
+        }
     };
     match t {
         // `char*` / `const char*` -> a real C string pointer.
@@ -2885,13 +3190,13 @@ fn opaque_or_struct_ptr(name: &str) -> String {
 /// directly: an out-param (handle returned through `**`, surfaced as a return
 /// value) and/or a trailing `NULL` callback (and the args after it).
 struct AdapterSpec {
-    lime_name: String,  // Lime-facing fn name (e.g. "sqlite3_open")
-    symbol: String,     // shim symbol (e.g. "lime_out_sqlite3_open")
-    real_symbol: String, // real C symbol (e.g. "sqlite3_open")
+    lime_name: String,        // Lime-facing fn name (e.g. "sqlite3_open")
+    symbol: String,           // shim symbol (e.g. "lime_out_sqlite3_open")
+    real_symbol: String,      // real C symbol (e.g. "sqlite3_open")
     ret_name: Option<String>, // opaque handle type name when this is an out-param
-    ret: CType,         // real C return type (used when not an out-param)
-    params: Vec<CParam>, // original C params (for shim body)
-    out_idx: Option<usize>, // index of the out-param, if any
+    ret: CType,               // real C return type (used when not an out-param)
+    params: Vec<CParam>,      // original C params (for shim body)
+    out_idx: Option<usize>,   // index of the out-param, if any
     drop_from: Option<usize>, // drop this param and everything after (NULL callback)
     // A "take"/"consume" out-param: a void-returning function with a single
     // `T**` parameter that READS the handle to free/consume it (e.g.
@@ -2916,7 +3221,8 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
     // Build adapters keyed by symbol so a single function can carry BOTH an
     // out-param/callback bridge AND nonnull boundary guards without emitting
     // two competing shims.
-    let mut by_sym: std::collections::HashMap<String, AdapterSpec> = std::collections::HashMap::new();
+    let mut by_sym: std::collections::HashMap<String, AdapterSpec> =
+        std::collections::HashMap::new();
     for f in &api.functions {
         let out_idx = f.params.iter().position(|p| is_out_param(&p.ty).is_some());
         // The out-param's pointee name is the opaque handle type the bridge
@@ -2953,9 +3259,7 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
         // handle to free/consume it (e.g. `avcodec_free_context`) rather than
         // creating and returning one. Generic: void return + single T** param,
         // no library names.
-        let take = out_idx.is_some()
-            && f.params.len() == 1
-            && matches!(f.ret, CType::Void);
+        let take = out_idx.is_some() && f.params.len() == 1 && matches!(f.ret, CType::Void);
         let needs_bridge = out_idx.is_some() || drop_from.is_some();
         if !needs_bridge && nonnull.is_empty() {
             continue;
@@ -2970,7 +3274,11 @@ fn collect_out_param_adapters(api: &NormalizedApi) -> Vec<AdapterSpec> {
             } else {
                 // Include the nonnull indices so two functions with the same name
                 // but different nonnull sets never collide on one shim symbol.
-                let nn = nonnull.iter().map(|i| i.to_string()).collect::<Vec<_>>().join("_");
+                let nn = nonnull
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join("_");
                 format!("lime_nonnull_{}_{}", sanitize_name(&f.name), nn)
             },
             real_symbol: sym.clone(),
@@ -3040,7 +3348,9 @@ fn gen_adapter_c_source(
     TYPEDEF_NAMES.with(|t| *t.borrow_mut() = Some(typedef_names));
     let mut s = String::new();
     s.push_str("/* Charger-generated adapter shims (out-param + null-callback + const + union/bitfield accessors + variadic). DO NOT EDIT. */\n");
-    s.push_str("#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n");
+    s.push_str(
+        "#include <stddef.h>\n#include <stdlib.h>\n#include <string.h>\n#include <stdarg.h>\n",
+    );
     s.push_str(&format!("#include \"{}\"\n", header_name));
     // C struct-by-value return: a C function returning `struct Point` uses the
     // platform struct-return convention (hidden sret pointer / register pair),
@@ -3048,11 +3358,17 @@ fn gen_adapter_c_source(
     // generate a wrapper that calls the real function and stores the result in
     // a heap-allocated `Point`, returning that pointer as the opaque handle.
     for f in &api.functions {
-        if f.is_method { continue; }
+        if f.is_method {
+            continue;
+        }
         let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
             && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_))
-            && record_name_of(&f.ret).map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n)).unwrap_or(false);
-        if !is_struct_ret { continue; }
+            && record_name_of(&f.ret)
+                .map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n))
+                .unwrap_or(false);
+        if !is_struct_ret {
+            continue;
+        }
         let ret_name = match &f.ret {
             CType::Struct(s) | CType::Other(s) => s.clone(),
             _ => continue,
@@ -3085,17 +3401,25 @@ fn gen_adapter_c_source(
         let has_struct_arg = f.params.iter().any(|p| {
             matches!(&p.ty, CType::Struct(_) | CType::Other(_))
                 && !matches!(&p.ty, CType::Pointer(_) | CType::Opaque(_))
-                && record_name_of(&p.ty).map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n)).unwrap_or(false)
+                && record_name_of(&p.ty)
+                    .map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n))
+                    .unwrap_or(false)
         });
         let is_struct_ret = matches!(&f.ret, CType::Struct(_) | CType::Other(_))
             && !matches!(&f.ret, CType::Pointer(_) | CType::Opaque(_))
-            && record_name_of(&f.ret).map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n)).unwrap_or(false);
-        if !has_struct_arg && !is_struct_ret { continue; }
+            && record_name_of(&f.ret)
+                .map(|n| is_complete_record(&n) && !is_stdlib_struct_tag(&n))
+                .unwrap_or(false);
+        if !has_struct_arg && !is_struct_ret {
+            continue;
+        }
         // Skip pure struct-return functions already covered by the heap-copy
         // wrapper above (lime_ret_<name>); here we only handle struct *args*
         // (the return wrapper is emitted separately and shares the same shim
         // name scheme would collide, so return-only is excluded).
-        if is_struct_ret && !has_struct_arg { continue; }
+        if is_struct_ret && !has_struct_arg {
+            continue;
+        }
         let shim = format!("lime_val_{}", sanitize_name(&f.name));
         // Parameter list: struct-by-value params become `Type* aN` (the opaque
         // handle pointer); everything else keeps its C type.
@@ -3160,138 +3484,144 @@ fn gen_adapter_c_source(
                     st.name, spelling
                 ));
             }
-        for f in &st.fields {
-            // Anonymous-record fields (union/struct ... unnamed ...) cannot be
-            // named or moved by value; skip the C accessor shim (the field stays
-            // opaque inside the C struct). Generic — applies to any library.
-            if is_anon_record_field(&f.ty) {
-                continue;
-            }
-            match &f.ty {
-                CType::Array(elem, size) => {
-                    // Function-pointer array fields cannot be surfaced as
-                    // element-wise scalar accessors — skip the shim (the field
-                    // stays opaque inside the C struct). Generic.
-                    if is_fn_ptr_array(&f.ty) {
-                        continue;
-                    }
-                    // Multi-dimensional fixed arrays (`int x[2][2]`) would need
-                    // element-wise accessors that return/assign the inner array
-                    // by value, which is invalid C (arrays are not returnable).
-                    // Skip the scalar shim so the field stays opaque inside the
-                    // C struct — Lime never needs per-element access for these.
-                    // Generic: any struct with a nested-array field benefits.
-                    if matches!(**elem, CType::Array(_, _)) {
-                        continue;
-                    }
-                    let c_ty = c_type_text(elem);
-                    if size.is_none() {
-                        // Flexible array member: emit a sized constructor that
-                        // allocates sizeof(struct) + len*sizeof(elem). Record the
-                        // element count into a `len` field ONLY if the struct
-                        // genuinely has one (generic: checked against st.fields,
-                        // not assumed). Structs without a `len` field simply get
-                        // the allocation — Lime never auto-infers any other field
-                        // (e.g. `n`) as length metadata.
-                        let has_len = st.fields.iter().any(|fl| fl.name == "len");
-                        let len_assign = if has_len { "if (f) f->len = len; " } else { "" };
-                        s.push_str(&format!(
+            for f in &st.fields {
+                // Anonymous-record fields (union/struct ... unnamed ...) cannot be
+                // named or moved by value; skip the C accessor shim (the field stays
+                // opaque inside the C struct). Generic — applies to any library.
+                if is_anon_record_field(&f.ty) {
+                    continue;
+                }
+                match &f.ty {
+                    CType::Array(elem, size) => {
+                        // Function-pointer array fields cannot be surfaced as
+                        // element-wise scalar accessors — skip the shim (the field
+                        // stays opaque inside the C struct). Generic.
+                        if is_fn_ptr_array(&f.ty) {
+                            continue;
+                        }
+                        // Multi-dimensional fixed arrays (`int x[2][2]`) would need
+                        // element-wise accessors that return/assign the inner array
+                        // by value, which is invalid C (arrays are not returnable).
+                        // Skip the scalar shim so the field stays opaque inside the
+                        // C struct — Lime never needs per-element access for these.
+                        // Generic: any struct with a nested-array field benefits.
+                        if matches!(**elem, CType::Array(_, _)) {
+                            continue;
+                        }
+                        let c_ty = c_type_text(elem);
+                        if size.is_none() {
+                            // Flexible array member: emit a sized constructor that
+                            // allocates sizeof(struct) + len*sizeof(elem). Record the
+                            // element count into a `len` field ONLY if the struct
+                            // genuinely has one (generic: checked against st.fields,
+                            // not assumed). Structs without a `len` field simply get
+                            // the allocation — Lime never auto-infers any other field
+                            // (e.g. `n`) as length metadata.
+                            let has_len = st.fields.iter().any(|fl| fl.name == "len");
+                            let len_assign = if has_len { "if (f) f->len = len; " } else { "" };
+                            s.push_str(&format!(
                             "void* lime_make_{0}_flex(int len) {{ {1}* f = ({1}*)calloc(1, sizeof({1}) + (size_t)len * sizeof({2})); {3}return (void*)f; }}\n",
                             st.name, spelling, c_ty, len_assign
                         ));
-                    }
-                    s.push_str(&format!(
-                        "{} lime_get_{}_{}_i({}* u, int i) {{ return ({})u->{}[i]; }}\n",
-                        c_ty, st.name, f.name, spelling, c_ty, f.name
-                    ));
-                    s.push_str(&format!(
-                        "void lime_set_{}_{}_i({}* u, int i, {} v) {{ u->{}[i] = ({})v; }}\n",
-                        st.name, f.name, spelling, c_ty, f.name, c_ty
-                    ));
-                }
-                _ => {
-                    // Function-pointer fields are surfaced exclusively by the
-                    // callback-table (`has_fn_ptr`) block below, which emits the
-                    // store + NULL-setter shims. Skip them here to avoid a
-                    // duplicate `lime_set_*` symbol with a conflicting type.
-                    if matches!(&f.ty, CType::Function(..)) {
-                        continue;
-                    }
-                    let c_ty = c_field_c_type(&f.ty, structs);
-                    // Getter: a pointer-like field is surfaced as `void*` on
-                    // the getter side and cast via `(void*)` — every C object
-                    // pointer converts to/from `void*`, so this is ABI-correct
-                    // for any pointee (`int*`, `struct X*`, opaque/incomplete
-                    // pointers, ...). It avoids emitting a wrong/unknown pointee
-                    // type name (e.g. a struct tag that is forward-declared or
-                    // not yet visible in the adapter TU) which would fail to
-                    // compile. A scalar/aggregate field keeps its concrete type.
-                    if is_pointer_field(&f.ty, structs) {
+                        }
                         s.push_str(&format!(
-                            "void* lime_get_{}_{}({}* u) {{ return (void*)u->{}; }}\n",
-                            st.name, f.name, spelling, f.name
+                            "{} lime_get_{}_{}_i({}* u, int i) {{ return ({})u->{}[i]; }}\n",
+                            c_ty, st.name, f.name, spelling, c_ty, f.name
                         ));
-                    } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
-                        // Value-record field (`struct X field;`): expose the
-                        // address of the nested struct as `void*` so Lime can
-                        // memcpy into / out of it via the matching value-record
-                        // setter. Taking the address (not the value) is required
-                        // — a struct value cannot be cast to `void*`.
                         s.push_str(&format!(
-                            "void* lime_get_{}_{}({}* u) {{ return (void*)&u->{}; }}\n",
-                            st.name, f.name, spelling, f.name
-                        ));
-                    } else {
-                        // Scalar (non-pointer, non-aggregate) field accessor.
-                        // Integer fields (int/long/char/short/bool) are surfaced
-                        // through `long long` so a negative/signed value occupies
-                        // the full 64-bit return register on Win64 (same class of
-                        // fix as Iteration 19's `lime_const_*` shims — the narrow
-                        // C return type otherwise leaves RAX bits 32-63 undefined).
-                        // Floats/doubles keep their concrete type (they use XMM,
-                        // not RAX). Generic — applies to every scalar field.
-                        let shim_ty = c_shim_scalar_ty(&f.ty);
-                        s.push_str(&format!(
-                            "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
-                            shim_ty, st.name, f.name, spelling, shim_ty, f.name
+                            "void lime_set_{}_{}_i({}* u, int i, {} v) {{ u->{}[i] = ({})v; }}\n",
+                            st.name, f.name, spelling, c_ty, f.name, c_ty
                         ));
                     }
-                    // Setter: any pointer field is surfaced as `void*` on the
-                    // setter side and assigned via `(void*)v` — every C object
-                    // pointer converts to/from `void*`, so this is ABI-correct
-                    // for any pointee (`int*`, `unsigned char*`, `struct X*`,
-                    // opaque/incomplete pointers, ...). It avoids emitting a
-                    // wrong pointee type (e.g. normalizing `unsigned char*` as
-                    // `int*` would fail to compile when assigned back). A nested
-                    // struct/aggregate field is copied via memcpy.
-                    if is_pointer_field(&f.ty, structs) {
-                        s.push_str(&format!(
-                            "void lime_set_{}_{}({}* u, void* v) {{ u->{} = (void*)v; }}\n",
-                            st.name, f.name, spelling, f.name
-                        ));
-                    } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
-                        s.push_str(&format!(
+                    _ => {
+                        // Function-pointer fields are surfaced exclusively by the
+                        // callback-table (`has_fn_ptr`) block below, which emits the
+                        // store + NULL-setter shims. Skip them here to avoid a
+                        // duplicate `lime_set_*` symbol with a conflicting type.
+                        if matches!(&f.ty, CType::Function(..)) {
+                            continue;
+                        }
+                        let c_ty = c_field_c_type(&f.ty, structs);
+                        // Getter: a pointer-like field is surfaced as `void*` on
+                        // the getter side and cast via `(void*)` — every C object
+                        // pointer converts to/from `void*`, so this is ABI-correct
+                        // for any pointee (`int*`, `struct X*`, opaque/incomplete
+                        // pointers, ...). It avoids emitting a wrong/unknown pointee
+                        // type name (e.g. a struct tag that is forward-declared or
+                        // not yet visible in the adapter TU) which would fail to
+                        // compile. A scalar/aggregate field keeps its concrete type.
+                        if is_pointer_field(&f.ty, structs) {
+                            s.push_str(&format!(
+                                "void* lime_get_{}_{}({}* u) {{ return (void*)u->{}; }}\n",
+                                st.name, f.name, spelling, f.name
+                            ));
+                        } else if matches!(
+                            &f.ty,
+                            CType::Struct(_) | CType::Other(_) | CType::Opaque(_)
+                        ) {
+                            // Value-record field (`struct X field;`): expose the
+                            // address of the nested struct as `void*` so Lime can
+                            // memcpy into / out of it via the matching value-record
+                            // setter. Taking the address (not the value) is required
+                            // — a struct value cannot be cast to `void*`.
+                            s.push_str(&format!(
+                                "void* lime_get_{}_{}({}* u) {{ return (void*)&u->{}; }}\n",
+                                st.name, f.name, spelling, f.name
+                            ));
+                        } else {
+                            // Scalar (non-pointer, non-aggregate) field accessor.
+                            // Integer fields (int/long/char/short/bool) are surfaced
+                            // through `long long` so a negative/signed value occupies
+                            // the full 64-bit return register on Win64 (same class of
+                            // fix as Iteration 19's `lime_const_*` shims — the narrow
+                            // C return type otherwise leaves RAX bits 32-63 undefined).
+                            // Floats/doubles keep their concrete type (they use XMM,
+                            // not RAX). Generic — applies to every scalar field.
+                            let shim_ty = c_shim_scalar_ty(&f.ty);
+                            s.push_str(&format!(
+                                "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
+                                shim_ty, st.name, f.name, spelling, shim_ty, f.name
+                            ));
+                        }
+                        // Setter: any pointer field is surfaced as `void*` on the
+                        // setter side and assigned via `(void*)v` — every C object
+                        // pointer converts to/from `void*`, so this is ABI-correct
+                        // for any pointee (`int*`, `unsigned char*`, `struct X*`,
+                        // opaque/incomplete pointers, ...). It avoids emitting a
+                        // wrong pointee type (e.g. normalizing `unsigned char*` as
+                        // `int*` would fail to compile when assigned back). A nested
+                        // struct/aggregate field is copied via memcpy.
+                        if is_pointer_field(&f.ty, structs) {
+                            s.push_str(&format!(
+                                "void lime_set_{}_{}({}* u, void* v) {{ u->{} = (void*)v; }}\n",
+                                st.name, f.name, spelling, f.name
+                            ));
+                        } else if matches!(
+                            &f.ty,
+                            CType::Struct(_) | CType::Other(_) | CType::Opaque(_)
+                        ) {
+                            s.push_str(&format!(
                             "void lime_set_{}_{}({}* u, void* v) {{ memcpy(&u->{}, v, sizeof(u->{})); }}\n",
                             st.name, f.name, spelling, f.name, f.name
                         ));
-                    } else {
-                        // Scalar (non-pointer, non-aggregate) field setter.
-                        // Integer fields take `long long` on the shim side so
-                        // the Lime caller's full 64-bit value is received (the
-                        // same Win64 RAX-width fix as the getter above / Iteration
-                        // 19 `lime_const_*`). The C assignment truncates to the
-                        // real member width (incl. bitfields) correctly. Floats/
-                        // doubles keep their concrete type. Generic.
-                        let shim_ty = c_shim_scalar_ty(&f.ty);
-                        s.push_str(&format!(
-                            "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
-                            st.name, f.name, spelling, shim_ty, f.name, shim_ty
-                        ));
+                        } else {
+                            // Scalar (non-pointer, non-aggregate) field setter.
+                            // Integer fields take `long long` on the shim side so
+                            // the Lime caller's full 64-bit value is received (the
+                            // same Win64 RAX-width fix as the getter above / Iteration
+                            // 19 `lime_const_*`). The C assignment truncates to the
+                            // real member width (incl. bitfields) correctly. Floats/
+                            // doubles keep their concrete type. Generic.
+                            let shim_ty = c_shim_scalar_ty(&f.ty);
+                            s.push_str(&format!(
+                                "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
+                                st.name, f.name, spelling, shim_ty, f.name, shim_ty
+                            ));
+                        }
                     }
                 }
             }
-        }
-        s.push_str("\n");
+            s.push_str("\n");
         }
         // Callback-table shims: a struct with function-pointer fields stores
         // Lime callbacks (raw fn ptrs, ABI-compatible with C function pointers)
@@ -3381,7 +3711,9 @@ fn gen_adapter_c_source(
                 // NULL so pointer-shaped params compile (a bare `0` is an int and
                 // triggers `-Wint-conversion` for `const char*` etc.).
                 let null = match &a.params[i].ty {
-                    CType::Pointer(_) | CType::Opaque(_) | CType::String | CType::Function(..) => "(void*)0".to_string(),
+                    CType::Pointer(_) | CType::Opaque(_) | CType::String | CType::Function(..) => {
+                        "(void*)0".to_string()
+                    }
                     _ => "0".to_string(),
                 };
                 call_args.push(null);
@@ -3400,7 +3732,12 @@ fn gen_adapter_c_source(
             let name = a.ret_name.as_deref().unwrap_or("void");
             let body = format!(
                 "void {} ({}) {{\n{}    {}* tmp = ({}*)a0;\n    {}(&tmp);\n}}\n\n",
-                a.symbol, decls.join(", "), guard, name, name, a.real_symbol
+                a.symbol,
+                decls.join(", "),
+                guard,
+                name,
+                name,
+                a.real_symbol
             );
             s.push_str(&body);
         } else if let Some(oi) = a.out_idx {
@@ -3417,13 +3754,26 @@ fn gen_adapter_c_source(
             };
             let body = format!(
                 "{} {} ({}) {{\n{}    {} a{} = 0;\n    {}({});\n    return a{};\n}}\n\n",
-                ret_c, a.symbol, decls.join(", "), guard, lt, oi, a.real_symbol, call_args.join(", "), oi
+                ret_c,
+                a.symbol,
+                decls.join(", "),
+                guard,
+                lt,
+                oi,
+                a.real_symbol,
+                call_args.join(", "),
+                oi
             );
             s.push_str(&body);
         } else {
             s.push_str(&format!(
                 "{} {} ({}) {{\n{}    return {}({});\n}}\n\n",
-                ret_c, a.symbol, decls.join(", "), guard, a.real_symbol, call_args.join(", ")
+                ret_c,
+                a.symbol,
+                decls.join(", "),
+                guard,
+                a.real_symbol,
+                call_args.join(", ")
             ));
         }
     }
@@ -3445,19 +3795,22 @@ fn gen_adapter_c_source(
         // handle rendering used elsewhere). Scalars/pointers use c_type_text.
         let c_ty = match &g.ty {
             CType::Struct(s) => {
-            if is_typedef_name(s) {
-                s.to_string()
-            } else {
-                format!("struct {}", s)
+                if is_typedef_name(s) {
+                    s.to_string()
+                } else {
+                    format!("struct {}", s)
+                }
             }
-        }
             CType::Other(s) => s.clone(),
             // `char*` (C string) is a `void*` at the ABI boundary — safe to
             // treat as a bare pointer for get/set.
             CType::String => "void*".to_string(),
             _ => c_type_text(&g.ty),
         };
-        let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _));
+        let is_agg = matches!(
+            g.ty,
+            CType::Struct(_) | CType::Other(_) | CType::Array(_, _)
+        );
         if is_agg {
             s.push_str(&format!(
                 "void* lime_get_{}(void) {{ return (void*)&{}; }}\n",
@@ -3629,7 +3982,8 @@ fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &Variad
             let slots = slots_for_arity(&entry, arity);
             // Build the parameter list: fixed params, then N typed slots.
             let mut params: Vec<String> = fixed.clone();
-            let mut call_args: Vec<String> = (0..f.params.len()).map(|i| format!("a{}", i)).collect();
+            let mut call_args: Vec<String> =
+                (0..f.params.len()).map(|i| format!("a{}", i)).collect();
             for (j, slot) in slots.iter().enumerate() {
                 let idx = f.params.len() + j;
                 params.push(format!("{} a{}", slot.c_type(), idx));
@@ -3662,14 +4016,21 @@ fn emit_variadic_c_adapters(s: &mut String, api: &NormalizedApi, shapes: &Variad
 /// accessor names/signatures match the extern-global shims exactly, so the Lime
 /// interface is identical regardless of linkage. Struct/array field accessors
 /// are emitted with the same ABI rules as the extern path.
-fn gen_static_accessor_c_source(globals: &[CGlobal], structs: &[CStruct], defined: &std::collections::BTreeSet<String>) -> String {
+fn gen_static_accessor_c_source(
+    globals: &[CGlobal],
+    structs: &[CStruct],
+    defined: &std::collections::BTreeSet<String>,
+) -> String {
     let mut s = String::new();
     for g in globals {
         if !matches!(g.storage, StorageClass::Static) {
             continue;
         }
         let c_ty = c_field_c_type(&g.ty, structs);
-        let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _));
+        let is_agg = matches!(
+            g.ty,
+            CType::Struct(_) | CType::Other(_) | CType::Array(_, _)
+        );
         if is_agg {
             s.push_str(&format!(
                 "void* lime_get_{}(void) {{ return (void*)&{}; }}\n",
@@ -3763,11 +4124,21 @@ fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct, structs
                 }
                 s.push_str(&format!(
                     "{} lime_get_{}_{}_i({}* u, int i) {{ return ({})u->{}[i]; }}\n",
-                    c_ty, prefix, f.name, c_struct_spelling(st), c_ty, f.name
+                    c_ty,
+                    prefix,
+                    f.name,
+                    c_struct_spelling(st),
+                    c_ty,
+                    f.name
                 ));
                 s.push_str(&format!(
                     "void lime_set_{}_{}_i({}* u, int i, {} v) {{ u->{}[i] = ({})v; }}\n",
-                    prefix, f.name, c_struct_spelling(st), c_ty, f.name, c_ty
+                    prefix,
+                    f.name,
+                    c_struct_spelling(st),
+                    c_ty,
+                    f.name,
+                    c_ty
                 ));
             }
             _ => {
@@ -3778,17 +4149,28 @@ fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct, structs
                 if is_pointer_field(&f.ty, structs) {
                     s.push_str(&format!(
                         "void* lime_get_{}_{}({}* u) {{ return (void*)u->{}; }}\n",
-                        prefix, f.name, c_struct_spelling(st), f.name
+                        prefix,
+                        f.name,
+                        c_struct_spelling(st),
+                        f.name
                     ));
                 } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
                     s.push_str(&format!(
                         "void* lime_get_{}_{}({}* u) {{ return (void*)&u->{}; }}\n",
-                        prefix, f.name, c_struct_spelling(st), f.name
+                        prefix,
+                        f.name,
+                        c_struct_spelling(st),
+                        f.name
                     ));
                 } else {
                     s.push_str(&format!(
                         "{} lime_get_{}_{}({}* u) {{ return ({})u->{}; }}\n",
-                        c_ty, prefix, f.name, c_struct_spelling(st), c_ty, f.name
+                        c_ty,
+                        prefix,
+                        f.name,
+                        c_struct_spelling(st),
+                        c_ty,
+                        f.name
                     ));
                 }
                 // Phase 1 Iteration 8: a pointer field is surfaced as `void*` on
@@ -3801,7 +4183,10 @@ fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct, structs
                 if matches!(&f.ty, CType::Pointer(_)) {
                     s.push_str(&format!(
                         "void lime_set_{}_{}({}* u, void* v) {{ u->{} = (void*)v; }}\n",
-                        prefix, f.name, c_struct_spelling(st), f.name
+                        prefix,
+                        f.name,
+                        c_struct_spelling(st),
+                        f.name
                     ));
                 } else if matches!(&f.ty, CType::Struct(_) | CType::Other(_) | CType::Opaque(_)) {
                     s.push_str(&format!(
@@ -3811,7 +4196,12 @@ fn emit_struct_field_shims_c(s: &mut String, prefix: &str, st: &CStruct, structs
                 } else {
                     s.push_str(&format!(
                         "void lime_set_{}_{}({}* u, {} v) {{ u->{} = ({})v; }}\n",
-                        prefix, f.name, c_struct_spelling(st), c_ty, f.name, c_ty
+                        prefix,
+                        f.name,
+                        c_struct_spelling(st),
+                        c_ty,
+                        f.name,
+                        c_ty
                     ));
                 }
             }
@@ -3836,9 +4226,16 @@ fn build_adapters_into(
     shapes: &VariadicShapes,
     include_dirs: &[PathBuf],
 ) -> Result<(), String> {
-    if adapters.is_empty() && constants.is_empty() && structs.is_empty()
-        && !globals.iter().any(|g| matches!(g.storage, StorageClass::Static))
-        && !api.functions.iter().any(|f| f.variadic && shapes.map.contains_key(&f.symbol))
+    if adapters.is_empty()
+        && constants.is_empty()
+        && structs.is_empty()
+        && !globals
+            .iter()
+            .any(|g| matches!(g.storage, StorageClass::Static))
+        && !api
+            .functions
+            .iter()
+            .any(|f| f.variadic && shapes.map.contains_key(&f.symbol))
     {
         return Ok(());
     }
@@ -3854,14 +4251,26 @@ fn build_adapters_into(
     let clang = if clang.exists() {
         clang
     } else {
-        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp { "clang++" } else { "clang" })
+        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp {
+            "clang++"
+        } else {
+            "clang"
+        })
     };
     let header_name = header
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-    let src = gen_adapter_c_source(adapters, constants, structs, globals, &header_name, api, shapes);
+    let src = gen_adapter_c_source(
+        adapters,
+        constants,
+        structs,
+        globals,
+        &header_name,
+        api,
+        shapes,
+    );
     let c_path = build_dir.join("lime_adapters.c");
     std::fs::write(&c_path, src).map_err(|e| format!("adapter gen failed: {}", e))?;
     if std::env::var("CHARGER_DEBUG_ADAPTERS").is_ok() {
@@ -3883,11 +4292,19 @@ fn build_adapters_into(
         cmd.arg("-I").arg(inc);
     }
     cmd.arg(&c_path).arg("-o").arg(&obj_path);
-    let status = cmd
-        .status()
-        .map_err(|e| format!("adapter build failed: {} launch error: {}", clang.display(), e))?;
+    let status = cmd.status().map_err(|e| {
+        format!(
+            "adapter build failed: {} launch error: {}",
+            clang.display(),
+            e
+        )
+    })?;
     if !status.success() {
-        return Err(format!("adapter build failed: {} exited with {}", clang.display(), status));
+        return Err(format!(
+            "adapter build failed: {} exited with {}",
+            clang.display(),
+            status
+        ));
     }
     let ar = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
     let ar = if ar.exists() {
@@ -3923,7 +4340,10 @@ fn generate_lime_iface(
     sem: &SemanticMeta,
 ) -> String {
     let mut out = String::new();
-    out.push_str(&format!("// Charger-generated Lime interface for '{}'\n", lib_name));
+    out.push_str(&format!(
+        "// Charger-generated Lime interface for '{}'\n",
+        lib_name
+    ));
     out.push_str("// DO NOT EDIT: regenerate with `charger install`.\n\n");
 
     // Constants (enum enumerators, static consts, integer object-macros) are
@@ -3951,7 +4371,10 @@ fn generate_lime_iface(
             // Aggregate (struct/array) globals and pointer globals cannot be
             // returned by value ABI-safely through Lime; expose them as a pointer
             // accessor (opaque handle) instead.
-            let is_agg = matches!(g.ty, CType::Struct(_) | CType::Other(_) | CType::Array(_, _) | CType::Pointer(_));
+            let is_agg = matches!(
+                g.ty,
+                CType::Struct(_) | CType::Other(_) | CType::Array(_, _) | CType::Pointer(_)
+            );
             if is_agg {
                 // Aggregate (struct/array/pointer) globals are surfaced as a bare
                 // pointer. Lime has no raw-pointer type, so we expose the address
@@ -4033,7 +4456,10 @@ fn generate_lime_iface(
             // that store the native function pointer into the C struct field.
             // No library-specific code — any `T (*f)(...)` field is handled.
             out.push_str(&format!("// Opaque handle for C callback-table struct '{}' (function-pointer fields); use lime_set_* shims\n", s.name));
-            out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
+            out.push_str(&format!(
+                "extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n",
+                s.name, s.name, s.name
+            ));
             for f in &s.fields {
                 let lime_ty = lime_type_name(&f.ty);
                 if matches!(f.ty, CType::Function(..)) {
@@ -4068,8 +4494,19 @@ fn generate_lime_iface(
             // `int` is i64/8 bytes; overlapping members and sub-byte bitfields
             // are unrepresentable). Surface as an opaque handle; accessor
             // shims (generated in the adapter C source) provide typed get/set.
-            out.push_str(&format!("// Opaque handle for C {} '{}' (union/bitfield); use lime_*_get/set shims\n", if s.is_union { "union" } else { "bitfield struct" }, s.name));
-            out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
+            out.push_str(&format!(
+                "// Opaque handle for C {} '{}' (union/bitfield); use lime_*_get/set shims\n",
+                if s.is_union {
+                    "union"
+                } else {
+                    "bitfield struct"
+                },
+                s.name
+            ));
+            out.push_str(&format!(
+                "extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n",
+                s.name, s.name, s.name
+            ));
             for f in &s.fields {
                 emit_field_accessors(&mut out, s, f);
             }
@@ -4087,13 +4524,22 @@ fn generate_lime_iface(
         // 8 bytes). Any sub-8-byte field (char/short/int) or aggregate that
         // Lime cannot lay out must be surfaced as an opaque handle with accessor
         // shims (clang owns the real layout — the source of truth).
-        let all_8byte = s.fields.iter().all(|f| matches!(
-            f.ty,
-            CType::Long | CType::Double | CType::Pointer(_) | CType::Function(..) | CType::Opaque(_)
-        ));
+        let all_8byte = s.fields.iter().all(|f| {
+            matches!(
+                f.ty,
+                CType::Long
+                    | CType::Double
+                    | CType::Pointer(_)
+                    | CType::Function(..)
+                    | CType::Opaque(_)
+            )
+        });
         if !all_8byte {
             out.push_str(&format!("// Opaque handle for C struct '{}' (sub-8-byte layout); use lime_*_get/set shims\n", s.name));
-            out.push_str(&format!("extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n", s.name, s.name, s.name));
+            out.push_str(&format!(
+                "extern fn lime_make_{}() -> Opaque({}) \"lime_make_{}\"\n",
+                s.name, s.name, s.name
+            ));
             for f in &s.fields {
                 emit_field_accessors(&mut out, s, f);
             }
@@ -4388,8 +4834,8 @@ impl VarSlot {
 ///   adapter of that fixed arity is generated.
 #[derive(Debug, Clone)]
 enum ShapeEntry {
-    Homogeneous(VarSlot),       // family, arity 0..MAX, all slots this token
-    Explicit(Vec<VarSlot>),     // one fixed arity equal to vec.len()
+    Homogeneous(VarSlot),   // family, arity 0..MAX, all slots this token
+    Explicit(Vec<VarSlot>), // one fixed arity equal to vec.len()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4429,7 +4875,9 @@ fn slots_for_arity(entry: &ShapeEntry, arity: usize) -> Vec<VarSlot> {
             if pattern.is_empty() {
                 return Vec::new();
             }
-            (0..arity).map(|i| pattern[i % pattern.len()].clone()).collect()
+            (0..arity)
+                .map(|i| pattern[i % pattern.len()].clone())
+                .collect()
         }
     }
 }
@@ -4644,7 +5092,8 @@ impl SemanticMeta {
             if path.exists() {
                 let text = std::fs::read_to_string(&path)
                     .map_err(|e| format!("charger_semantic.toml read error: {}", e))?;
-                let value = text.parse::<toml::Value>()
+                let value = text
+                    .parse::<toml::Value>()
                     .map_err(|e| format!("charger_semantic.toml parse error: {}", e))?;
                 if let Some(fns) = value.get("functions").and_then(|v| v.as_table()) {
                     for (sym, v) in fns {
@@ -4673,7 +5122,11 @@ fn parse_func_semantics(v: &toml::Value) -> FuncSemantics {
         }
     }
     if let Some(r) = v.get("return_nullable").and_then(|x| x.as_bool()) {
-        fs.ret.nullable = if r { Nullability::Nullable } else { Nullability::NonNull };
+        fs.ret.nullable = if r {
+            Nullability::Nullable
+        } else {
+            Nullability::NonNull
+        };
     }
     if let Some(r) = v.get("return_lifetime").and_then(|x| x.as_str()) {
         fs.ret.lifetime = Some(r.to_string());
@@ -4697,8 +5150,11 @@ fn parse_func_semantics(v: &toml::Value) -> FuncSemantics {
     if let Some(arr) = v.get("params_nullable").and_then(|x| x.as_array()) {
         for (i, e) in arr.iter().enumerate() {
             if let Some(b) = e.as_bool() {
-                ensure_param(&mut fs, i).nullable =
-                    if b { Nullability::Nullable } else { Nullability::NonNull };
+                ensure_param(&mut fs, i).nullable = if b {
+                    Nullability::Nullable
+                } else {
+                    Nullability::NonNull
+                };
             } else if let Some(s) = e.as_str().and_then(Nullability::parse) {
                 ensure_param(&mut fs, i).nullable = s;
             }
@@ -4709,12 +5165,24 @@ fn parse_func_semantics(v: &toml::Value) -> FuncSemantics {
         for (key, pv) in tbl {
             if let Ok(i) = key.parse::<usize>() {
                 let p = ensure_param(&mut fs, i);
-                if let Some(o) = pv.get("ownership").and_then(|x| x.as_str()).and_then(OwnershipSem::parse) {
+                if let Some(o) = pv
+                    .get("ownership")
+                    .and_then(|x| x.as_str())
+                    .and_then(OwnershipSem::parse)
+                {
                     p.ownership = o;
                 }
                 if let Some(b) = pv.get("nullable").and_then(|x| x.as_bool()) {
-                    p.nullable = if b { Nullability::Nullable } else { Nullability::NonNull };
-                } else if let Some(s) = pv.get("nullable").and_then(|x| x.as_str()).and_then(Nullability::parse) {
+                    p.nullable = if b {
+                        Nullability::Nullable
+                    } else {
+                        Nullability::NonNull
+                    };
+                } else if let Some(s) = pv
+                    .get("nullable")
+                    .and_then(|x| x.as_str())
+                    .and_then(Nullability::parse)
+                {
                     p.nullable = s;
                 }
             }
@@ -4732,12 +5200,24 @@ fn ensure_param(fs: &mut FuncSemantics, i: usize) -> &mut ParamSemantics {
 
 fn parse_global_semantics(v: &toml::Value) -> GlobalSemantics {
     let mut g = GlobalSemantics::default();
-    if let Some(o) = v.get("ownership").and_then(|x| x.as_str()).and_then(OwnershipSem::parse) {
+    if let Some(o) = v
+        .get("ownership")
+        .and_then(|x| x.as_str())
+        .and_then(OwnershipSem::parse)
+    {
         g.ownership = o;
     }
     if let Some(b) = v.get("nullable").and_then(|x| x.as_bool()) {
-        g.nullable = if b { Nullability::Nullable } else { Nullability::NonNull };
-    } else if let Some(s) = v.get("nullable").and_then(|x| x.as_str()).and_then(Nullability::parse) {
+        g.nullable = if b {
+            Nullability::Nullable
+        } else {
+            Nullability::NonNull
+        };
+    } else if let Some(s) = v
+        .get("nullable")
+        .and_then(|x| x.as_str())
+        .and_then(Nullability::parse)
+    {
         g.nullable = s;
     }
     if let Some(m) = v.get("mutable").and_then(|x| x.as_bool()) {
@@ -4899,7 +5379,10 @@ pub struct InstallResult {
 pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String> {
     let src_path = PathBuf::from(source);
     if !src_path.exists() {
-        return Err(format!("compiler/build error: source '{}' not found", source));
+        return Err(format!(
+            "compiler/build error: source '{}' not found",
+            source
+        ));
     }
 
     // Determine language: if any .cpp/.cc/.cxx present -> C++, else C.
@@ -4938,7 +5421,11 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                     }
                 } else {
                     let origin = Path::new(&m.source_origin);
-                    let dir = if origin.is_file() { origin.parent() } else { Some(origin) };
+                    let dir = if origin.is_file() {
+                        origin.parent()
+                    } else {
+                        Some(origin)
+                    };
                     if let Some(dpath) = dir {
                         if !include_dirs.iter().any(|p| p == dpath) {
                             include_dirs.push(dpath.to_path_buf());
@@ -5006,24 +5493,87 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         let mut inc_stack: Vec<PathBuf> = vec![Path::new(source).to_path_buf()];
         let mut inc_seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         while let Some(dir) = inc_stack.pop() {
-            let lower = dir.file_name().and_then(|n| n.to_str()).unwrap_or("").to_ascii_lowercase();
-            if matches!(lower.as_str(),
-                "fuzz" | "test" | "tests" | "benchmark" | "benchmarks"
-                | "examples" | "example" | "demo" | "demos" | "docs" | "doc"
-                | "tools" | "utils" | "contrib" | "third_party" | "thirdparty"
-                | "3rdparty" | "cmake" | "cmake-build" | "build-scripts"
-                | "visualtest" | "testautomation" | "automated"
-                | "xcode-ios" | "xcode-macos" | "xcode-tvos" | "xcode-visionos"
-                | "android-project" | "ios" | "emscripten" | "ngage" | "haiku"
-                | "pandora" | "n3ds" | "psp" | "vita" | "wiiu" | "switch"
-                | "raspberrypi" | "riscos" | "os2" | "ps2" | "windowsce"
-                | "winrt" | "wingdk" | "xbox" | "ngage" | "symbian"
-                | "pkgconfig" | "visualc" | "visualc-arm64" | "visualc-armuwp"
-                | "visualc-windows-phone" | "visualc-windows-store"
-                | "watcom" | "mpw" | "macosx" | "apple" | "amiga" | "dreamcast"
-                | "ps3" | "ps4" | "ps5" | "stadia" | "tvos" | "visionos"
-                | "util" | "apps" | "ms" | "helpers" | "ktls" | "fips"
-            ) || INACTIVE_PLATFORMS.contains(&lower.as_str()) {
+            let lower = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if matches!(
+                lower.as_str(),
+                "fuzz"
+                    | "test"
+                    | "tests"
+                    | "benchmark"
+                    | "benchmarks"
+                    | "examples"
+                    | "example"
+                    | "demo"
+                    | "demos"
+                    | "docs"
+                    | "doc"
+                    | "tools"
+                    | "utils"
+                    | "contrib"
+                    | "third_party"
+                    | "thirdparty"
+                    | "3rdparty"
+                    | "cmake"
+                    | "cmake-build"
+                    | "build-scripts"
+                    | "visualtest"
+                    | "testautomation"
+                    | "automated"
+                    | "xcode-ios"
+                    | "xcode-macos"
+                    | "xcode-tvos"
+                    | "xcode-visionos"
+                    | "android-project"
+                    | "ios"
+                    | "emscripten"
+                    | "ngage"
+                    | "haiku"
+                    | "pandora"
+                    | "n3ds"
+                    | "psp"
+                    | "vita"
+                    | "wiiu"
+                    | "switch"
+                    | "raspberrypi"
+                    | "riscos"
+                    | "os2"
+                    | "ps2"
+                    | "windowsce"
+                    | "winrt"
+                    | "wingdk"
+                    | "xbox"
+                    | "ngage"
+                    | "symbian"
+                    | "pkgconfig"
+                    | "visualc"
+                    | "visualc-arm64"
+                    | "visualc-armuwp"
+                    | "visualc-windows-phone"
+                    | "visualc-windows-store"
+                    | "watcom"
+                    | "mpw"
+                    | "macosx"
+                    | "apple"
+                    | "amiga"
+                    | "dreamcast"
+                    | "ps3"
+                    | "ps4"
+                    | "ps5"
+                    | "stadia"
+                    | "tvos"
+                    | "visionos"
+                    | "util"
+                    | "apps"
+                    | "ms"
+                    | "helpers"
+                    | "ktls"
+                    | "fips"
+            ) || INACTIVE_PLATFORMS.contains(&lower.as_str())
+            {
                 continue;
             }
             if dir.file_name().and_then(|n| n.to_str()) == Some("include") {
@@ -5064,14 +5614,20 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // iface + shims) and the full build path.
     let ast = extract_ast_json(&header, lang, llvm_bindir, &include_dirs, &build_flags)?;
     let mut api = normalize(&ast, lang, &src_path);
-    let mut fc = 0usize; let mut rc = 0usize;
+    let mut fc = 0usize;
+    let mut rc = 0usize;
     fn walk(o: &serde_json::Value, fc: &mut usize, rc: &mut usize) {
         if let Some(k) = o.get("kind").and_then(|v| v.as_str()) {
-            if k == "FunctionDecl" { *fc += 1; }
-            else if k == "RecordDecl" { *rc += 1; }
+            if k == "FunctionDecl" {
+                *fc += 1;
+            } else if k == "RecordDecl" {
+                *rc += 1;
+            }
         }
         if let Some(a) = o.get("inner").and_then(|v| v.as_array()) {
-            for c in a { walk(c, fc, rc); }
+            for c in a {
+                walk(c, fc, rc);
+            }
         }
     }
     walk(&ast, &mut fc, &mut rc);
@@ -5104,7 +5660,19 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 // the reused artifact (a stale artifact built by an older
                 // Charger lacks them) and (re)generate the iface with adapters.
                 let art_dest = entry.join(&m.artifact);
-                build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_dest, &header, llvm_bindir, lang, &api, &shapes, &include_dirs)?;
+                build_adapters_into(
+                    &adapters,
+                    &api.constants,
+                    &api.structs,
+                    &api.globals,
+                    &art_dest,
+                    &header,
+                    llvm_bindir,
+                    lang,
+                    &api,
+                    &shapes,
+                    &include_dirs,
+                )?;
                 let iface = generate_lime_iface(&api, &lib_name, &adapters, &shapes, &sem);
                 std::fs::write(entry.join("lime-iface.lime"), &iface)
                     .map_err(|e| format!("Lime interface generation failed: {}", e))?;
@@ -5125,20 +5693,29 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 if sem_checks.iter().any(|c| !c.pass) {
                     return Err(format!(
                         "{} invalid semantic metadata check(s) for '{}'",
-                        sem_checks.iter().filter(|c| !c.pass).count(), lib_name
+                        sem_checks.iter().filter(|c| !c.pass).count(),
+                        lib_name
                     ));
                 }
                 // Also refresh the compact normalized signatures (older manifests
                 // lacked them) so verify-semantics has real API shapes to check.
-                m.functions = api.functions.iter().map(|f| ManifestFn {
-                    symbol: f.symbol.clone(),
-                    params: f.params.iter().map(|pp| ctype_tag(&pp.ty)).collect(),
-                    ret: ctype_tag(&f.ret),
-                }).collect();
-                m.globals = api.globals.iter().map(|g| ManifestGlobal {
-                    name: g.name.clone(),
-                    ty: ctype_tag(&g.ty),
-                }).collect();
+                m.functions = api
+                    .functions
+                    .iter()
+                    .map(|f| ManifestFn {
+                        symbol: f.symbol.clone(),
+                        params: f.params.iter().map(|pp| ctype_tag(&pp.ty)).collect(),
+                        ret: ctype_tag(&f.ret),
+                    })
+                    .collect();
+                m.globals = api
+                    .globals
+                    .iter()
+                    .map(|g| ManifestGlobal {
+                        name: g.name.clone(),
+                        ty: ctype_tag(&g.ty),
+                    })
+                    .collect();
                 let manifest_toml = toml::to_string_pretty(&m)
                     .map_err(|e| format!("artifact store failed: manifest error: {}", e))?;
                 std::fs::write(entry.join("manifest.toml"), manifest_toml)
@@ -5176,7 +5753,11 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     let clang = if clang.exists() {
         clang
     } else {
-        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp { "clang++" } else { "clang" })
+        PathBuf::from(llvm_bindir).join(if lang == ApiKind::Cpp {
+            "clang++"
+        } else {
+            "clang"
+        })
     };
     // Static (internal-linkage) globals cannot be reached from a separate
     // adapter translation unit, so their accessors must live in the SAME TU as
@@ -5201,7 +5782,10 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
             .map_err(|e| format!("static inject failed: read {}: {}", first.display(), e))?;
         std::fs::write(
             &combined,
-            format!("{}\n\n/* Charger static-global accessors */\n{}\n", orig, static_src),
+            format!(
+                "{}\n\n/* Charger static-global accessors */\n{}\n",
+                orig, static_src
+            ),
         )
         .map_err(|e| format!("static inject failed: write {}: {}", combined.display(), e))?;
         compiled_sources[0] = combined;
@@ -5224,7 +5808,11 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         // symbols). Derive the object name from the source path relative to the
         // corpus root so every TU gets a distinct archive member. Generic —
         // no library-specific names.
-        let stem = s.file_stem().and_then(|x| x.to_str()).unwrap_or("src").to_string();
+        let stem = s
+            .file_stem()
+            .and_then(|x| x.to_str())
+            .unwrap_or("src")
+            .to_string();
         // Generic: object filenames MUST be unique across the ENTIRE source
         // tree, not just per-directory. Multi-directory C libraries (SDL2,
         // FFmpeg, OpenSSL, ...) ship same-named .c files in different backends
@@ -5307,11 +5895,19 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
             cmd.arg("-idirafter").arg(hdir);
         }
         cmd.arg(s).arg("-o").arg(&obj_path);
-        let status = cmd
-            .status()
-            .map_err(|e| format!("native build failed: {} launch error: {}", clang.display(), e))?;
+        let status = cmd.status().map_err(|e| {
+            format!(
+                "native build failed: {} launch error: {}",
+                clang.display(),
+                e
+            )
+        })?;
         if !status.success() {
-            return Err(format!("native build failed: {} exited with {}", clang.display(), status));
+            return Err(format!(
+                "native build failed: {} exited with {}",
+                clang.display(),
+                status
+            ));
         }
         obj_paths.push(obj_path);
     }
@@ -5343,12 +5939,20 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
             None => {
                 // fallback to llvm-ar if lib.exe cannot be located
                 let a = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
-                if a.exists() { a } else { PathBuf::from(llvm_bindir).join("llvm-ar") }
+                if a.exists() {
+                    a
+                } else {
+                    PathBuf::from(llvm_bindir).join("llvm-ar")
+                }
             }
         }
     } else {
         let a = PathBuf::from(llvm_bindir).join("llvm-ar.exe");
-        if a.exists() { a } else { PathBuf::from(llvm_bindir).join("llvm-ar") }
+        if a.exists() {
+            a
+        } else {
+            PathBuf::from(llvm_bindir).join("llvm-ar")
+        }
     };
     let ar_is_msvc_lib = cfg!(windows) && ar.to_string_lossy().ends_with("lib.exe");
     // Generic: archive in CHUNKS. Passing every object on one command line
@@ -5368,14 +5972,17 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
                 .map_err(|e| format!("native build failed: cannot write response file: {}", e))?;
             use std::io::Write;
             for o in &obj_paths {
-                writeln!(f, "{}", o.display())
-                    .map_err(|e| format!("native build failed: cannot write response file: {}", e))?;
+                writeln!(f, "{}", o.display()).map_err(|e| {
+                    format!("native build failed: cannot write response file: {}", e)
+                })?;
             }
         }
         let mut ar_cmd = Command::new(&ar);
         // lib.exe requires `/OUT:file` and `@file` each as a single token
         // (no space after `:` or `@`). Use a response file to bound the arg list.
-        ar_cmd.arg(format!("/OUT:{}", art_path.display())).arg(format!("@{}", resp.display()));
+        ar_cmd
+            .arg(format!("/OUT:{}", art_path.display()))
+            .arg(format!("@{}", resp.display()));
         let ar_status = ar_cmd
             .status()
             .map_err(|e| format!("native build failed: lib.exe launch error: {}", e))?;
@@ -5407,14 +6014,28 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
             .status()
             .map_err(|e| format!("native build failed: llvm-ar launch error: {}", e))?;
         if !s_status.success() {
-            return Err("native build failed: llvm-ar (symbol table) exited with error".to_string());
+            return Err(
+                "native build failed: llvm-ar (symbol table) exited with error".to_string(),
+            );
         }
     }
 
     // 2b. Build out-param / null-callback adapter shims and insert them into
     // the prepared native artifact (so the Lime `extern fn` shim symbols
     // resolve at link time).
-    build_adapters_into(&adapters, &api.constants, &api.structs, &api.globals, &art_path, &header, llvm_bindir, lang, &api, &shapes, &include_dirs)?;
+    build_adapters_into(
+        &adapters,
+        &api.constants,
+        &api.structs,
+        &api.globals,
+        &art_path,
+        &header,
+        llvm_bindir,
+        lang,
+        &api,
+        &shapes,
+        &include_dirs,
+    )?;
 
     // Phase 1 Iteration 6: derive artifact metadata from what was actually
     // built. Charger always produces an archive (.lib on Windows, .a elsewhere)
@@ -5459,14 +6080,14 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     let _ = std::fs::create_dir_all(&entry);
 
     let art_dest = entry.join(&art_name);
-    std::fs::copy(&art_path, &art_dest)
-        .map_err(|e| format!("artifact store failed: {}", e))?;
+    std::fs::copy(&art_path, &art_dest).map_err(|e| format!("artifact store failed: {}", e))?;
 
     let iface_dest = entry.join("lime-iface.lime");
-    std::fs::write(&iface_dest, iface).map_err(|e| format!("Lime interface generation failed: {}", e))?;
+    std::fs::write(&iface_dest, iface)
+        .map_err(|e| format!("Lime interface generation failed: {}", e))?;
 
-    let abi_json = serde_json::to_string_pretty(&abi)
-        .map_err(|e| format!("ABI extraction failed: {}", e))?;
+    let abi_json =
+        serde_json::to_string_pretty(&abi).map_err(|e| format!("ABI extraction failed: {}", e))?;
     std::fs::write(entry.join("abi.json"), abi_json)
         .map_err(|e| format!("ABI extraction failed: {}", e))?;
 
@@ -5513,29 +6134,49 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         }
     }
     for s in &api.structs {
-        if s.name.is_empty() { continue; }
+        if s.name.is_empty() {
+            continue;
+        }
         let sym = format!("lime_make_{}", s.name);
         if !symbols.contains(&sym) {
             symbols.push(sym);
         }
         for f in &s.fields {
-            if is_anon_record_field(&f.ty) { continue; }
-            if is_union_field(&f.ty) { continue; }
-            if is_fn_ptr_array(&f.ty) { continue; }
-            if matches!(&f.ty, CType::Function(..)) { continue; }
+            if is_anon_record_field(&f.ty) {
+                continue;
+            }
+            if is_union_field(&f.ty) {
+                continue;
+            }
+            if is_fn_ptr_array(&f.ty) {
+                continue;
+            }
+            if matches!(&f.ty, CType::Function(..)) {
+                continue;
+            }
             match &f.ty {
                 CType::Array(inner, _) => {
-                    if matches!(**inner, CType::Array(_, _)) { continue; }
+                    if matches!(**inner, CType::Array(_, _)) {
+                        continue;
+                    }
                     let g = format!("lime_get_{}_{}_i", s.name, f.name);
                     let st = format!("lime_set_{}_{}_i", s.name, f.name);
-                    if !symbols.contains(&g) { symbols.push(g); }
-                    if !symbols.contains(&st) { symbols.push(st); }
+                    if !symbols.contains(&g) {
+                        symbols.push(g);
+                    }
+                    if !symbols.contains(&st) {
+                        symbols.push(st);
+                    }
                 }
                 _ => {
                     let g = format!("lime_get_{}_{}", s.name, f.name);
                     let st = format!("lime_set_{}_{}", s.name, f.name);
-                    if !symbols.contains(&g) { symbols.push(g); }
-                    if !symbols.contains(&st) { symbols.push(st); }
+                    if !symbols.contains(&g) {
+                        symbols.push(g);
+                    }
+                    if !symbols.contains(&st) {
+                        symbols.push(st);
+                    }
                 }
             }
         }
@@ -5544,15 +6185,23 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
     // Phase 1 Iteration 7: persist compact normalized signatures so
     // `verify_semantics` can validate the Semantic Supplement Layer against
     // real API shapes without re-parsing the header.
-    let manifest_fns: Vec<ManifestFn> = api.functions.iter().map(|f| ManifestFn {
-        symbol: f.symbol.clone(),
-        params: f.params.iter().map(|p| ctype_tag(&p.ty)).collect(),
-        ret: ctype_tag(&f.ret),
-    }).collect();
-    let manifest_globals: Vec<ManifestGlobal> = api.globals.iter().map(|g| ManifestGlobal {
-        name: g.name.clone(),
-        ty: ctype_tag(&g.ty),
-    }).collect();
+    let manifest_fns: Vec<ManifestFn> = api
+        .functions
+        .iter()
+        .map(|f| ManifestFn {
+            symbol: f.symbol.clone(),
+            params: f.params.iter().map(|p| ctype_tag(&p.ty)).collect(),
+            ret: ctype_tag(&f.ret),
+        })
+        .collect();
+    let manifest_globals: Vec<ManifestGlobal> = api
+        .globals
+        .iter()
+        .map(|g| ManifestGlobal {
+            name: g.name.clone(),
+            ty: ctype_tag(&g.ty),
+        })
+        .collect();
     // Phase 1 Iteration 7: gate the auxiliary semantic metadata BEFORE the
     // manifest is written / native build is declared good. Invalid metadata
     // (dangling free_with, out-of-range param index, nullable on a scalar, ...)
@@ -5566,7 +6215,8 @@ pub fn install(source: &str, llvm_bindir: &str) -> Result<InstallResult, String>
         if sem_checks.iter().any(|c| !c.pass) {
             return Err(format!(
                 "{} invalid semantic metadata check(s) for '{}'",
-                sem_checks.iter().filter(|c| !c.pass).count(), lib_name
+                sem_checks.iter().filter(|c| !c.pass).count(),
+                lib_name
             ));
         }
     }
@@ -5733,7 +6383,11 @@ fn select_api_header(_dir: &Path, headers: &[PathBuf], sources: &[PathBuf]) -> O
         let mut cur = start;
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         loop {
-            let stem = cur.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let stem = cur
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             if visited.contains(&stem) {
                 return Some(cur);
             }
@@ -5746,9 +6400,10 @@ fn select_api_header(_dir: &Path, headers: &[PathBuf], sources: &[PathBuf]) -> O
                         let rest = &line[q + 1..];
                         if let Some(end) = rest.find('"') {
                             let inc = &rest[..end];
-                            if let Some(h) = headers.iter().find(|h| {
-                                h.file_name().and_then(|s| s.to_str()) == Some(inc)
-                            }) {
+                            if let Some(h) = headers
+                                .iter()
+                                .find(|h| h.file_name().and_then(|s| s.to_str()) == Some(inc))
+                            {
                                 if !is_ext(h) {
                                     next = Some(h.to_path_buf());
                                 } else {
@@ -5923,8 +6578,7 @@ fn is_main_definition(line: &str) -> bool {
     let chars: Vec<char> = line.chars().collect();
     while let Some(pos) = line[idx..].find("main") {
         let abs = idx + pos;
-        let before_ok = abs == 0
-            || !chars[abs - 1].is_alphanumeric() && chars[abs - 1] != '_';
+        let before_ok = abs == 0 || !chars[abs - 1].is_alphanumeric() && chars[abs - 1] != '_';
         if before_ok && abs + 4 < chars.len() && chars[abs + 4] == '(' {
             // ensure '(' directly follows "main" (allow no space)
             return true;
@@ -5944,14 +6598,64 @@ fn is_main_definition(line: &str) -> bool {
 /// (`windows`, `win32`, `direct3d*`, `directsound`, `dummy`, `generic`, ...) are
 /// deliberately NOT in this list so they remain compiled.
 const INACTIVE_PLATFORMS: &[&str] = &[
-    "qnx", "raspberrypi", "rpi", "wayland", "x11", "xorg", "kmsdrm", "vivante",
-    "alsa", "pulseaudio", "jack", "pipewire", "oss", "sndio", "coreaudio",
-    "directfb", "nacl", "android", "macosx", "apple", "cygwin", "riscos", "os2",
-    "amiga", "dreamcast", "pandora", "symbian", "ps2", "ps3", "ps4", "ps5",
-    "vita", "wiiu", "switch", "n3ds", "stadia", "tvos", "visionos", "wingdk",
-    "xbox", "windowsce", "dlopen", "pthread", "unix", "linux", "freebsd",
-    "netbsd", "openbsd", "solaris", "hpux", "irix", "aix", "stdcpp", "gdk",
-    "mac", "darwin", "libusb", "main",
+    "qnx",
+    "raspberrypi",
+    "rpi",
+    "wayland",
+    "x11",
+    "xorg",
+    "kmsdrm",
+    "vivante",
+    "alsa",
+    "pulseaudio",
+    "jack",
+    "pipewire",
+    "oss",
+    "sndio",
+    "coreaudio",
+    "directfb",
+    "nacl",
+    "android",
+    "macosx",
+    "apple",
+    "cygwin",
+    "riscos",
+    "os2",
+    "amiga",
+    "dreamcast",
+    "pandora",
+    "symbian",
+    "ps2",
+    "ps3",
+    "ps4",
+    "ps5",
+    "vita",
+    "wiiu",
+    "switch",
+    "n3ds",
+    "stadia",
+    "tvos",
+    "visionos",
+    "wingdk",
+    "xbox",
+    "windowsce",
+    "dlopen",
+    "pthread",
+    "unix",
+    "linux",
+    "freebsd",
+    "netbsd",
+    "openbsd",
+    "solaris",
+    "hpux",
+    "irix",
+    "aix",
+    "stdcpp",
+    "gdk",
+    "mac",
+    "darwin",
+    "libusb",
+    "main",
 ];
 
 /// Inactive-platform backend *translation-unit* filename stems. Like
@@ -5983,10 +6687,26 @@ const INACTIVE_PLATFORMS: &[&str] = &[
 /// files keep their normal names.
 const INACTIVE_PLATFORM_FILE_STEMS: &[&str] = &[
     "ktls",
-    "armcap", "ppccap", "sparcv9cap", "loongarchcap",
-    "rand_vms", "rand_vxworks", "rand_unix",
-    "e_afalg", "e_devcrypto", "lpdir_unix", "md2", "rc5", "securitycheck_fips", "lpdir",
-    "s390x", "riscv", "acvp", "poly1305_base2_44", "poly1305_ieee754", "ecp_nistz256",
+    "armcap",
+    "ppccap",
+    "sparcv9cap",
+    "loongarchcap",
+    "rand_vms",
+    "rand_vxworks",
+    "rand_unix",
+    "e_afalg",
+    "e_devcrypto",
+    "lpdir_unix",
+    "md2",
+    "rc5",
+    "securitycheck_fips",
+    "lpdir",
+    "s390x",
+    "riscv",
+    "acvp",
+    "poly1305_base2_44",
+    "poly1305_ieee754",
+    "ecp_nistz256",
 ];
 
 fn collect_sources(
@@ -6035,23 +6755,82 @@ fn collect_sources(
                     // `Demos`/`Examples` (e.g. SDL2's Xcode-iOS/Demos) are skipped
                     // just like `demo`/`examples`. Generic directory-name skip.
                     let lower = name.to_ascii_lowercase();
-                    if matches!(lower.as_str(),
-                        "fuzz" | "test" | "tests" | "benchmark" | "benchmarks"
-                        | "examples" | "example" | "demo" | "demos" | "docs" | "doc"
-                        | "tools" | "utils" | "contrib" | "third_party" | "thirdparty"
-                        | "3rdparty" | "cmake" | "cmake-build" | "build-scripts"
-                        | "visualtest" | "testautomation" | "automated"
-                        | "xcode-ios" | "xcode-macos" | "xcode-tvos" | "xcode-visionos"
-                        | "android-project" | "ios" | "emscripten" | "ngage" | "haiku"
-                        | "pandora" | "n3ds" | "psp" | "vita" | "wiiu" | "switch"
-                        | "raspberrypi" | "riscos" | "os2" | "ps2" | "windowsce"
-                        | "winrt" | "wingdk" | "xbox" | "ngage" | "symbian"
-                        | "pkgconfig" | "visualc" | "visualc-arm64" | "visualc-armuwp"
-                        | "visualc-windows-phone" | "visualc-windows-store"
-                        | "watcom" | "mpw" | "macosx" | "apple" | "amiga" | "dreamcast"
-                        | "ps3" | "ps4" | "ps5" | "stadia" | "tvos" | "visionos"
-                        | "util" | "apps" | "ms" | "helpers" | "ktls" | "fips"
-                    ) || INACTIVE_PLATFORMS.contains(&lower.as_str()) {
+                    if matches!(
+                        lower.as_str(),
+                        "fuzz"
+                            | "test"
+                            | "tests"
+                            | "benchmark"
+                            | "benchmarks"
+                            | "examples"
+                            | "example"
+                            | "demo"
+                            | "demos"
+                            | "docs"
+                            | "doc"
+                            | "tools"
+                            | "utils"
+                            | "contrib"
+                            | "third_party"
+                            | "thirdparty"
+                            | "3rdparty"
+                            | "cmake"
+                            | "cmake-build"
+                            | "build-scripts"
+                            | "visualtest"
+                            | "testautomation"
+                            | "automated"
+                            | "xcode-ios"
+                            | "xcode-macos"
+                            | "xcode-tvos"
+                            | "xcode-visionos"
+                            | "android-project"
+                            | "ios"
+                            | "emscripten"
+                            | "ngage"
+                            | "haiku"
+                            | "pandora"
+                            | "n3ds"
+                            | "psp"
+                            | "vita"
+                            | "wiiu"
+                            | "switch"
+                            | "raspberrypi"
+                            | "riscos"
+                            | "os2"
+                            | "ps2"
+                            | "windowsce"
+                            | "winrt"
+                            | "wingdk"
+                            | "xbox"
+                            | "ngage"
+                            | "symbian"
+                            | "pkgconfig"
+                            | "visualc"
+                            | "visualc-arm64"
+                            | "visualc-armuwp"
+                            | "visualc-windows-phone"
+                            | "visualc-windows-store"
+                            | "watcom"
+                            | "mpw"
+                            | "macosx"
+                            | "apple"
+                            | "amiga"
+                            | "dreamcast"
+                            | "ps3"
+                            | "ps4"
+                            | "ps5"
+                            | "stadia"
+                            | "tvos"
+                            | "visionos"
+                            | "util"
+                            | "apps"
+                            | "ms"
+                            | "helpers"
+                            | "ktls"
+                            | "fips"
+                    ) || INACTIVE_PLATFORMS.contains(&lower.as_str())
+                    {
                         continue;
                     }
                     stack.push(p);
@@ -6063,8 +6842,15 @@ fn collect_sources(
                         // Skip platform-specific backend TUs by filename stem
                         // (e.g. `ktls_meth.c` on a non-Linux host). Generic —
                         // matches INACTIVE_PLATFORM_FILE_STEMS, no library names.
-                        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-                        if INACTIVE_PLATFORM_FILE_STEMS.iter().any(|s| stem.contains(&s.to_ascii_lowercase())) {
+                        let stem = p
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        if INACTIVE_PLATFORM_FILE_STEMS
+                            .iter()
+                            .any(|s| stem.contains(&s.to_ascii_lowercase()))
+                        {
                             continue;
                         }
                         sources.push(p);
@@ -6114,10 +6900,15 @@ fn collect_sources(
         // `#include "X.c"` relationships (no library-specific names).
         let all_text: Vec<String> = sources
             .iter()
-            .map(|p| std::fs::read_to_string(p).unwrap_or_default().to_lowercase())
+            .map(|p| {
+                std::fs::read_to_string(p)
+                    .unwrap_or_default()
+                    .to_lowercase()
+            })
             .collect();
         // Names that appear as a `#include "X.c"` target in some OTHER source.
-        let mut included_as_chunk: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut included_as_chunk: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for txt in &all_text {
             for line in txt.lines() {
                 let line = line.trim();
@@ -6138,7 +6929,11 @@ fn collect_sources(
         sources = sources
             .into_iter()
             .filter(|p| {
-                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                let name = p
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
                 !included_as_chunk.contains(&name)
             })
             .collect();
@@ -6153,17 +6948,42 @@ fn collect_sources(
             .filter(|p| {
                 let simd_dir = p.components().any(|c| {
                     let s = c.as_os_str().to_string_lossy().to_lowercase();
-                    s == "simd" || s == "neon" || s == "sse" || s == "avx"
-                        || s == "x86_64" || s.starts_with("mmx") || s == "intrinsics"
-                        || s == "java" || s == "jni" || s == "android" || s == "objc"
-                        || s == "wasm" || s == "emscripten"
-                        || s == "fuzz" || s == "test" || s == "tests"
-                        || s == "doc" || s == "docs" || s == "example"
-                        || s == "examples" || s == "sample" || s == "samples"
-                        || s == "packages" || s == "vms" || s == "os400" || s == "macos"
-                        || s == "win32" || s == "build" || s == "cmake" || s == "m4"
-                        || s == "autom4te.cache" || s == "scripts" || s == "projects"
-                        || s == "contrib" || s == "third_party" || s == "thirdparty"
+                    s == "simd"
+                        || s == "neon"
+                        || s == "sse"
+                        || s == "avx"
+                        || s == "x86_64"
+                        || s.starts_with("mmx")
+                        || s == "intrinsics"
+                        || s == "java"
+                        || s == "jni"
+                        || s == "android"
+                        || s == "objc"
+                        || s == "wasm"
+                        || s == "emscripten"
+                        || s == "fuzz"
+                        || s == "test"
+                        || s == "tests"
+                        || s == "doc"
+                        || s == "docs"
+                        || s == "example"
+                        || s == "examples"
+                        || s == "sample"
+                        || s == "samples"
+                        || s == "packages"
+                        || s == "vms"
+                        || s == "os400"
+                        || s == "macos"
+                        || s == "win32"
+                        || s == "build"
+                        || s == "cmake"
+                        || s == "m4"
+                        || s == "autom4te.cache"
+                        || s == "scripts"
+                        || s == "projects"
+                        || s == "contrib"
+                        || s == "third_party"
+                        || s == "thirdparty"
                 });
                 !simd_dir
             })
@@ -6214,15 +7034,14 @@ fn collect_sources(
             sources = sources
                 .into_iter()
                 .filter(|p| {
-                    let under_src = p.starts_with(&lib_parent)
-                        && {
-                            let after = p.strip_prefix(&lib_parent).unwrap_or(p.as_path());
-                            after
-                                .components()
-                                .next()
-                                .map(|c| c.as_os_str() == "src")
-                                .unwrap_or(false)
-                        };
+                    let under_src = p.starts_with(&lib_parent) && {
+                        let after = p.strip_prefix(&lib_parent).unwrap_or(p.as_path());
+                        after
+                            .components()
+                            .next()
+                            .map(|c| c.as_os_str() == "src")
+                            .unwrap_or(false)
+                    };
                     !under_src
                 })
                 .collect();
@@ -6236,7 +7055,11 @@ fn collect_sources(
             sources = sources
                 .into_iter()
                 .filter(|p| {
-                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    let name = p
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
                     !excl.contains(&name)
                 })
                 .collect();
@@ -6267,7 +7090,10 @@ fn collect_sources(
     // language selection happens later, in the build loop, where each TU is
     // compiled in its own language. Generic: derived purely from the API
     // header's file extension, no library names.
-    let lang = match header.as_ref().and_then(|h| h.extension().and_then(|e| e.to_str())) {
+    let lang = match header
+        .as_ref()
+        .and_then(|h| h.extension().and_then(|e| e.to_str()))
+    {
         Some("hpp") | Some("hh") | Some("hxx") => ApiKind::Cpp,
         _ => ApiKind::C,
     };
@@ -6319,7 +7145,11 @@ fn find_header_dir(source_origin: &str, name: &str) -> Option<PathBuf> {
             let p = entry.path();
             if p.is_dir() {
                 stack.push(p);
-            } else if p.file_name().map(|f| f.to_string_lossy() == target).unwrap_or(false) {
+            } else if p
+                .file_name()
+                .map(|f| f.to_string_lossy() == target)
+                .unwrap_or(false)
+            {
                 return p.parent().map(|pp| pp.to_path_buf());
             }
         }
@@ -6433,15 +7263,17 @@ fn detect_abi(llvm_bindir: &str, lang: ApiKind) -> AbiMeta {
     let macros = run_capture(&clang, &["-E", "-dM", "-"], "");
 
     // helper: read a `__SIZEOF_<X>__` macro (bytes) -> u64.
-    let sizeof_macro = |name: &str| -> u64 {
-        macro_u64(&macros, &format!("__SIZEOF_{}__", name))
-    };
+    let sizeof_macro = |name: &str| -> u64 { macro_u64(&macros, &format!("__SIZEOF_{}__", name)) };
     let width_macro = |name: &str| -> u64 { macro_u64(&macros, &format!("__{}__", name)) };
 
     let pointer = sizeof_macro("POINTER");
     // clang does not emit `__SIZEOF_CHAR__` (char is always 1 byte by the C
     // standard), so fall back to 1 when the macro is absent.
-    let char_w = if sizeof_macro("CHAR") == 0 { 1 } else { sizeof_macro("CHAR") };
+    let char_w = if sizeof_macro("CHAR") == 0 {
+        1
+    } else {
+        sizeof_macro("CHAR")
+    };
     let short = sizeof_macro("SHORT");
     let int = sizeof_macro("INT");
     let long = sizeof_macro("LONG");
@@ -6685,16 +7517,19 @@ fn find_artifact_entry(lib: &str) -> Option<PathBuf> {
             if !lpath.is_dir() {
                 continue;
             }
-            let name = lpath.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
-            let matches = name == bare
-                || name == lib
-                || {
-                    if let Some(ent) = find_artifact_entry_exact(&name) {
-                        load_manifest(&ent).map(|m| m.library == lib || m.library == bare).unwrap_or(false)
-                    } else {
-                        false
-                    }
-                };
+            let name = lpath
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let matches = name == bare || name == lib || {
+                if let Some(ent) = find_artifact_entry_exact(&name) {
+                    load_manifest(&ent)
+                        .map(|m| m.library == lib || m.library == bare)
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            };
             if matches {
                 if let Some(p) = find_artifact_entry_exact(&name) {
                     let key = format!("{}/{}", lpath.display(), p.display());
@@ -6715,7 +7550,11 @@ fn strip_version_suffix(name: &str) -> String {
     if let Some(idx) = name.rfind('-') {
         let tail = &name[idx + 1..];
         // a version tail looks like `1.3.1` / `3_1_0` (digits and dots/underscores)
-        if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '_') {
+        if !tail.is_empty()
+            && tail
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.' || c == '_')
+        {
             return name[..idx].to_string();
         }
     }
@@ -6854,7 +7693,12 @@ fn load_charger_config(dir: &Path) -> ChargerConfig {
                 .collect()
         })
         .unwrap_or_default();
-    ChargerConfig { api_header, build_flags, deps, exclude }
+    ChargerConfig {
+        api_header,
+        build_flags,
+        deps,
+        exclude,
+    }
 }
 
 fn load_manifest(entry: &Path) -> Option<Manifest> {
@@ -6872,32 +7716,58 @@ fn load_manifest(entry: &Path) -> Option<Manifest> {
 pub fn lookup_artifacts_for_symbols(symbols: &[String]) -> Vec<std::path::PathBuf> {
     let base = store_root();
     let mut out: Vec<std::path::PathBuf> = Vec::new();
-    if !base.exists() { return out; }
+    if !base.exists() {
+        return out;
+    }
     // Collect every store entry whose manifest symbols intersect the requested
     // set, but keep at most ONE entry per library (the newest by path ordering)
     // so re-installs don't link stale/duplicate artifacts of the same library
     // (which would collide symbols and crash at runtime). Dependencies are still
     // pulled in transitively below.
     #[derive(Clone)]
-    struct Cand { lib: String, key: String, entry: std::path::PathBuf, deps: Vec<String> }
+    struct Cand {
+        lib: String,
+        key: String,
+        entry: std::path::PathBuf,
+        deps: Vec<String>,
+    }
     let mut cands: Vec<Cand> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&base) {
         for lib in rd.filter_map(|e| e.ok()) {
             let libp = lib.path();
-            if !libp.is_dir() { continue; }
-            let lib_name = libp.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+            if !libp.is_dir() {
+                continue;
+            }
+            let lib_name = libp
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
             if let Ok(rd2) = std::fs::read_dir(&libp) {
                 for ver in rd2.filter_map(|e| e.ok()) {
                     let verp = ver.path();
-                    if !verp.is_dir() { continue; }
+                    if !verp.is_dir() {
+                        continue;
+                    }
                     if let Ok(rd3) = std::fs::read_dir(&verp) {
                         for hash in rd3.filter_map(|e| e.ok()) {
                             let entry = hash.path();
-                            if !entry.is_dir() { continue; }
+                            if !entry.is_dir() {
+                                continue;
+                            }
                             if let Some(m) = load_manifest(&entry) {
                                 if m.symbols.iter().any(|s| symbols.contains(s)) {
-                                    let key = format!("{}/{}/{}", lib_name, ver.file_name().to_string_lossy().to_string(), hash.file_name().to_string_lossy().to_string());
-                                    cands.push(Cand { lib: lib_name.clone(), key, entry, deps: m.dependencies.clone() });
+                                    let key = format!(
+                                        "{}/{}/{}",
+                                        lib_name,
+                                        ver.file_name().to_string_lossy().to_string(),
+                                        hash.file_name().to_string_lossy().to_string()
+                                    );
+                                    cands.push(Cand {
+                                        lib: lib_name.clone(),
+                                        key,
+                                        entry,
+                                        deps: m.dependencies.clone(),
+                                    });
                                 }
                             }
                         }
@@ -6907,13 +7777,20 @@ pub fn lookup_artifacts_for_symbols(symbols: &[String]) -> Vec<std::path::PathBu
         }
     }
     // Per-library: keep only the newest entry (largest path key == newest dir).
-    let mut best_per_lib: std::collections::HashMap<String, Cand> = std::collections::HashMap::new();
+    let mut best_per_lib: std::collections::HashMap<String, Cand> =
+        std::collections::HashMap::new();
     for c in cands {
         let e = best_per_lib.entry(c.lib.clone()).or_insert(c.clone());
-        if c.key > e.key { *e = c; }
+        if c.key > e.key {
+            *e = c;
+        }
     }
     for c in best_per_lib.values() {
-        let art = c.entry.join(&load_manifest(&c.entry).map(|m| m.artifact.clone()).unwrap_or_default());
+        let art = c.entry.join(
+            &load_manifest(&c.entry)
+                .map(|m| m.artifact.clone())
+                .unwrap_or_default(),
+        );
         if art.exists() && !out.contains(&art) {
             out.push(art);
         }
@@ -6954,7 +7831,13 @@ fn func_semantic_comment(sem: &SemanticMeta, symbol: &str) -> String {
     let mut lines = Vec::new();
     let r = &fs.ret;
     if r.ownership != OwnershipSem::Unknown {
-        let mut s = format!("// return ownership: {}", serde_json::to_string(&r.ownership).unwrap_or_default().trim_matches('"').to_string());
+        let mut s = format!(
+            "// return ownership: {}",
+            serde_json::to_string(&r.ownership)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_string()
+        );
         if let Some(fw) = &r.free_with {
             s.push_str(&format!(" (free_with: {})", fw));
         }
@@ -6965,7 +7848,10 @@ fn func_semantic_comment(sem: &SemanticMeta, symbol: &str) -> String {
     } else if r.nullable != Nullability::Unknown {
         lines.push(format!(
             "// return nullable: {}",
-            serde_json::to_string(&r.nullable).unwrap_or_default().trim_matches('"').to_string()
+            serde_json::to_string(&r.nullable)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_string()
         ));
     }
     for (i, p) in fs.params.iter().enumerate() {
@@ -6974,13 +7860,19 @@ fn func_semantic_comment(sem: &SemanticMeta, symbol: &str) -> String {
             if p.ownership != OwnershipSem::Unknown {
                 s.push_str(&format!(
                     " ownership={}",
-                    serde_json::to_string(&p.ownership).unwrap_or_default().trim_matches('"').to_string()
+                    serde_json::to_string(&p.ownership)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string()
                 ));
             }
             if p.nullable != Nullability::Unknown {
                 s.push_str(&format!(
                     " nullable={}",
-                    serde_json::to_string(&p.nullable).unwrap_or_default().trim_matches('"').to_string()
+                    serde_json::to_string(&p.nullable)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string()
                 ));
             }
             lines.push(s);
@@ -6989,7 +7881,10 @@ fn func_semantic_comment(sem: &SemanticMeta, symbol: &str) -> String {
     if fs.callback_lifetime != CallbackLifetime::Unknown {
         lines.push(format!(
             "// callback lifetime: {}",
-            serde_json::to_string(&fs.callback_lifetime).unwrap_or_default().trim_matches('"').to_string()
+            serde_json::to_string(&fs.callback_lifetime)
+                .unwrap_or_default()
+                .trim_matches('"')
+                .to_string()
         ));
     }
     if lines.is_empty() {
@@ -7052,7 +7947,10 @@ fn measure_struct_layouts(
     }
     let header_dir = header.parent().unwrap_or(Path::new("."));
     let mut probe = String::from("#include <stddef.h>\n#include <stdio.h>\n");
-    probe.push_str(&format!("#include \"{}\"\n", header.file_name().unwrap_or_default().to_string_lossy()));
+    probe.push_str(&format!(
+        "#include \"{}\"\n",
+        header.file_name().unwrap_or_default().to_string_lossy()
+    ));
     probe.push_str("int main(){\n");
     for s in &api.structs {
         // Anonymous (typedef-only) structs have no tag to reference by name in
@@ -7083,7 +7981,8 @@ fn measure_struct_layouts(
         // compile error). Record size/align for the whole struct but omit
         // bitfield fields from the offset list; the recorded layout therefore
         // covers exactly the fields a probe can measure. Generic.
-        let probe_fields: Vec<&CParam> = s.fields.iter().filter(|f| f.bit_width.is_none()).collect();
+        let probe_fields: Vec<&CParam> =
+            s.fields.iter().filter(|f| f.bit_width.is_none()).collect();
         probe.push_str(&format!(
             "  printf(\"LAYOUT %s %zu %zu %d\", \"{}\", (size_t)sizeof({}{}), (size_t)_Alignof({}{}), (int){});\n",
             s.name, tag, s.name, tag, s.name, probe_fields.len()
@@ -7143,11 +8042,35 @@ fn measure_struct_layouts(
                 field_offsets.push(v);
             }
         }
-        let is_packed = api.structs.iter().find(|s| s.name == name).map(|s| s.is_packed).unwrap_or(false);
-        let is_union = api.structs.iter().find(|s| s.name == name).map(|s| s.is_union).unwrap_or(false);
-        let is_anon = api.structs.iter().find(|s| s.name == name).map(|s| s.is_anon).unwrap_or(false);
-        let field_names: Vec<String> = api.structs.iter().find(|s| s.name == name)
-            .map(|s| s.fields.iter().filter(|f| f.bit_width.is_none()).map(|f| f.name.clone()).collect())
+        let is_packed = api
+            .structs
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.is_packed)
+            .unwrap_or(false);
+        let is_union = api
+            .structs
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.is_union)
+            .unwrap_or(false);
+        let is_anon = api
+            .structs
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.is_anon)
+            .unwrap_or(false);
+        let field_names: Vec<String> = api
+            .structs
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| {
+                s.fields
+                    .iter()
+                    .filter(|f| f.bit_width.is_none())
+                    .map(|f| f.name.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         layouts.push(StructLayout {
             name,
@@ -7262,7 +8185,8 @@ fn verify_struct_layouts(m: &Manifest, llvm_bindir: &str) -> Vec<AbiCheck> {
         return checks;
     }
     // Parse measured layouts keyed by name.
-    let mut measured: std::collections::HashMap<String, (u64, u64, Vec<u64>)> = std::collections::HashMap::new();
+    let mut measured: std::collections::HashMap<String, (u64, u64, Vec<u64>)> =
+        std::collections::HashMap::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         if !line.starts_with("LAYOUT ") {
             continue;
@@ -7297,7 +8221,15 @@ fn verify_struct_layouts(m: &Manifest, llvm_bindir: &str) -> Vec<AbiCheck> {
             add(format!("{} alignof", sl.name), sl.align, *ma);
             for (i, fo) in sl.field_offsets.iter().enumerate() {
                 let moff = mo.get(i).copied().unwrap_or(u64::MAX);
-                add(format!("{} offsetof[{}]", sl.name, sl.field_names.get(i).cloned().unwrap_or_default()), *fo, moff);
+                add(
+                    format!(
+                        "{} offsetof[{}]",
+                        sl.name,
+                        sl.field_names.get(i).cloned().unwrap_or_default()
+                    ),
+                    *fo,
+                    moff,
+                );
             }
         }
     }
@@ -7310,8 +8242,8 @@ fn verify_struct_layouts(m: &Manifest, llvm_bindir: &str) -> Vec<AbiCheck> {
 pub fn verify_abi(lib: &str, llvm_bindir: &str) -> Result<Vec<AbiCheck>, String> {
     let entry = find_artifact_entry(lib)
         .ok_or_else(|| format!("verify-abi: library '{}' is not installed", lib))?;
-    let abi = load_abi(&entry)
-        .ok_or_else(|| format!("verify-abi: abi.json missing for '{}'", lib))?;
+    let abi =
+        load_abi(&entry).ok_or_else(|| format!("verify-abi: abi.json missing for '{}'", lib))?;
     let manifest = load_manifest(&entry);
 
     let clang = PathBuf::from(llvm_bindir).join("clang.exe");
@@ -7348,11 +8280,23 @@ pub fn verify_abi(lib: &str, llvm_bindir: &str) -> Result<Vec<AbiCheck>, String>
     add("long long width", abi.primitives.long_long, sz("LONG_LONG"));
     add("float width", abi.primitives.float, sz("FLOAT"));
     add("double width", abi.primitives.double, sz("DOUBLE"));
-    add("long double width", abi.primitives.long_double, sz("LONG_DOUBLE"));
+    add(
+        "long double width",
+        abi.primitives.long_double,
+        sz("LONG_DOUBLE"),
+    );
     add("pointer width", abi.primitives.pointer, sz("POINTER"));
     add("size_t width", abi.primitives.size_t, wd("SIZE_WIDTH") / 8);
-    add("wchar_t width", abi.primitives.wchar_t, wd("WCHAR_WIDTH") / 8);
-    add("ptrdiff_t width", abi.primitives.ptrdiff_t, wd("PTRDIFF_WIDTH") / 8);
+    add(
+        "wchar_t width",
+        abi.primitives.wchar_t,
+        wd("WCHAR_WIDTH") / 8,
+    );
+    add(
+        "ptrdiff_t width",
+        abi.primitives.ptrdiff_t,
+        wd("PTRDIFF_WIDTH") / 8,
+    );
     add("char_bit", abi.char_bit, wd("CHAR_BIT"));
     add("pointer_width_bits", abi.pointer_width, sz("POINTER") * 8);
 
@@ -7457,17 +8401,29 @@ pub fn validate_semantic_meta(
 ) -> Result<Vec<SemanticCheck>, String> {
     let mut checks: Vec<SemanticCheck> = Vec::new();
     let mut ok = true;
-    let push = |checks: &mut Vec<SemanticCheck>, item: &str, detail: &str, pass: bool, ok: &mut bool| {
-        if !pass { *ok = false; }
-        checks.push(SemanticCheck { item: item.to_string(), detail: detail.to_string(), pass });
-    };
+    let push =
+        |checks: &mut Vec<SemanticCheck>, item: &str, detail: &str, pass: bool, ok: &mut bool| {
+            if !pass {
+                *ok = false;
+            }
+            checks.push(SemanticCheck {
+                item: item.to_string(),
+                detail: detail.to_string(),
+                pass,
+            });
+        };
 
     for (sym, fs) in &sem.functions {
         let api_fn = match api_fns.iter().find(|f| &f.symbol == sym) {
             Some(f) => f,
             None => {
-                push(&mut checks, &format!("functions.{}", sym),
-                     "referenced function symbol does not exist in the API", false, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("functions.{}", sym),
+                    "referenced function symbol does not exist in the API",
+                    false,
+                    &mut ok,
+                );
                 continue;
             }
         };
@@ -7475,63 +8431,124 @@ pub fn validate_semantic_meta(
 
         if fs.ret.ownership != OwnershipSem::Unknown {
             if fs.ret.ownership == OwnershipSem::Consumed {
-                push(&mut checks, &format!("functions.{}.return_ownership", sym),
-                     "return cannot be 'consumed' (consumed applies to parameters)", false, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("functions.{}.return_ownership", sym),
+                    "return cannot be 'consumed' (consumed applies to parameters)",
+                    false,
+                    &mut ok,
+                );
             } else {
                 let mut d = format!("ownership = {:?}", fs.ret.ownership);
                 if let Some(fw) = &fs.ret.free_with {
                     if api_fns.iter().any(|f| &f.symbol == fw) {
                         d.push_str(&format!(" (free_with: {})", fw));
                     } else {
-                        push(&mut checks, &format!("functions.{}.return_free_with", sym),
-                             &format!("free_with symbol '{}' is not a known function", fw), false, &mut ok);
+                        push(
+                            &mut checks,
+                            &format!("functions.{}.return_free_with", sym),
+                            &format!("free_with symbol '{}' is not a known function", fw),
+                            false,
+                            &mut ok,
+                        );
                     }
                 }
-                push(&mut checks, &format!("functions.{}.return_ownership", sym), &d, true, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("functions.{}.return_ownership", sym),
+                    &d,
+                    true,
+                    &mut ok,
+                );
             }
         }
         if fs.ret.nullable != Nullability::Unknown {
             if !is_pointer_like(&ctype_from_tag(&api_fn.ret)) {
-                push(&mut checks, &format!("functions.{}.return_nullable", sym),
-                     "nullable applied to a non-pointer return type", false, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("functions.{}.return_nullable", sym),
+                    "nullable applied to a non-pointer return type",
+                    false,
+                    &mut ok,
+                );
             } else {
-                push(&mut checks, &format!("functions.{}.return_nullable", sym),
-                     &format!("nullable = {:?}", fs.ret.nullable), true, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("functions.{}.return_nullable", sym),
+                    &format!("nullable = {:?}", fs.ret.nullable),
+                    true,
+                    &mut ok,
+                );
             }
         }
         if let Some(lt) = &fs.ret.lifetime {
-            push(&mut checks, &format!("functions.{}.return_lifetime", sym),
-                 &format!("lifetime = {}", lt), true, &mut ok);
+            push(
+                &mut checks,
+                &format!("functions.{}.return_lifetime", sym),
+                &format!("lifetime = {}", lt),
+                true,
+                &mut ok,
+            );
         }
         for (i, pp) in fs.params.iter().enumerate() {
             if i >= arity {
-                push(&mut checks, &format!("functions.{}.params[{}]", sym, i),
-                     "parameter index out of range", false, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("functions.{}.params[{}]", sym, i),
+                    "parameter index out of range",
+                    false,
+                    &mut ok,
+                );
                 continue;
             }
             let param_ty = &ctype_from_tag(&api_fn.params[i]);
             if pp.ownership != OwnershipSem::Unknown {
                 if pp.ownership == OwnershipSem::Consumed && !is_pointer_like(&param_ty) {
-                    push(&mut checks, &format!("functions.{}.params[{}].ownership", sym, i),
-                         "consumed applied to a non-pointer parameter", false, &mut ok);
+                    push(
+                        &mut checks,
+                        &format!("functions.{}.params[{}].ownership", sym, i),
+                        "consumed applied to a non-pointer parameter",
+                        false,
+                        &mut ok,
+                    );
                 } else {
-                    push(&mut checks, &format!("functions.{}.params[{}].ownership", sym, i),
-                         &format!("ownership = {:?}", pp.ownership), true, &mut ok);
+                    push(
+                        &mut checks,
+                        &format!("functions.{}.params[{}].ownership", sym, i),
+                        &format!("ownership = {:?}", pp.ownership),
+                        true,
+                        &mut ok,
+                    );
                 }
             }
             if pp.nullable != Nullability::Unknown {
                 if !is_pointer_like(&param_ty) {
-                    push(&mut checks, &format!("functions.{}.params[{}].nullable", sym, i),
-                         "nullable applied to a non-pointer parameter", false, &mut ok);
+                    push(
+                        &mut checks,
+                        &format!("functions.{}.params[{}].nullable", sym, i),
+                        "nullable applied to a non-pointer parameter",
+                        false,
+                        &mut ok,
+                    );
                 } else {
-                    push(&mut checks, &format!("functions.{}.params[{}].nullable", sym, i),
-                         &format!("nullable = {:?}", pp.nullable), true, &mut ok);
+                    push(
+                        &mut checks,
+                        &format!("functions.{}.params[{}].nullable", sym, i),
+                        &format!("nullable = {:?}", pp.nullable),
+                        true,
+                        &mut ok,
+                    );
                 }
             }
         }
         if fs.callback_lifetime != CallbackLifetime::Unknown {
-            push(&mut checks, &format!("functions.{}.callback_lifetime", sym),
-                 &format!("callback lifetime = {:?}", fs.callback_lifetime), true, &mut ok);
+            push(
+                &mut checks,
+                &format!("functions.{}.callback_lifetime", sym),
+                &format!("callback lifetime = {:?}", fs.callback_lifetime),
+                true,
+                &mut ok,
+            );
         }
     }
 
@@ -7539,34 +8556,60 @@ pub fn validate_semantic_meta(
         let api_g = match api_globals.iter().find(|x| &x.name == name) {
             Some(g) => g,
             None => {
-                push(&mut checks, &format!("globals.{}", name),
-                     "referenced global does not exist in the API", false, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("globals.{}", name),
+                    "referenced global does not exist in the API",
+                    false,
+                    &mut ok,
+                );
                 continue;
             }
         };
         if g.ownership != OwnershipSem::Unknown {
-            push(&mut checks, &format!("globals.{}.ownership", name),
-                 &format!("ownership = {:?}", g.ownership), true, &mut ok);
+            push(
+                &mut checks,
+                &format!("globals.{}.ownership", name),
+                &format!("ownership = {:?}", g.ownership),
+                true,
+                &mut ok,
+            );
         }
         if g.nullable != Nullability::Unknown {
             if !is_pointer_like(&ctype_from_tag(&api_g.ty)) {
-                push(&mut checks, &format!("globals.{}.nullable", name),
-                     "nullable applied to a non-pointer global", false, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("globals.{}.nullable", name),
+                    "nullable applied to a non-pointer global",
+                    false,
+                    &mut ok,
+                );
             } else {
-                push(&mut checks, &format!("globals.{}.nullable", name),
-                     &format!("nullable = {:?}", g.nullable), true, &mut ok);
+                push(
+                    &mut checks,
+                    &format!("globals.{}.nullable", name),
+                    &format!("nullable = {:?}", g.nullable),
+                    true,
+                    &mut ok,
+                );
             }
         }
         if let Some(mut_) = g.mutable {
-            push(&mut checks, &format!("globals.{}.mutable", name),
-                 &format!("mutable = {}", mut_), true, &mut ok);
+            push(
+                &mut checks,
+                &format!("globals.{}.mutable", name),
+                &format!("mutable = {}", mut_),
+                true,
+                &mut ok,
+            );
         }
     }
 
     if !ok {
         return Err(format!(
             "verify-semantics: {} invalid metadata check(s)",
-            checks.iter().filter(|c| !c.pass).count()));
+            checks.iter().filter(|c| !c.pass).count()
+        ));
     }
     Ok(checks)
 }
@@ -7582,7 +8625,9 @@ pub fn verify_semantics(lib: &str) -> Result<Vec<SemanticCheck>, String> {
 
 fn load_abi(entry: &Path) -> Option<AbiMeta> {
     let p = entry.join("abi.json");
-    std::fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str(&s).ok())
+    std::fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
 }
 
 // ----------------------------------------------------------------------------
@@ -7626,7 +8671,11 @@ fn find_msvc_lib_exe(llvm_bindir: &Path) -> Option<PathBuf> {
 fn glob_first(pattern: &Path) -> Option<PathBuf> {
     let pat = pattern.to_string_lossy().to_string();
     if !pat.contains('*') {
-        return if pattern.exists() { Some(pattern.to_path_buf()) } else { None };
+        return if pattern.exists() {
+            Some(pattern.to_path_buf())
+        } else {
+            None
+        };
     }
     let parts: Vec<&str> = pat.split('*').collect();
     if parts.len() != 2 {
@@ -7702,13 +8751,13 @@ fn archive_target_arch(archive: &Path) -> Option<String> {
     // COFF object magic: 0x14c = i386, 0x8664 = x86_64, 0xAA64 = aarch64.
     // ELF e_machine: 0x3e = x86_64, 0xb7 = aarch64, 0x03 = i386.
     // These appear inside object members; a cheap scan catches the common ones.
-    if find_subslice(&data, &[0x64, 0x86]) .is_some() {
+    if find_subslice(&data, &[0x64, 0x86]).is_some() {
         return Some("x86_64".to_string());
     }
-    if find_subslice(&data, &[0x64, 0xaa]) .is_some() {
+    if find_subslice(&data, &[0x64, 0xaa]).is_some() {
         return Some("aarch64".to_string());
     }
-    if find_subslice(&data, &[0x4c, 0x01]) .is_some() {
+    if find_subslice(&data, &[0x4c, 0x01]).is_some() {
         return Some("i386".to_string());
     }
     None
@@ -7718,18 +8767,12 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
     }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Extract the architecture token from an arbitrary triple string.
 fn triple_arch(triple: &str) -> String {
-    triple
-        .split(['-', '.'])
-        .next()
-        .unwrap_or("")
-        .to_string()
+    triple.split(['-', '.']).next().unwrap_or("").to_string()
 }
 
 /// Whether the architecture encoded in a target triple matches the
@@ -7769,7 +8812,9 @@ mod adapter_dedup_tests {
     }
 
     fn shapes() -> VariadicShapes {
-        VariadicShapes { map: std::collections::HashMap::new() }
+        VariadicShapes {
+            map: std::collections::HashMap::new(),
+        }
     }
 
     // Regression: a void-return function whose only parameter is a `T**`
@@ -7786,7 +8831,9 @@ mod adapter_dedup_tests {
             symbol: "tmpfile_s".to_string(),
             params: vec![CParam {
                 name: "p".to_string(),
-                ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))),
+                ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque(
+                    "FILE".to_string(),
+                ))))),
                 nullable: Nullability::Unknown,
                 bit_width: None,
             }],
@@ -7806,7 +8853,9 @@ mod adapter_dedup_tests {
             ret: CType::Void,
             params: vec![CParam {
                 name: "p".to_string(),
-                ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))),
+                ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque(
+                    "FILE".to_string(),
+                ))))),
                 nullable: Nullability::Unknown,
                 bit_width: None,
             }],
@@ -7854,13 +8903,34 @@ mod adapter_dedup_tests {
             name: name.to_string(),
             symbol: name.to_string(),
             params: vec![
-                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown, bit_width: None },
-                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
-                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
+                CParam {
+                    name: "p".to_string(),
+                    ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque(
+                        "FILE".to_string(),
+                    ))))),
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                },
+                CParam {
+                    name: "a".to_string(),
+                    ty: CType::String,
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                },
+                CParam {
+                    name: "b".to_string(),
+                    ty: CType::String,
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                },
             ],
             ret: CType::Void,
-            is_method: false, is_constructor: false, is_const: false,
-            self_ty: None, variadic: false, calling_convention: String::new(),
+            is_method: false,
+            is_constructor: false,
+            is_const: false,
+            self_ty: None,
+            variadic: false,
+            calling_convention: String::new(),
         };
         api.functions.push(mk("fopen_s"));
         api.functions.push(mk("freopen_s"));
@@ -7871,9 +8941,26 @@ mod adapter_dedup_tests {
             ret_name: Some("FILE".to_string()),
             ret: CType::Void,
             params: vec![
-                CParam { name: "p".to_string(), ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque("FILE".to_string()))))), nullable: Nullability::Unknown, bit_width: None },
-                CParam { name: "a".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
-                CParam { name: "b".to_string(), ty: CType::String, nullable: Nullability::Unknown, bit_width: None },
+                CParam {
+                    name: "p".to_string(),
+                    ty: CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Opaque(
+                        "FILE".to_string(),
+                    ))))),
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                },
+                CParam {
+                    name: "a".to_string(),
+                    ty: CType::String,
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                },
+                CParam {
+                    name: "b".to_string(),
+                    ty: CType::String,
+                    nullable: Nullability::Unknown,
+                    bit_width: None,
+                },
             ],
             out_idx: Some(0),
             drop_from: None,
@@ -7884,10 +8971,19 @@ mod adapter_dedup_tests {
         let src = gen_adapter_c_source(&adapters, &[], &[], &[], "stdio.h", &api, &shapes());
         let count_a0 = src.matches("    FILE* a0 = 0;").count();
         let count_ret = src.matches("    return a0;").count();
-        assert_eq!(count_a0, 2, "expected 2 `FILE* a0 = 0;` (one per shim), got {} in:\n{}", count_a0, src);
-        assert_eq!(count_ret, 2, "expected 2 `return a0;` (one per shim), got {} in:\n{}", count_ret, src);
+        assert_eq!(
+            count_a0, 2,
+            "expected 2 `FILE* a0 = 0;` (one per shim), got {} in:\n{}",
+            count_a0, src
+        );
+        assert_eq!(
+            count_ret, 2,
+            "expected 2 `return a0;` (one per shim), got {} in:\n{}",
+            count_ret, src
+        );
         assert!(
-            src.contains("    fopen_s(&a0, a1, a2);") && src.contains("    freopen_s(&a0, a1, a2);"),
+            src.contains("    fopen_s(&a0, a1, a2);")
+                && src.contains("    freopen_s(&a0, a1, a2);"),
             "real calls missing in:\n{}",
             src
         );

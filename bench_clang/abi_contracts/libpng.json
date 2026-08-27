@@ -1,0 +1,27 @@
+{
+  "library": "libpng",
+  "version": "1.6.50",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "libpng",
+  "functions": [
+    { "name": "png_access_version_number", "params": [], "ret": "Int", "symbol": "png_access_version_number" },
+    { "name": "png_set_read_fn",
+      "params": ["Opaque(png_struct)", "Opaque(ScalarPtr)", "Callback"],
+      "ret": "Unit",
+      "symbol": "png_set_read_fn" },
+    { "name": "png_create_read_struct",
+      "params": ["Int", "Opaque(ScalarPtr)", "Callback", "Callback"],
+      "ret": "Opaque(png_struct)",
+      "symbol": "png_create_read_struct" }
+  ],
+  "required_symbols": [
+    "png_access_version_number",
+    "png_set_read_fn",
+    "png_create_read_struct"
+  ],
+  "forbidden_substrings": [
+    "\"lime_val_png_set_read_fn\"",
+    "\"lime_val_png_create_read_struct\""
+  ]
+}

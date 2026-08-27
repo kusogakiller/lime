@@ -1,0 +1,6 @@
+import std.string
+
+fn main():
+    println(std.string.trim("  hello  "))
+    println(std.string.to_upper("abc"))
+    println(std.string.contains("lime", "im"))

@@ -1,0 +1,7 @@
+fn main():
+    if true:
+        println("A")
+    elif true:
+        println("B")
+    else:
+        println("C")

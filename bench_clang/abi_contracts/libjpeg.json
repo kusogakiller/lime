@@ -1,0 +1,23 @@
+{
+  "library": "libjpeg-turbo",
+  "version": "3.1.0",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "libjpeg",
+  "functions": [
+    { "name": "jpeg_CreateDecompress",
+      "params": ["Opaque(jpeg_decompress_struct)", "Int", "Int"],
+      "ret": "Unit",
+      "symbol": "jpeg_CreateDecompress" },
+    { "name": "jpeg_destroy_decompress",
+      "params": ["Opaque(jpeg_decompress_struct)"],
+      "ret": "Unit",
+      "symbol": "jpeg_destroy_decompress" },
+    { "name": "jpeg_std_error",
+      "params": ["Opaque(jpeg_error_mgr)"],
+      "ret": "Opaque(jpeg_error_mgr)",
+      "symbol": "jpeg_std_error" }
+  ],
+  "required_symbols": ["jpeg_CreateDecompress", "jpeg_destroy_decompress", "jpeg_std_error"],
+  "forbidden_substrings": ["Opaque(unsigned)", "\"lime_val_jpeg_CreateDecompress\""]
+}

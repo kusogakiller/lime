@@ -1,0 +1,7 @@
+// Level 13: file I/O ? deterministic save / read-back round trip
+fn main():
+    let report = "TASKS=2\nDONE=1\nFAILED=1\n"
+    write_file("audit_report.txt", report)
+    let loaded = read_file("audit_report.txt")
+    println(loaded == report)
+    println(loaded.len())

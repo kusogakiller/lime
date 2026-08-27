@@ -1,0 +1,21 @@
+{
+  "library": "FFmpeg media-object slice (avcodec/avutil)",
+  "version": "avcodec 62.28.102",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "ffmpeg_media_objects",
+  "functions": [
+    { "name": "av_packet_alloc", "params": [], "ret": "Opaque(AVPacket)", "symbol": "av_packet_alloc" },
+    { "name": "av_packet_free", "params": ["Opaque(AVPacket)"], "ret": "Unit", "symbol": "lime_take_av_packet_free" },
+    { "name": "av_frame_alloc", "params": [], "ret": "Opaque(AVFrame)", "symbol": "av_frame_alloc" },
+    { "name": "av_frame_free", "params": ["Opaque(AVFrame)"], "ret": "Unit", "symbol": "lime_take_av_frame_free" },
+    { "name": "av_frame_unref", "params": ["Opaque(AVFrame)"], "ret": "Unit", "symbol": "av_frame_unref" },
+    { "name": "avcodec_parameters_alloc", "params": [], "ret": "Opaque(AVCodecParameters)", "symbol": "avcodec_parameters_alloc" },
+    { "name": "avcodec_parameters_free", "params": ["Opaque(AVCodecParameters)"], "ret": "Unit", "symbol": "lime_take_avcodec_parameters_free" }
+  ],
+  "required_symbols": [
+    "av_packet_alloc", "lime_take_av_packet_free",
+    "av_frame_alloc", "lime_take_av_frame_free", "av_frame_unref",
+    "avcodec_parameters_alloc", "lime_take_avcodec_parameters_free"
+  ]
+}

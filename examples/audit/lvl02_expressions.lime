@@ -1,0 +1,23 @@
+// Level 2: expressions (arithmetic / comparison / boolean / string)
+fn main():
+    let base = 10
+    let extra = 3
+    println(base + extra)
+    println(base - extra)
+    println(base * extra)
+    println(base / extra)
+    println(base % extra)
+    let fprice = 19.5
+    let qty = 2.0
+    println(fprice * qty)
+    println(base > extra)
+    println(base <= extra)
+    println(base != extra)
+    let hot = true
+    let big = false
+    println(hot && (not big))
+    println(hot || big)
+    let who = "task" + "-" + "manager"
+    println(who)
+    println(who == "task-manager")
+    println(who.len())

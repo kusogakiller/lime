@@ -1,0 +1,5 @@
+// EXPECT: check FAILS ? int parameter cannot receive a string
+fn add(int: a, int: b):
+    return a + b
+fn main():
+    println(add(1, "x"))

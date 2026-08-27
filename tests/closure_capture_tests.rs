@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::fs;
+use std::process::Command;
 
 fn llvm_toolchain_available() -> bool {
     std::env::var("LLVM_SYS_221_PREFIX").is_ok() || std::env::var("LIME_LLVM_PREFIX").is_ok()
@@ -31,35 +31,60 @@ fn lime_cmd(subcmd: &str, toml: &str, extra_args: &[&str]) -> String {
 fn run_both(dir: &str, code: &str, expected: &[&str], test_name: &str) {
     write_project(dir, code);
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, expected, "{} (interpreter) mismatch\nfull:\n{}", test_name, out);
+    assert_eq!(
+        interp, expected,
+        "{} (interpreter) mismatch\nfull:\n{}",
+        test_name, out
+    );
 
     if !llvm_toolchain_available() {
         eprintln!("skipping native for {} -- no LLVM", test_name);
         return;
     }
     let out = lime_cmd("build", &format!("{}/citrus.toml", dir), &["--emit-object"]);
-    assert!(out.contains("ok:"), "{} native build failed:\n{}", test_name, out);
+    assert!(
+        out.contains("ok:"),
+        "{} native build failed:\n{}",
+        test_name,
+        out
+    );
     let exe = format!("{}.exe", dir);
-    assert!(fs::metadata(&exe).is_ok(), "{} expected exe at {}", test_name, exe);
+    assert!(
+        fs::metadata(&exe).is_ok(),
+        "{} expected exe at {}",
+        test_name,
+        exe
+    );
     let run = Command::new(&exe).output().unwrap();
     let native_out = String::from_utf8_lossy(&run.stdout).trim().to_string();
-    assert_eq!(native_out.replace("\r", ""), expected.join("\n"), "{} native mismatch", test_name);
+    assert_eq!(
+        native_out.replace("\r", ""),
+        expected.join("\n"),
+        "{} native mismatch",
+        test_name
+    );
 }
 
 fn run_interp_only(dir: &str, code: &str, expected: &[&str], test_name: &str) {
     write_project(dir, code);
     let out = lime_cmd("run", &format!("{}/citrus.toml", dir), &[]);
-    let interp: Vec<&str> = out.lines()
+    let interp: Vec<&str> = out
+        .lines()
         .filter(|l| !l.starts_with("warning"))
         .filter(|l| !l.contains("unused variable"))
         .filter(|l| !l.contains("error["))
         .collect();
-    assert_eq!(interp, expected, "{} (interpreter) mismatch\nfull:\n{}", test_name, out);
+    assert_eq!(
+        interp, expected,
+        "{} (interpreter) mismatch\nfull:\n{}",
+        test_name, out
+    );
 }
 
 #[test]
@@ -71,8 +96,6 @@ fn capture_int_value() {
         "capture_int_value",
     );
 }
-
-
 
 #[test]
 fn capture_bool_value() {

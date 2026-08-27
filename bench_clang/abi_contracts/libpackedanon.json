@@ -1,0 +1,25 @@
+{
+  "library": "libpackedanon (ABI fixture, Iteration-28/30 shape)",
+  "version": "0.1.0",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "functions": [
+    { "name": "lime_make_PackedAnon", "params": [], "ret": "Opaque(PackedAnon)", "symbol": "lime_make_PackedAnon" },
+    { "name": "lime_get_PackedAnon_head", "params": ["Opaque(PackedAnon)"], "ret": "Int", "symbol": "lime_get_PackedAnon_head" },
+    { "name": "lime_set_PackedAnon_x", "params": ["Opaque(PackedAnon)", "Int"], "ret": "Unit", "symbol": "lime_set_PackedAnon_x" },
+    { "name": "lime_set_PackedAnon_y", "params": ["Opaque(PackedAnon)", "Int"], "ret": "Unit", "symbol": "lime_set_PackedAnon_y" },
+    { "name": "lime_get_PackedAnonBit_b", "params": ["Opaque(PackedAnonBit)"], "ret": "Int", "symbol": "lime_get_PackedAnonBit_b" },
+    { "name": "pka_make", "params": [], "ret": "Opaque(PackedAnon)", "symbol": "lime_ret_pka_make" },
+    { "name": "pka_set_head", "params": ["Opaque(PackedAnon)", "Int"], "ret": "Unit", "symbol": "pka_set_head" },
+    { "name": "pka_link_anchor", "params": [], "ret": "Int", "symbol": "pka_link_anchor" }
+  ],
+  "required_symbols": [
+    "lime_make_PackedAnon", "lime_get_PackedAnon_x", "lime_set_PackedAnon_x",
+    "lime_ret_pka_make", "pka_set_head"
+  ],
+  "forbidden_substrings": [
+    "Opaque(unsigned)",
+    "\"lime_val_pka_set_head\"",
+    "\"lime_val_pka_bit_set_b\""
+  ]
+}

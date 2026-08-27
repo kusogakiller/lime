@@ -1,11 +1,11 @@
-use std::fs;
 use std::collections::{HashMap, HashSet};
+use std::fs;
 
 // Embed the C runtime source so the compiler can compile it on-the-fly.
 const RUNTIME_C_SOURCE: &str = include_str!("codegen/runtime/runtime.c");
 const RUNTIME_H_SOURCE: &str = include_str!("codegen/runtime/runtime.h");
-use std::sync::{Mutex, OnceLock};
 use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, OnceLock};
 
 // ===== String Interning (Phase 1) =====
 // Identifiers/type names are interned into a stable `u32` id so that name
@@ -144,37 +144,93 @@ impl Hash for MonoKey {
 // Phase 0 (Step 10): LLVM backend foundation (textual IR emitter).
 // Inkwell 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢隴手・讚ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驕ｶ髮・｣ｰ・､繝ｻ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
 // 鬮ｫ・ｰ繝ｻ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ蛹ｺ・ｻ繧托ｽｽ・ｽ繝ｻ・､鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・ｷ鬯ｮ・ｮ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬮ｯ・ｷ繝ｻ・ｷ髣比ｼ夲ｽｽ・｣驕ｯ・ｶ繝ｻ・ｳ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ LLVM IR 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髫ｶ蠑ｱ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｴ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
+pub mod abiverify;
+pub mod charger;
 #[path = "codegen/mod.rs"]
 mod codegen;
-pub mod charger;
-
-
-
 
 // ===== Lexer =====
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     // Keywords
-    Fn, Lime, Struct, Interface, State, Enum, Let, Mut, If, Else, Match, Return,
-    Async, Await, Unsafe, True, False, Where, For, While, Defer, Extern,
-    Int, Float, Str, Bool, Option,
+    Fn,
+    Lime,
+    Struct,
+    Interface,
+    State,
+    Enum,
+    Let,
+    Mut,
+    If,
+    Elif,
+    Else,
+    Match,
+    Return,
+    Async,
+    Await,
+    Unsafe,
+    True,
+    False,
+    Where,
+    For,
+    While,
+    Defer,
+    Extern,
+    Int,
+    Float,
+    Str,
+    Bool,
+    Option,
 
     // Operators
-    Plus, Minus, Star, Slash, Percent,
-    Assign, PlusAssign, MinusAssign, StarAssign, SlashAssign,
-    Eq, NotEq, Lt, Gt, LtEq, GtEq,
-    And, Or, Not,
-    Dot, DoubleDot,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    Assign,
+    PlusAssign,
+    MinusAssign,
+    StarAssign,
+    SlashAssign,
+    Eq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    And,
+    Or,
+    Not,
+    Dot,
+    DoubleDot,
 
     // Delimiters
-    LParen, RParen, LBrace, RBrace, LBracket, RBracket,
-    Colon, DoubleColon, Semicolon, Comma, Arrow, FatArrow, Question,
+    LParen,
+    RParen,
+    LBrace,
+    RBrace,
+    LBracket,
+    RBracket,
+    Colon,
+    DoubleColon,
+    Semicolon,
+    Comma,
+    Arrow,
+    FatArrow,
+    Question,
 
     // Indents
-    Indent, Dedent, Newline,
+    Indent,
+    Dedent,
+    Newline,
 
     // Literals
-    IntLit(i64), LongLit(i64), FloatLit(f64), StringLit(String), Ident(String),
+    IntLit(i64),
+    LongLit(i64),
+    FloatLit(f64),
+    StringLit(String),
+    Ident(String),
 
     Eof,
 }
@@ -334,6 +390,36 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
         // 鬮ｫ・ｰ繝ｻ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ譏ｴ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
         if ch.is_ascii_digit() {
             let start = i;
+            // Iteration 33 P3: hexadecimal integer literals — `0x1F` / `0X1f`.
+            // Entered only when at least one hex digit follows the 0x/0X
+            // prefix, so plain `0` and identifiers that merely begin with
+            // `x` lex exactly as before. Decimal handling below is untouched.
+            if ch == '0'
+                && i + 1 < n
+                && (chars[i + 1] == 'x' || chars[i + 1] == 'X')
+                && i + 2 < n
+                && chars[i + 2].is_ascii_hexdigit()
+            {
+                i += 2; // consume 0x / 0X
+                while i < n && chars[i].is_ascii_hexdigit() {
+                    i += 1;
+                }
+                let num: String = chars[start..i].iter().collect();
+                // Optional Long suffix, mirroring the decimal path.
+                if i < n && chars[i] == 'L' {
+                    i += 1;
+                    match i64::from_str_radix(&num[2..], 16) {
+                        Ok(v) => emit(Token::LongLit(v), line, col),
+                        Err(_) => return Err(format!("Invalid long hex literal: {}", num)),
+                    }
+                } else {
+                    match i64::from_str_radix(&num[2..], 16) {
+                        Ok(v) => emit(Token::IntLit(v), line, col),
+                        Err(_) => return Err(format!("Invalid hex integer literal: {}", num)),
+                    }
+                }
+                continue;
+            }
             let mut is_float = false;
             while i < n && chars[i].is_ascii_digit() {
                 i += 1;
@@ -390,6 +476,7 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
                 "let" => Token::Let,
                 "mut" => Token::Mut,
                 "if" => Token::If,
+                "elif" => Token::Elif,
                 "else" => Token::Else,
                 "match" => Token::Match,
                 "return" => Token::Return,
@@ -577,10 +664,7 @@ fn tokenize(source: &str) -> Result<(Vec<Token>, Vec<(usize, usize)>), String> {
                 Token::RBracket
             }
             _ => {
-                return Err(format!(
-                    "Unexpected character '{}' at {}:{}",
-                    ch, line, col
-                ));
+                return Err(format!("Unexpected character '{}' at {}:{}", ch, line, col));
             }
         };
 
@@ -675,13 +759,8 @@ enum Expr {
 
 #[derive(Debug, Clone)]
 enum Pattern {
-    Variant {
-        name: String,
-        bindings: Vec<String>,
-    },
-    Try {
-        elems: Vec<Pattern>,
-    },
+    Variant { name: String, bindings: Vec<String> },
+    Try { elems: Vec<Pattern> },
     Error,
     Catch,
     Tuple(Vec<Pattern>),
@@ -961,7 +1040,12 @@ impl Parser {
             while self.current() != &Token::RParen {
                 let name = match self.current() {
                     Token::Ident(n) => n.clone(),
-                    _ => return Err(format!("Expected variable name in destructure, got {:?}", self.current())),
+                    _ => {
+                        return Err(format!(
+                            "Expected variable name in destructure, got {:?}",
+                            self.current()
+                        ));
+                    }
                 };
                 self.advance();
                 vars.push(name);
@@ -1092,13 +1176,8 @@ impl Parser {
             return Err("Expected indented block".to_string());
         }
 
-        while self.current() != &Token::Dedent
-            && self.current() != &Token::Eof
-        {
-            if matches!(
-                self.current(),
-                Token::Newline | Token::Indent
-            ) {
+        while self.current() != &Token::Dedent && self.current() != &Token::Eof {
+            if matches!(self.current(), Token::Newline | Token::Indent) {
                 self.advance();
                 continue;
             }
@@ -1321,7 +1400,7 @@ impl Parser {
                             return Err(format!(
                                 "Expected an opaque handle type name inside Opaque(...), got {:?}",
                                 other
-                            ))
+                            ));
                         }
                     };
                     self.advance();
@@ -1399,7 +1478,10 @@ impl Parser {
     // 鬮ｯ・ｷ騾趣ｽｯ郢晢ｽ｡郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ: 鬮ｴ謇假ｽｽ・ｴ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｶ・ｽ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮｣蜴・ｽｽ・ｴ髯ｷ・･繝ｻ・ｲ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ (...) 鬩搾ｽｵ繝ｻ・ｺ髯溷供ﾂ莉ｰﾂ髫ｰ逍ｲ・ｻ髮｣・ｽ・｢陝ｷ繝ｻ・｣・ｰ陞滂ｽｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｪ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓溘・縺､ﾂ鬯ｮ・ｦ繝ｻ・ｪ驕ｶ髮・｣ｰ・､繝ｻ・ｸ繝ｻ・ｺ髯ｷ莨夲ｽｽ・ｱ驕ｯ・ｶ繝ｻ・ｻ鬯ｮ・ｫ隴会ｽｦ繝ｻ・ｽ繝ｻ・｣鬮ｫ・ｴ繝ｻ・ｫ鬮｣髮・ｽｾ蛟仰陜｣・､繝ｻ・ｸ繝ｻ・ｺ鬯ｮ・ｦ繝ｻ・ｪ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ鬩阪・遘√・・ｽ繝ｻ・ｩ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髯ｷ・ｷ繝ｻ・ｶ繝ｻ縺､ﾂ驛｢譎｢・ｽ・ｻ
     // 鬮ｫ・ｰ陟包ｽ｡繝ｻ・ｻ陷･謫ｾ・ｽ・ｲ繝ｻ・･鬩搾ｽｵ繝ｻ・ｺ髯ｷ・ｷ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ Some([鬮ｯ諛ｷ髮驍・・・ｭ・ｫ陞滄托ｽｰ蟷・ｽｫ・､隲幢ｽｶ繝ｻ・ｿ繝ｻ・ｽE...]) 鬩幢ｽ｢繝ｻ・ｧ髯橸ｽｳ陞滂ｽｲ繝ｻ・ｽ繝ｻ・ｿ髫ｴ竏ｵ閻ｸ繝ｻ・ｼ繝ｻ・ｰ鬩搾ｽｵ繝ｻ・ｲ驕ｶ謫ｾ・ｽ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髯ｷ・･繝ｻ・ｲ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ ) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｨ・ｾ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ貅ｷ萓帙・・ｾ鬲・ｼ夲ｽｽ・ｿ繝ｻ・ｽE鬯ｯ・ｨ繝ｻ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ繝ｻ縺､ﾂ鬩搾ｽｵ繝ｻ・ｲ驛｢譎｢・ｽ・ｻ
     // 鬮ｯ讓奇ｽｻ繧托ｽｽ・ｽ繝ｻ・ｱ鬮ｫ・ｰ繝ｻ・ｨ驛｢譎｢・ｽ・ｻ鬮ｯ蛹ｺ・ｻ繧托ｽｽ・ｽ繝ｻ・､鬮ｯ貅ｷ・､・ｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ)鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ驛｢譎｢・ｽ・ｻNone 鬩幢ｽ｢繝ｻ・ｧ髯橸ｽｳ陞滂ｽｲ繝ｻ・ｽ繝ｻ・ｿ髫ｴ竏ｵ閻ｸ繝ｻ・ｼ繝ｻ・ｰ鬩搾ｽｵ繝ｻ・ｲ驕ｶ謫ｾ・ｽ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髯ｷ・･繝ｻ・ｲ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｿ繝ｻ・ｽE驕ｶ鬆托ｽ･・｢繝ｻ・ｬ鬲・ｼ夲ｽｽ・ｽ繝ｻ・ｻ鬩幢ｽ｢繝ｻ・ｧ髣包ｽｵ隰ｨ魑ｴﾂ驛｢譎｢・ｽ・ｻ
-    fn try_parse_type_args(&mut self, constraints: &mut Vec<(String, String)>) -> Option<Vec<String>> {
+    fn try_parse_type_args(
+        &mut self,
+        constraints: &mut Vec<(String, String)>,
+    ) -> Option<Vec<String>> {
         let save = self.pos;
         if self.current() != &Token::LParen {
             return None;
@@ -1506,7 +1588,9 @@ impl Parser {
                             self.expect(Token::Colon)?;
                             let iface = match self.current() {
                                 Token::Ident(f) => f.clone(),
-                                _ => return Err("Expected interface name in constraint".to_string()),
+                                _ => {
+                                    return Err("Expected interface name in constraint".to_string());
+                                }
                             };
                             self.advance();
                             constraints.push((tv.clone(), iface));
@@ -1838,7 +1922,18 @@ impl Parser {
 
     fn parse_if(&mut self) -> Result<Stmt, String> {
         self.expect(Token::If)?;
+        self.parse_if_tail()
+    }
 
+    /// Parse the remainder of an if-chain after the opening `if` (or `elif`)
+    /// keyword has been consumed: `cond : block` followed by zero or more
+    /// `elif cond : block` and an optional `else : block`.
+    ///
+    /// Iteration 33 — `elif` support. Chains are DESUGARED into nested
+    /// `Stmt::If` nodes (`elif c: b` becomes `else: [If{c, b}]`), so the
+    /// resolver, type checker, interpreter and native codegen need no changes:
+    /// every downstream stage only ever sees plain if/else nesting.
+    fn parse_if_tail(&mut self) -> Result<Stmt, String> {
         let cond = self.parse_expr()?;
         self.expect(Token::Colon)?;
 
@@ -1848,11 +1943,21 @@ impl Parser {
             self.advance();
             self.expect(Token::Colon)?;
             Some(self.parse_block()?)
+        } else if self.current() == &Token::Elif {
+            // `elif` — consume the token and recurse; the inner chain becomes
+            // the sole statement of this link's else branch.
+            self.advance();
+            let inner = self.parse_if_tail()?;
+            Some(vec![inner])
         } else {
             None
         };
 
-        Ok(Stmt::If { cond, then_branch, else_branch })
+        Ok(Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn parse_return(&mut self) -> Result<Stmt, String> {
@@ -1873,16 +1978,31 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Stmt::Return { explicit_type, value: expr })
+        Ok(Stmt::Return {
+            explicit_type,
+            value: expr,
+        })
     }
 
     fn parse_return_type(&mut self) -> Option<Type> {
         let saved = self.pos;
         let ty = match self.current() {
-            Token::Int => { self.advance(); Type::Int }
-            Token::Float => { self.advance(); Type::Float }
-            Token::Bool => { self.advance(); Type::Bool }
-            Token::Str => { self.advance(); Type::String }
+            Token::Int => {
+                self.advance();
+                Type::Int
+            }
+            Token::Float => {
+                self.advance();
+                Type::Float
+            }
+            Token::Bool => {
+                self.advance();
+                Type::Bool
+            }
+            Token::Str => {
+                self.advance();
+                Type::String
+            }
             Token::Ident(n) => {
                 let name = n.clone();
                 self.advance();
@@ -1908,16 +2028,19 @@ impl Parser {
         };
         self.advance();
 
-        self.expect(Token::Ident("in".to_string())).map_err(|_| {
-            "Expected 'in' in for loop".to_string()
-        })?;
+        self.expect(Token::Ident("in".to_string()))
+            .map_err(|_| "Expected 'in' in for loop".to_string())?;
 
         let iterable = self.parse_expr()?;
         self.expect(Token::Colon)?;
 
         let body = self.parse_block()?;
 
-        Ok(Stmt::For { var, iterable, body })
+        Ok(Stmt::For {
+            var,
+            iterable,
+            body,
+        })
     }
 
     fn parse_while(&mut self) -> Result<Stmt, String> {
@@ -1970,18 +2093,20 @@ impl Parser {
             } else {
                 let name = match self.current() {
                     Token::Ident(n) => n.clone(),
-                    other => return Err(format!("Expected variant name in match, got {:?}", other)),
+                    other => {
+                        return Err(format!("Expected variant name in match, got {:?}", other));
+                    }
                 };
                 self.advance();
 
                 if name == "_" {
                     return Err(
-                        "`_` is no longer a wildcard pattern; use `catch:` instead".to_string(),
+                        "`_` is no longer a wildcard pattern; use `catch:` instead".to_string()
                     );
                 } else if name == "catch" {
                     if matches!(self.current(), Token::Ident(_) | Token::LParen) {
                         return Err(
-                            "`catch` is a catch-all arm and does not bind values".to_string(),
+                            "`catch` is a catch-all arm and does not bind values".to_string()
                         );
                     }
                     Pattern::Catch
@@ -2019,7 +2144,7 @@ impl Parser {
                             let b = match self.current() {
                                 Token::Ident(n) => n.clone(),
                                 other => {
-                                    return Err(format!("Expected binding name, got {:?}", other))
+                                    return Err(format!("Expected binding name, got {:?}", other));
                                 }
                             };
                             self.advance();
@@ -2035,9 +2160,9 @@ impl Parser {
                 }
             };
 
-        self.expect(Token::Colon)?;
+            self.expect(Token::Colon)?;
 
-        let body = self.parse_block()?;
+            let body = self.parse_block()?;
 
             arms.push((pattern, body));
         }
@@ -2075,7 +2200,10 @@ impl Parser {
                 } else if name == "catch" {
                     Pattern::Catch
                 } else {
-                    Pattern::Variant { name, bindings: vec![] }
+                    Pattern::Variant {
+                        name,
+                        bindings: vec![],
+                    }
                 }
             };
             elems.push(elem);
@@ -2152,12 +2280,18 @@ impl Parser {
             Token::Minus => {
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::UnOp { op: "-".to_string(), operand: Box::new(operand) })
+                Ok(Expr::UnOp {
+                    op: "-".to_string(),
+                    operand: Box::new(operand),
+                })
             }
             Token::Not => {
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::UnOp { op: "not".to_string(), operand: Box::new(operand) })
+                Ok(Expr::UnOp {
+                    op: "not".to_string(),
+                    operand: Box::new(operand),
+                })
             }
             Token::Await => {
                 self.advance();
@@ -2187,7 +2321,9 @@ impl Parser {
                         Token::Float => "float".to_string(),
                         Token::Str => "str".to_string(),
                         Token::IntLit(n) => n.to_string(),
-                        other => return Err(format!("Expected method/field name, got {:?}", other)),
+                        other => {
+                            return Err(format!("Expected method/field name, got {:?}", other));
+                        }
                     };
                     self.advance();
                     // Track the dotted path so module-qualified calls such as
@@ -2201,9 +2337,10 @@ impl Parser {
                         dotted_path = vec![base.clone()];
                     }
                     dotted_path.push(name.clone());
-                    if is_call && (dotted_path.len() >= 3
-                        || (dotted_path.len() == 2
-                            && self.package_names.contains(&dotted_path[0])))
+                    if is_call
+                        && (dotted_path.len() >= 3
+                            || (dotted_path.len() == 2
+                                && self.package_names.contains(&dotted_path[0])))
                     {
                         // Module-qualified call: `a.b.c(...)` (3+ segments) or
                         // `pkg.fn(...)` where `pkg` is a known imported package.
@@ -2253,9 +2390,7 @@ impl Parser {
                     if let Expr::Ident(func) = &expr {
                         // 鬮ｯ・ｷ騾趣ｽｯ郢晢ｽ｡郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ: (...) 鬩搾ｽｵ繝ｻ・ｺ髫ｰ逍ｲ・ｻ髮｣・ｽ・｢陝ｷ繝ｻ・｣・ｰ陞滂ｽｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｪ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓滄・莨√・繝ｻ・ｹ繝ｻ・ｧ驛｢譎｢・ｽ・ｻPoint(int) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髯ｷ莨夲ｽｽ・ｱ驕ｯ・ｶ繝ｻ・ｻ鬮ｫ・ｰ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
                         let save = self.pos;
-                        if let Some(type_args) =
-                            self.try_parse_type_args(&mut Vec::new())
-                        {
+                        if let Some(type_args) = self.try_parse_type_args(&mut Vec::new()) {
                             let typed_name = format!("{}({})", func, type_args.join(", "));
                             // 鬯ｨ・ｾ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ貅ｷ萓帙・・ｾ鬲・ｼ夲ｽｽ・ｿ繝ｻ・ｽE (values) 鬩搾ｽｵ繝ｻ・ｺ髫ｶ蜻ｵ・ｶ・｣繝ｻ・ｽ繝ｻ・ｶ髯橸ｽ｢繝ｻ・ｹ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｶ陜｣・､髴肴亢繝ｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髴大｣ｼ蟋薙・・ｻ闕ｵ貊ゑｽｽ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
                             if self.current() == &Token::LParen {
@@ -2298,8 +2433,7 @@ impl Parser {
                             self.pos = save;
                             self.advance();
                             let mut args = Vec::new();
-                            while self.current() != &Token::RParen
-                                && self.current() != &Token::Eof
+                            while self.current() != &Token::RParen && self.current() != &Token::Eof
                             {
                                 args.push(self.parse_expr()?);
                                 if self.current() == &Token::Comma {
@@ -2418,7 +2552,11 @@ impl Parser {
                         self.advance();
                         let param_name = match self.current() {
                             Token::Ident(n) => n.clone(),
-                            _ => return Err("Expected parameter name in anonymous function".to_string()),
+                            _ => {
+                                return Err(
+                                    "Expected parameter name in anonymous function".to_string()
+                                );
+                            }
                         };
                         self.advance();
                         params.push((param_name, param_type));
@@ -2511,10 +2649,7 @@ impl Parser {
     }
 }
 
-fn parse(
-    tokens: Vec<Token>,
-    locs: Vec<(usize, usize)>,
-) -> Result<Vec<Stmt>, String> {
+fn parse(tokens: Vec<Token>, locs: Vec<(usize, usize)>) -> Result<Vec<Stmt>, String> {
     let mut parser = Parser::new(tokens, locs);
     parser.parse_program()
 }
@@ -2566,7 +2701,10 @@ fn parse_version(s: &str) -> Result<Version, String> {
     let s = s.strip_prefix('v').unwrap_or(s);
     let parts: Vec<&str> = s.split('.').collect();
     if parts.len() != 3 {
-        return Err(format!("Invalid version '{}' (expected vMAJOR.MINOR.PATCH)", s));
+        return Err(format!(
+            "Invalid version '{}' (expected vMAJOR.MINOR.PATCH)",
+            s
+        ));
     }
     let major = parts[0]
         .parse::<u32>()
@@ -2577,7 +2715,11 @@ fn parse_version(s: &str) -> Result<Version, String> {
     let patch = parts[2]
         .parse::<u32>()
         .map_err(|_| format!("Invalid version patch in '{}'", s))?;
-    Ok(Version { major, minor, patch })
+    Ok(Version {
+        major,
+        minor,
+        patch,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -2664,19 +2806,21 @@ fn load_project_stmts(citrus_path: &str) -> Result<Project, String> {
         } else {
             format!("{}/{}", base_dir, rel)
         };
-        let source = fs::read_to_string(&full)
-            .map_err(|e| format!("Error reading file '{}' (from [files].{}): {}", full, name, e))?;
+        let source = fs::read_to_string(&full).map_err(|e| {
+            format!(
+                "Error reading file '{}' (from [files].{}): {}",
+                full, name, e
+            )
+        })?;
         let (tokens, locs) = {
             let _t = StageTimer::new("tokenize");
-            tokenize(&source)
-                .map_err(|e| format!("Lexer error in '{}': {}", full, e))?
+            tokenize(&source).map_err(|e| format!("error[E0001] {}: {}", full, e))?
         };
-        let pkg_names: std::collections::HashSet<String> =
-            cfg.imports.keys().cloned().collect();
+        let pkg_names: std::collections::HashSet<String> = cfg.imports.keys().cloned().collect();
         let (stmts, stmt_locs) = {
             let _t = StageTimer::new("parse");
             parse_with_locs(tokens, locs, &pkg_names)
-                .map_err(|e| format!("Parser error in '{}': {}", full, e))?
+                .map_err(|e| format!("error[E0101] {}: {}", full, e))?
         };
         files.push(SourceFile {
             path: full,
@@ -2751,18 +2895,14 @@ impl<'a> ImportResolver<'a> {
                     msg.push_str(&format!("\n  did you mean '{}'?", s));
                 }
                 return Err(msg);
+            }
         }
+        Ok(())
     }
-    Ok(())
-}
-
 
     /// Build the dependency-edge list and detect cycles (DFS over the
     /// package graph; each package's own [import]s are followed).
-    fn build_dependency_graph(
-        &self,
-        registry_root: &str,
-    ) -> Result<Vec<(String, String)>, String> {
+    fn build_dependency_graph(&self, registry_root: &str) -> Result<Vec<(String, String)>, String> {
         let mut edges: Vec<(String, String)> = Vec::new();
         let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut in_stack: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -3052,13 +3192,13 @@ fn load_target(path: &str) -> Result<LoadedProject, String> {
             .map_err(|e| format!("Error reading file '{}': {}", path, e))?;
         let (tokens, locs) = {
             let _t = StageTimer::new("tokenize");
-            tokenize(&source).map_err(|e| format!("Lexer error: {}", e))?
+            tokenize(&source).map_err(|e| format!("error[E0001] {}: {}", path, e))?
         };
         let pkg_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         let (stmts, stmt_locs) = {
             let _t = StageTimer::new("parse");
             parse_with_locs(tokens, locs, &pkg_names)
-                .map_err(|e| format!("Parser error: {}", e))?
+                .map_err(|e| format!("error[E0101] {}: {}", path, e))?
         };
         let mut defs = Defs::new();
         collect_defs(&stmts, &mut defs);
@@ -3067,11 +3207,18 @@ fn load_target(path: &str) -> Result<LoadedProject, String> {
         // we match them against the charger store and link the artifacts.
         let mut charger_artifacts: Vec<std::path::PathBuf> = Vec::new();
         if !defs.extern_symbols.is_empty() {
-            let syms: Vec<String> = defs.extern_symbols.values().map(|(s, _, _)| s.clone()).collect();
+            let syms: Vec<String> = defs
+                .extern_symbols
+                .values()
+                .map(|(s, _, _)| s.clone())
+                .collect();
             charger_artifacts = crate::charger::lookup_artifacts_for_symbols(&syms);
             if !charger_artifacts.is_empty() {
-                eprintln!("[charger] linking {} native artifact(s) for {} extern symbol(s)",
-                    charger_artifacts.len(), syms.len());
+                eprintln!(
+                    "[charger] linking {} native artifact(s) for {} extern symbol(s)",
+                    charger_artifacts.len(),
+                    syms.len()
+                );
                 for a in &charger_artifacts {
                     eprintln!("[charger]   artifact: {}", a.display());
                 }
@@ -3110,7 +3257,12 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
                 Some(f) => f,
                 None => continue,
             };
-            (fdef.body.clone(), fdef.params.clone(), fdef.constraints.clone(), fdef.type_params.clone())
+            (
+                fdef.body.clone(),
+                fdef.params.clone(),
+                fdef.constraints.clone(),
+                fdef.type_params.clone(),
+            )
         };
         // Build env from params + constraints
         let mut env_vars: HashMap<String, Type> = HashMap::new();
@@ -3133,19 +3285,25 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
                             defs.structs.get(sname).and_then(|sd| {
                                 if !sd.type_params.is_empty() {
                                     Some((sname.clone(), sd.type_params.clone()))
-                                } else { None }
+                                } else {
+                                    None
+                                }
                             })
                         }
                         Type::State(sname) if !sname.contains('(') => {
                             defs.enum_type_params.get(sname).and_then(|etp| {
                                 if !etp.is_empty() {
                                     Some((sname.clone(), etp.clone()))
-                                } else { None }
+                                } else {
+                                    None
+                                }
                             })
                         }
                         _ => None,
                     }
-                } else { None };
+                } else {
+                    None
+                };
                 if let Some(fdef) = defs.functions.get_mut(fname) {
                     if fdef.return_type.is_none() {
                         let mut rt_str = type_to_string(t);
@@ -3161,23 +3319,51 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
     // Also infer return types for struct methods
     let sname_list: Vec<String> = defs.structs.keys().cloned().collect();
     for sname in &sname_list {
-        let methods: Vec<(String, Vec<Stmt>, Vec<(String, String)>, Vec<(String, String)>)> = {
+        let methods: Vec<(
+            String,
+            Vec<Stmt>,
+            Vec<(String, String)>,
+            Vec<(String, String)>,
+        )> = {
             let sdef = match defs.structs.get(sname) {
                 Some(s) => s,
                 None => continue,
             };
-            sdef.methods.iter().map(|(mname, mdef)| {
-                (mname.clone(), mdef.body.clone(), mdef.params.clone(), mdef.constraints.clone())
-            }).collect()
+            sdef.methods
+                .iter()
+                .map(|(mname, mdef)| {
+                    (
+                        mname.clone(),
+                        mdef.body.clone(),
+                        mdef.params.clone(),
+                        mdef.constraints.clone(),
+                    )
+                })
+                .collect()
         };
-        let methods_with_tp: Vec<(String, Vec<Stmt>, Vec<(String, String)>, Vec<(String, String)>, Vec<String>)> = {
+        let methods_with_tp: Vec<(
+            String,
+            Vec<Stmt>,
+            Vec<(String, String)>,
+            Vec<(String, String)>,
+            Vec<String>,
+        )> = {
             let sdef = match defs.structs.get(sname) {
                 Some(s) => s,
                 None => continue,
             };
-            sdef.methods.iter().map(|(mname, mdef)| {
-                (mname.clone(), mdef.body.clone(), mdef.params.clone(), mdef.constraints.clone(), mdef.type_params.clone())
-            }).collect()
+            sdef.methods
+                .iter()
+                .map(|(mname, mdef)| {
+                    (
+                        mname.clone(),
+                        mdef.body.clone(),
+                        mdef.params.clone(),
+                        mdef.constraints.clone(),
+                        mdef.type_params.clone(),
+                    )
+                })
+                .collect()
         };
         for (mname, body, params, constraints, type_params) in &methods_with_tp {
             let mut env_vars: HashMap<String, Type> = HashMap::new();
@@ -3199,19 +3385,25 @@ fn infer_function_return_types(defs: &mut Defs) -> Result<(), String> {
                                 defs.structs.get(sname2).and_then(|sd| {
                                     if !sd.type_params.is_empty() {
                                         Some((sname2.clone(), sd.type_params.clone()))
-                                    } else { None }
+                                    } else {
+                                        None
+                                    }
                                 })
                             }
                             Type::State(sname2) if !sname2.contains('(') => {
                                 defs.enum_type_params.get(sname2).and_then(|etp| {
                                     if !etp.is_empty() {
                                         Some((sname2.clone(), etp.clone()))
-                                    } else { None }
+                                    } else {
+                                        None
+                                    }
                                 })
                             }
                             _ => None,
                         }
-                    } else { None };
+                    } else {
+                        None
+                    };
                     if let Some(sdef) = defs.structs.get_mut(sname) {
                         if let Some(mdef) = sdef.methods.get_mut(mname) {
                             if mdef.return_type.is_none() {
@@ -3257,7 +3449,11 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 if !fdef.params.iter().any(|(_, pt)| pt == "_") {
                     continue;
                 }
-                (fdef.body.clone(), fdef.params.clone(), fdef.constraints.clone())
+                (
+                    fdef.body.clone(),
+                    fdef.params.clone(),
+                    fdef.constraints.clone(),
+                )
             };
             let mut env: HashMap<String, Type> = HashMap::new();
             let mut env_cons: HashMap<String, Vec<String>> = HashMap::new();
@@ -3278,7 +3474,15 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             // Walk body, using infer_type to detect constraints on Var types.
             // The operator resolver already maps `Var(_)+Var(_)` 遶翫・`Int` and
             // `Var(_)+Int` 遶翫・`Int`, so we can read back concrete types.
-            infer_params_from_body(&body, &mut env, defs, &env_cons, &mut call_info, fname, &untyped_indices);
+            infer_params_from_body(
+                &body,
+                &mut env,
+                defs,
+                &env_cons,
+                &mut call_info,
+                fname,
+                &untyped_indices,
+            );
         }
     }
 
@@ -3297,8 +3501,21 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 Stmt::Expr(e) | Stmt::Return { value: Some(e), .. } => {
                     infer_expr_params(e, env, defs, env_cons, call_info, fname, untyped_indices);
                 }
-                Stmt::Let { name, value, type_hint, .. } => {
-                    infer_expr_params(value, env, defs, env_cons, call_info, fname, untyped_indices);
+                Stmt::Let {
+                    name,
+                    value,
+                    type_hint,
+                    ..
+                } => {
+                    infer_expr_params(
+                        value,
+                        env,
+                        defs,
+                        env_cons,
+                        call_info,
+                        fname,
+                        untyped_indices,
+                    );
                     if let Some(th) = type_hint {
                         env.insert(name.clone(), type_from_str(th, defs));
                     } else if let Ok(t) = infer_type(value, env, defs, env_cons) {
@@ -3308,26 +3525,78 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                     }
                 }
                 Stmt::Assign { name, value, .. } => {
-                    infer_expr_params(value, env, defs, env_cons, call_info, fname, untyped_indices);
+                    infer_expr_params(
+                        value,
+                        env,
+                        defs,
+                        env_cons,
+                        call_info,
+                        fname,
+                        untyped_indices,
+                    );
                     if let Ok(t) = infer_type(value, env, defs, env_cons) {
                         env.insert(name.clone(), t);
                     }
                 }
-                Stmt::If { then_branch, else_branch, .. } => {
-                    infer_params_from_body(then_branch, env, defs, env_cons, call_info, fname, untyped_indices);
+                Stmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    infer_params_from_body(
+                        then_branch,
+                        env,
+                        defs,
+                        env_cons,
+                        call_info,
+                        fname,
+                        untyped_indices,
+                    );
                     if let Some(eb) = else_branch {
-                        infer_params_from_body(eb, env, defs, env_cons, call_info, fname, untyped_indices);
+                        infer_params_from_body(
+                            eb,
+                            env,
+                            defs,
+                            env_cons,
+                            call_info,
+                            fname,
+                            untyped_indices,
+                        );
                     }
                 }
                 Stmt::While { body, .. } => {
-                    infer_params_from_body(body, env, defs, env_cons, call_info, fname, untyped_indices);
+                    infer_params_from_body(
+                        body,
+                        env,
+                        defs,
+                        env_cons,
+                        call_info,
+                        fname,
+                        untyped_indices,
+                    );
                 }
                 Stmt::For { body, .. } => {
-                    infer_params_from_body(body, env, defs, env_cons, call_info, fname, untyped_indices);
+                    infer_params_from_body(
+                        body,
+                        env,
+                        defs,
+                        env_cons,
+                        call_info,
+                        fname,
+                        untyped_indices,
+                    );
                 }
                 Stmt::Match { arms, .. } => {
                     for (_, arm_body) in arms {
-                        infer_params_from_body(arm_body, env, defs, env_cons, call_info, fname, untyped_indices);
+                        infer_params_from_body(
+                            arm_body,
+                            env,
+                            defs,
+                            env_cons,
+                            call_info,
+                            fname,
+                            untyped_indices,
+                        );
                     }
                 }
                 _ => {}
@@ -3345,19 +3614,34 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
         untyped_indices: &[(usize, String)],
     ) {
         match e {
-            Expr::BinOp { left, op, right, .. } => {
+            Expr::BinOp {
+                left, op, right, ..
+            } => {
                 let lt = infer_type(left, env, defs, env_cons).unwrap_or(Type::Unknown);
                 let rt = infer_type(right, env, defs, env_cons).unwrap_or(Type::Unknown);
-                if let Some((_, result_ty)) = resolve_operator_interface(defs, &lt, &rt, op, env_cons) {
+                if let Some((_, result_ty)) =
+                    resolve_operator_interface(defs, &lt, &rt, op, env_cons)
+                {
                     // Operator resolved 遯ｶ繝ｻcheck if it implies concrete types
                     // for any Var-typed params.
-                    let resolved_lt = if matches!(&lt, Type::Var(_)) { &result_ty } else { &lt };
-                    let resolved_rt = if matches!(&rt, Type::Var(_)) { &result_ty } else { &rt };
+                    let resolved_lt = if matches!(&lt, Type::Var(_)) {
+                        &result_ty
+                    } else {
+                        &lt
+                    };
+                    let resolved_rt = if matches!(&rt, Type::Var(_)) {
+                        &result_ty
+                    } else {
+                        &rt
+                    };
                     // If lt was Var and resolved_lt is concrete, write it back
                     if let Type::Var(tv) = &lt {
                         if !matches!(resolved_lt, Type::Var(_)) && *resolved_lt != Type::Unknown {
-                            if let Some((idx, _)) = untyped_indices.iter().find(|(_, tv2)| tv2 == tv) {
-                                call_info.entry(fname.to_string())
+                            if let Some((idx, _)) =
+                                untyped_indices.iter().find(|(_, tv2)| tv2 == tv)
+                            {
+                                call_info
+                                    .entry(fname.to_string())
                                     .or_default()
                                     .push((*idx, type_to_string(resolved_lt)));
                             }
@@ -3365,8 +3649,11 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                     }
                     if let Type::Var(tv) = &rt {
                         if !matches!(resolved_rt, Type::Var(_)) && *resolved_rt != Type::Unknown {
-                            if let Some((idx, _)) = untyped_indices.iter().find(|(_, tv2)| tv2 == tv) {
-                                call_info.entry(fname.to_string())
+                            if let Some((idx, _)) =
+                                untyped_indices.iter().find(|(_, tv2)| tv2 == tv)
+                            {
+                                call_info
+                                    .entry(fname.to_string())
                                     .or_default()
                                     .push((*idx, type_to_string(resolved_rt)));
                             }
@@ -3374,10 +3661,26 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                     }
                 }
                 infer_expr_params(left, env, defs, env_cons, call_info, fname, untyped_indices);
-                infer_expr_params(right, env, defs, env_cons, call_info, fname, untyped_indices);
+                infer_expr_params(
+                    right,
+                    env,
+                    defs,
+                    env_cons,
+                    call_info,
+                    fname,
+                    untyped_indices,
+                );
             }
             Expr::UnOp { operand, .. } => {
-                infer_expr_params(operand, env, defs, env_cons, call_info, fname, untyped_indices);
+                infer_expr_params(
+                    operand,
+                    env,
+                    defs,
+                    env_cons,
+                    call_info,
+                    fname,
+                    untyped_indices,
+                );
             }
             Expr::Call { args, .. } => {
                 for a in args {
@@ -3385,13 +3688,29 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 }
             }
             Expr::MethodCall { object, args, .. } => {
-                infer_expr_params(object, env, defs, env_cons, call_info, fname, untyped_indices);
+                infer_expr_params(
+                    object,
+                    env,
+                    defs,
+                    env_cons,
+                    call_info,
+                    fname,
+                    untyped_indices,
+                );
                 for a in args {
                     infer_expr_params(a, env, defs, env_cons, call_info, fname, untyped_indices);
                 }
             }
             Expr::FieldAccess { object, .. } => {
-                infer_expr_params(object, env, defs, env_cons, call_info, fname, untyped_indices);
+                infer_expr_params(
+                    object,
+                    env,
+                    defs,
+                    env_cons,
+                    call_info,
+                    fname,
+                    untyped_indices,
+                );
             }
             Expr::Array(items) => {
                 for it in items {
@@ -3399,11 +3718,27 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 }
             }
             Expr::Range { start, end } => {
-                infer_expr_params(start, env, defs, env_cons, call_info, fname, untyped_indices);
+                infer_expr_params(
+                    start,
+                    env,
+                    defs,
+                    env_cons,
+                    call_info,
+                    fname,
+                    untyped_indices,
+                );
                 infer_expr_params(end, env, defs, env_cons, call_info, fname, untyped_indices);
             }
             Expr::Await(inner) => {
-                infer_expr_params(inner, env, defs, env_cons, call_info, fname, untyped_indices);
+                infer_expr_params(
+                    inner,
+                    env,
+                    defs,
+                    env_cons,
+                    call_info,
+                    fname,
+                    untyped_indices,
+                );
             }
             _ => {}
         }
@@ -3420,7 +3755,12 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                 Stmt::Expr(e) | Stmt::Return { value: Some(e), .. } => {
                     scan_expr_for_calls(e, env, defs, call_info);
                 }
-                Stmt::Let { name, value, type_hint, .. } => {
+                Stmt::Let {
+                    name,
+                    value,
+                    type_hint,
+                    ..
+                } => {
                     scan_expr_for_calls(value, env, defs, call_info);
                     // Update env for subsequent statements
                     if let Some(th) = type_hint {
@@ -3437,7 +3777,11 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                         env.insert(name.clone(), t);
                     }
                 }
-                Stmt::If { cond, then_branch, else_branch } => {
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
                     scan_expr_for_calls(cond, env, defs, call_info);
                     let mut then_env = env.clone();
                     scan_stmts_for_calls(then_branch, &mut then_env, defs, call_info);
@@ -3450,11 +3794,20 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
                     scan_expr_for_calls(cond, env, defs, call_info);
                     scan_stmts_for_calls(body, env, defs, call_info);
                 }
-                Stmt::For { var, iterable, body } => {
+                Stmt::For {
+                    var,
+                    iterable,
+                    body,
+                } => {
                     scan_expr_for_calls(iterable, env, defs, call_info);
                     let elem = if let Ok(it_ty) = infer_type(iterable, env, defs, &HashMap::new()) {
-                        match &it_ty { Type::List(e) => (**e).clone(), _ => Type::Unknown }
-                    } else { Type::Unknown };
+                        match &it_ty {
+                            Type::List(e) => (**e).clone(),
+                            _ => Type::Unknown,
+                        }
+                    } else {
+                        Type::Unknown
+                    };
                     env.insert(var.clone(), elem);
                     scan_stmts_for_calls(body, env, defs, call_info);
                 }
@@ -3478,15 +3831,15 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
     ) {
         match e {
             Expr::Call { func, args } => {
-                let resolved = resolve_pkg_name(defs, func)
-                    .unwrap_or_else(|| func.clone());
+                let resolved = resolve_pkg_name(defs, func).unwrap_or_else(|| func.clone());
                 if let Some(fdef) = defs.functions.get(&resolved) {
                     if fdef.params.iter().any(|(_, pt)| pt == "_") {
                         for (i, ((_, pt), arg)) in fdef.params.iter().zip(args.iter()).enumerate() {
                             if pt == "_" {
                                 if let Ok(at) = infer_type(arg, env, defs, &HashMap::new()) {
                                     if at != Type::Unknown && at != Type::Var("_".to_string()) {
-                                        call_info.entry(resolved.clone())
+                                        call_info
+                                            .entry(resolved.clone())
                                             .or_default()
                                             .push((i, type_to_string(&at)));
                                     }
@@ -3555,7 +3908,8 @@ fn infer_untyped_params(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
             let first = type_strs[0];
             let all_same = type_strs.iter().all(|s| *s == first);
             if all_same && first != "_" {
-                updates.entry(fname.clone())
+                updates
+                    .entry(fname.clone())
                     .or_default()
                     .push((*idx, first.to_string()));
             }
@@ -3589,18 +3943,21 @@ fn scan_return_types_env(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Return { explicit_type, value } => {
+            Stmt::Return {
+                explicit_type,
+                value,
+            } => {
                 let t = match (explicit_type, value) {
                     (Some(et), _) => {
-                        if value.is_none() { continue; }
+                        if value.is_none() {
+                            continue;
+                        }
                         et.clone()
                     }
-                    (_, Some(e)) => {
-                        match infer_type(e, env_vars, defs, env_cons) {
-                            Ok(t) => t,
-                            Err(_) => continue,
-                        }
-                    }
+                    (_, Some(e)) => match infer_type(e, env_vars, defs, env_cons) {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    },
                     (None, None) => Type::Unit,
                 };
                 match ret_type {
@@ -3611,7 +3968,11 @@ fn scan_return_types_env(
                     _ => {}
                 }
             }
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 scan_return_types_env(then_branch, defs, env_vars, env_cons, ret_type);
                 if let Some(eb) = else_branch {
                     scan_return_types_env(eb, defs, env_vars, env_cons, ret_type);
@@ -3620,13 +3981,11 @@ fn scan_return_types_env(
             Stmt::Expr(e) => {
                 // Expression-bodied function: last expression is the return value
                 match infer_type(e, env_vars, defs, env_cons) {
-                    Ok(t) => {
-                        match ret_type {
-                            Some(prev) if !type_eq(prev, &t) => {}
-                            None => *ret_type = Some(t),
-                            _ => {}
-                        }
-                    }
+                    Ok(t) => match ret_type {
+                        Some(prev) if !type_eq(prev, &t) => {}
+                        None => *ret_type = Some(t),
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
@@ -3637,7 +3996,10 @@ fn scan_return_types_env(
                 let m_ty = infer_type(expr, env_vars, defs, env_cons).unwrap_or(Type::Unknown);
                 let (state_name, variants) = if let Type::State(sn) = &m_ty {
                     let base = struct_base(sn);
-                    (sn.clone(), defs.states.get(&base).cloned().unwrap_or_default())
+                    (
+                        sn.clone(),
+                        defs.states.get(&base).cloned().unwrap_or_default(),
+                    )
                 } else if let Type::Option(inner) = &m_ty {
                     let sn = format!("Option({})", type_to_string(inner));
                     (sn, vec!["Some".to_string(), "None".to_string()])
@@ -3678,7 +4040,12 @@ fn scan_return_types_env(
             Stmt::For { body, .. } => {
                 scan_return_types_env(body, defs, env_vars, env_cons, ret_type);
             }
-            Stmt::Let { name, value, type_hint, .. } => {
+            Stmt::Let {
+                name,
+                value,
+                type_hint,
+                ..
+            } => {
                 // Prefer the explicit type annotation over inference 遯ｶ繝ｻthe
                 // user's declared type is authoritative and preserves concrete
                 // generic args (e.g. `HashMap(int,int)`) that inference would
@@ -3745,13 +4112,13 @@ pub fn compile_pipeline(
     // and function call types are known for expression type checking).
     {
         let _t = StageTimer::new("infer_return_types");
-        infer_function_return_types(&mut defs).map_err(|e| format!("error[type]: {}", e))?;
+        infer_function_return_types(&mut defs).map_err(|e| format!("error[E0290] {}", e))?;
     }
 
     // Stage 4: interface conformance.
     {
         let _t = StageTimer::new("check_interface_conformance");
-        check_interface_conformance(&defs).map_err(|e| format!("error[type]: {}", e))?;
+        check_interface_conformance(&defs).map_err(|e| format!("error[E0291] {}", e))?;
     }
 
     // Stage 5a: operator resolution on statements.
@@ -3806,7 +4173,7 @@ pub fn compile_pipeline(
     // Stage 5: monomorphization.
     {
         let _t = StageTimer::new("monomorphize_all");
-        monomorphize_all(&mut defs, &mut stmts).map_err(|e| format!("error[type]: {}", e))?;
+        monomorphize_all(&mut defs, &mut stmts).map_err(|e| format!("error[E0292] {}", e))?;
     }
 
     // Stage 6: optimizer (dead code elimination).
@@ -3819,7 +4186,7 @@ pub fn compile_pipeline(
     // output.
     let memory = {
         let _t = StageTimer::new("memory_analyze");
-        memory_analyze(&stmts, &defs).map_err(|e| format!("error[memory]: {}", e))?
+        memory_analyze(&stmts, &defs).map_err(|e| format!("error[E0701] {}", e))?
     };
     if options.verbose {
         report_memory(&memory);
@@ -3844,14 +4211,20 @@ pub fn compile_pipeline(
         // startup overhead (was ~3ms from linking the whole 5000-line runtime).
         let out = {
             use std::collections::HashSet;
-            let used: HashSet<&str> = out.lines()
+            let used: HashSet<&str> = out
+                .lines()
                 .filter_map(|l| {
                     let s = l.trim_start();
                     if s.contains("call") {
                         if let Some(p) = s.find("@runtime_") {
                             let rest = &s[p + 1..];
-                            let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
-                            if !name.is_empty() { return Some(name); }
+                            let name = rest
+                                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                                .next()
+                                .unwrap_or("");
+                            if !name.is_empty() {
+                                return Some(name);
+                            }
                         }
                     }
                     None
@@ -3862,7 +4235,10 @@ pub fn compile_pipeline(
                 if line.trim_start().starts_with("declare") && line.contains("@runtime_") {
                     if let Some(p) = line.find("@runtime_") {
                         let rest = &line[p + 1..];
-                        let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or("");
+                        let name = rest
+                            .split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .next()
+                            .unwrap_or("");
                         if !name.is_empty() && !used.contains(name) {
                             continue;
                         }
@@ -3875,7 +4251,7 @@ pub fn compile_pipeline(
         };
         let ll_path_str = format!("{}.ll", base);
         fs::write(&ll_path_str, &out)
-            .map_err(|e| format!("error[codegen]: failed to write {}: {}", ll_path_str, e))?;
+            .map_err(|e| format!("error[E0401] failed to write {}: {}", ll_path_str, e))?;
         report.emitted_ll = Some(ll_path_str.clone());
         ll_path = Some(ll_path_str);
 
@@ -3899,7 +4275,7 @@ pub fn compile_pipeline(
             // unlowered function as a stub that returns a default value.
             if options.emit_object {
                 return Err(format!(
-                    "error[codegen]: {} function(s) could not be fully lowered; refusing to emit object file:\n  - {}",
+                    "error[E0402] {} function(s) could not be fully lowered; refusing to emit object file:\n  - {}",
                     report.codegen_warnings.len(),
                     report.codegen_warnings.join("\n  - ")
                 ));
@@ -3915,7 +4291,11 @@ pub fn compile_pipeline(
             // opt+llc which produces incorrect code from the Lime-generated IR).
             {
                 let _t = StageTimer::new("compile_ir");
-                let obj_ext = if cfg!(target_os = "windows") { "bc" } else { "bc" };
+                let obj_ext = if cfg!(target_os = "windows") {
+                    "bc"
+                } else {
+                    "bc"
+                };
                 let obj_path = format!("{}.{}", base, obj_ext);
                 let status = std::process::Command::new(llvm_tool("clang"))
                     .arg(&format!("-O{}", opt_level))
@@ -3931,7 +4311,11 @@ pub fn compile_pipeline(
                         // Stage 11: linking.
                         {
                             let _t_link = StageTimer::new("link");
-                            let exe_suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
+                            let exe_suffix = if cfg!(target_os = "windows") {
+                                ".exe"
+                            } else {
+                                ""
+                            };
                             let exe_path = format!("{}{}", base, exe_suffix);
                             if cfg!(target_os = "windows") {
                                 // Use lld-link (Windows) without /entry:main;
@@ -3939,60 +4323,68 @@ pub fn compile_pipeline(
                                 // Compile runtime.c on the fly and link it.
                                 let runtime_obj = compile_runtime_c()?;
 
-                                 let link_result = std::process::Command::new(llvm_tool("lld-link"))
-                                     .arg(&obj_path)
-                                     .arg(&runtime_obj)
-                                     .arg(&format!("/out:{}", exe_path))
-                                     .arg("/subsystem:console")
-                                     .arg("/OPT:REF")
-                                     .arg("/OPT:ICF")
-                                     // Allow unresolved symbols from third-party
-                                     // libraries whose headers declare optional
-                                     // features that are not compiled into the
-                                     // prepared artifact (e.g. SQLite's
-                                     // unlock-notify / snapshot / rtree entry
-                                     // points). These are never called by the
-                                     // Lime program, so leaving them unresolved
-                                     // is safe and matches how such libs are
-                                     // linked in practice.
-                                     .arg("/FORCE:UNRESOLVED")
-                                     .arg("/defaultlib:libcmt")
-                                     .arg("/defaultlib:oldnames")
-                                     .arg("/defaultlib:Winhttp")
-                                     .arg("/defaultlib:Shell32")
-                                     .arg("/defaultlib:Userenv")
-                                     .arg("/defaultlib:Advapi32")
-                                     .arg("/defaultlib:Ws2_32")
-                                     .arg("/defaultlib:Mswsock")
-                                     .arg("/defaultlib:Kernel32")
-                                     // Common Windows system import libraries that
-                                     // real-world native libraries (SDL2, GDI-based
-                                     // libs, COM-using libs, multimedia, ...) require
-                                     // at link time. Adding them unconditionally is
-                                     // generic and harmless: an unused /defaultlib is
-                                     // simply ignored by the linker. Mirrors the
-                                     // existing Shell32/Advapi32/Ws2_32 entries.
-                                     .arg("/defaultlib:User32")
-                                     .arg("/defaultlib:Ole32")
-                                     .arg("/defaultlib:Oleaut32")
-                                     .arg("/defaultlib:Uuid")
-                                     .arg("/defaultlib:Gdi32")
-                                     .arg("/defaultlib:Winmm")
-                                     .arg("/defaultlib:Setupapi")
-                                     .arg("/defaultlib:Version")
-                                     .arg("/defaultlib:Imm32")
-                                     .arg("/defaultlib:Dinput8")
-                                     .arg("/defaultlib:Dxguid")
-                                     // Charger: inject prepared native artifacts (.lib).
-                                     .args(&charger_artifacts)
-                                     .status();
+                                let link_result = std::process::Command::new(llvm_tool("lld-link"))
+                                    .arg(&obj_path)
+                                    .arg(&runtime_obj)
+                                    .arg(&format!("/out:{}", exe_path))
+                                    .arg("/subsystem:console")
+                                    .arg("/OPT:REF")
+                                    .arg("/OPT:ICF")
+                                    // Allow unresolved symbols from third-party
+                                    // libraries whose headers declare optional
+                                    // features that are not compiled into the
+                                    // prepared artifact (e.g. SQLite's
+                                    // unlock-notify / snapshot / rtree entry
+                                    // points). These are never called by the
+                                    // Lime program, so leaving them unresolved
+                                    // is safe and matches how such libs are
+                                    // linked in practice.
+                                    .arg("/FORCE:UNRESOLVED")
+                                    .arg("/defaultlib:libcmt")
+                                    .arg("/defaultlib:oldnames")
+                                    .arg("/defaultlib:Winhttp")
+                                    .arg("/defaultlib:Shell32")
+                                    .arg("/defaultlib:Userenv")
+                                    .arg("/defaultlib:Advapi32")
+                                    .arg("/defaultlib:Ws2_32")
+                                    .arg("/defaultlib:Mswsock")
+                                    .arg("/defaultlib:Kernel32")
+                                    // Common Windows system import libraries that
+                                    // real-world native libraries (SDL2, GDI-based
+                                    // libs, COM-using libs, multimedia, ...) require
+                                    // at link time. Adding them unconditionally is
+                                    // generic and harmless: an unused /defaultlib is
+                                    // simply ignored by the linker. Mirrors the
+                                    // existing Shell32/Advapi32/Ws2_32 entries.
+                                    .arg("/defaultlib:User32")
+                                    .arg("/defaultlib:Ole32")
+                                    .arg("/defaultlib:Oleaut32")
+                                    .arg("/defaultlib:Uuid")
+                                    .arg("/defaultlib:Gdi32")
+                                    .arg("/defaultlib:Winmm")
+                                    .arg("/defaultlib:Setupapi")
+                                    .arg("/defaultlib:Version")
+                                    .arg("/defaultlib:Imm32")
+                                    .arg("/defaultlib:Dinput8")
+                                    .arg("/defaultlib:Dxguid")
+                                    // Charger: inject prepared native artifacts (.lib).
+                                    .args(&charger_artifacts)
+                                    .status();
                                 match link_result {
                                     Ok(s) if s.success() => {
                                         report.emitted_exe = Some(exe_path);
                                     }
                                     Ok(s) => {
-                                        eprintln!("warning: `lld-link` exited with failure (status {:?})", s);
-                                        eprintln!("warning: charger_artifacts = {:?}", charger_artifacts);
+                                        eprintln!(
+                                            "warning: `lld-link` exited with failure (status {:?})",
+                                            s
+                                        );
+                                        if options.verbose {
+                                            eprintln!(
+                                                "warning: charger_artifacts = {:?}",
+                                                charger_artifacts
+                                            );
+                                        }
                                     }
                                     Err(e) => {
                                         eprintln!("warning: `lld-link` failed to launch: {}", e);
@@ -4026,15 +4418,32 @@ pub fn compile_pipeline(
         }
     }
 
+    // Iteration 33 P1: a Build that requested object+executable output MUST
+    // end with an executable on disk. Linker failures were previously demoted
+    // to warnings here, which let `lime build` print `ok:` and exit 0 while
+    // producing no exe at all — the root cause of the long-misdiagnosed
+    // "closure capture failures" (they failed on a missing-exe assert).
+    // Both failure shapes are hard errors now:
+    //   * the linker subprocess failed or could not be launched
+    //     (its own diagnostics were already streamed to stderr), or
+    //   * the linker reported success but the expected executable is absent.
+    if mode == CompileMode::Build && options.emit_object && report.emitted_exe.is_none() {
+        return Err(
+            "error[E0501] build did not produce an executable (see linker \
+             diagnostics above). Note: Windows native builds require an MSVC / \
+             Windows SDK environment — run from an x64 Developer Command Prompt \
+             (vcvarsall.bat x64) or equivalent."
+                .to_string(),
+        );
+    }
+
     // Stage 9: execution (Run mode only).
     if mode == CompileMode::Run {
         if defs.functions.contains_key("main") {
-            call_function("main", Vec::new(), &defs)
-                .map_err(|e| format!("error[runtime]: {}", e))?;
+            call_function("main", Vec::new(), &defs).map_err(|e| format!("error[E0601] {}", e))?;
         } else {
             let mut env = HashMap::new();
-            execute_stmts(&stmts, &mut env, &defs)
-                .map_err(|e| format!("error[runtime]: {}", e))?;
+            execute_stmts(&stmts, &mut env, &defs).map_err(|e| format!("error[E0601] {}", e))?;
         }
         report.executed = true;
     }
@@ -4108,7 +4517,10 @@ fn llvm_bindir() -> Option<String> {
         for dir in std::env::split_paths(&paths) {
             let llvm_config = dir.join("llvm-config.exe");
             if llvm_config.exists() {
-                if let Ok(out) = std::process::Command::new(&llvm_config).arg("--bindir").output() {
+                if let Ok(out) = std::process::Command::new(&llvm_config)
+                    .arg("--bindir")
+                    .output()
+                {
                     if let Ok(s) = String::from_utf8(out.stdout) {
                         let bindir = s.trim();
                         if !bindir.is_empty() {
@@ -4192,32 +4604,54 @@ fn collect_called_names_stmt(s: &Stmt, out: &mut std::collections::HashSet<Strin
     match s {
         Stmt::Let { value, .. } => collect_called_names_expr(value, out),
         Stmt::Assign { value, .. } => collect_called_names_expr(value, out),
-        Stmt::Return { explicit_type: _, value: Some(e) } => collect_called_names_expr(e, out),
-        Stmt::Return { explicit_type: _, value: None } => {}
+        Stmt::Return {
+            explicit_type: _,
+            value: Some(e),
+        } => collect_called_names_expr(e, out),
+        Stmt::Return {
+            explicit_type: _,
+            value: None,
+        } => {}
         Stmt::Expr(e) => collect_called_names_expr(e, out),
-        Stmt::If { cond, then_branch, else_branch } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             collect_called_names_expr(cond, out);
-            for st in then_branch { collect_called_names_stmt(st, out); }
+            for st in then_branch {
+                collect_called_names_stmt(st, out);
+            }
             if let Some(eb) = else_branch {
-                for st in eb { collect_called_names_stmt(st, out); }
+                for st in eb {
+                    collect_called_names_stmt(st, out);
+                }
             }
         }
         Stmt::While { cond, body } => {
             collect_called_names_expr(cond, out);
-            for st in body { collect_called_names_stmt(st, out); }
+            for st in body {
+                collect_called_names_stmt(st, out);
+            }
         }
         Stmt::For { iterable, body, .. } => {
             collect_called_names_expr(iterable, out);
-            for st in body { collect_called_names_stmt(st, out); }
+            for st in body {
+                collect_called_names_stmt(st, out);
+            }
         }
         Stmt::Match { expr, arms } => {
             collect_called_names_expr(expr, out);
             for (_, body) in arms {
-                for st in body { collect_called_names_stmt(st, out); }
+                for st in body {
+                    collect_called_names_stmt(st, out);
+                }
             }
         }
         Stmt::Defer { body } => {
-            for st in body { collect_called_names_stmt(st, out); }
+            for st in body {
+                collect_called_names_stmt(st, out);
+            }
         }
         _ => {}
     }
@@ -4227,7 +4661,9 @@ fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<Strin
     match e {
         Expr::Call { func, args } => {
             out.insert(func.clone());
-            for a in args { collect_called_names_expr(a, out); }
+            for a in args {
+                collect_called_names_expr(a, out);
+            }
         }
         Expr::Ident(name) => {
             // Phase B-2.2: function names used as values (e.g. `let f = add`)
@@ -4235,11 +4671,15 @@ fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<Strin
             out.insert(name.clone());
         }
         Expr::FnDef { body, .. } => {
-            for s in body { collect_called_names_stmt(s, out); }
+            for s in body {
+                collect_called_names_stmt(s, out);
+            }
         }
         Expr::MethodCall { object, args, .. } => {
             collect_called_names_expr(object, out);
-            for a in args { collect_called_names_expr(a, out); }
+            for a in args {
+                collect_called_names_expr(a, out);
+            }
         }
         Expr::BinOp { left, right, .. } => {
             collect_called_names_expr(left, out);
@@ -4248,7 +4688,9 @@ fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<Strin
         Expr::UnOp { operand, .. } => collect_called_names_expr(operand, out),
         Expr::FieldAccess { object, .. } => collect_called_names_expr(object, out),
         Expr::Array(items) => {
-            for it in items { collect_called_names_expr(it, out); }
+            for it in items {
+                collect_called_names_expr(it, out);
+            }
         }
         Expr::Range { start, end } => {
             collect_called_names_expr(start, out);
@@ -4260,8 +4702,12 @@ fn collect_called_names_expr(e: &Expr, out: &mut std::collections::HashSet<Strin
         }
         Expr::Slice { target, start, end } => {
             collect_called_names_expr(target, out);
-            if let Some(s) = start { collect_called_names_expr(s, out); }
-            if let Some(e) = end { collect_called_names_expr(e, out); }
+            if let Some(s) = start {
+                collect_called_names_expr(s, out);
+            }
+            if let Some(e) = end {
+                collect_called_names_expr(e, out);
+            }
         }
         Expr::Await(inner) => collect_called_names_expr(inner, out),
         _ => {}
@@ -4283,8 +4729,14 @@ fn stmt_idents(out: &mut Vec<String>, s: &Stmt) {
     match s {
         Stmt::Let { value, .. } => expr_vars(value, out),
         Stmt::Assign { value, .. } => expr_vars(value, out),
-        Stmt::Return { explicit_type: _, value: Some(e) } => expr_vars(e, out),
-        Stmt::Return { explicit_type: _, value: None } => {}
+        Stmt::Return {
+            explicit_type: _,
+            value: Some(e),
+        } => expr_vars(e, out),
+        Stmt::Return {
+            explicit_type: _,
+            value: None,
+        } => {}
         Stmt::Expr(e) => expr_vars(e, out),
         Stmt::If {
             cond,
@@ -4503,7 +4955,9 @@ pub fn write_lock_file(
     out.push_str(&format!("version = \"{}\"\n\n", cfg.version));
 
     // Resolved packages: every declared import with its on-disk version.
-    let mut pkgs: Vec<(String, String)> = cfg.imports.iter()
+    let mut pkgs: Vec<(String, String)> = cfg
+        .imports
+        .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     pkgs.sort();
@@ -4513,7 +4967,10 @@ pub fn write_lock_file(
         out.push_str(&format!("name = \"{}\"\n", name));
         out.push_str(&format!("requested = \"{}\"\n", ver));
         out.push_str(&format!("resolved = \"{}\"\n", resolved));
-        out.push_str(&format!("source = \"{}/{}/{}\"\n\n", REGISTRY_ROOT, name, resolved));
+        out.push_str(&format!(
+            "source = \"{}/{}/{}\"\n\n",
+            REGISTRY_ROOT, name, resolved
+        ));
     }
 
     // Dependency edges (sorted, deduped).
@@ -4632,9 +5089,12 @@ impl JsonValue {
             JsonValue::Float(f) => JsonValue::Float(*f),
             JsonValue::String(s) => JsonValue::String(s.clone()),
             JsonValue::Array(arr) => JsonValue::Array(arr.iter().map(|v| v.deep_clone()).collect()),
-            JsonValue::Object(pairs) => {
-                JsonValue::Object(pairs.iter().map(|(k, v)| (k.clone(), v.deep_clone())).collect())
-            }
+            JsonValue::Object(pairs) => JsonValue::Object(
+                pairs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.deep_clone()))
+                    .collect(),
+            ),
         }
     }
 
@@ -4645,7 +5105,11 @@ impl JsonValue {
             JsonValue::Int(i) => i.to_string(),
             JsonValue::Float(f) => {
                 let s = format!("{}", f);
-                if s.contains('.') { s } else { format!("{}.0", s) }
+                if s.contains('.') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
             }
             JsonValue::String(s) => format!("\"{}\"", s),
             JsonValue::Array(arr) => {
@@ -4653,7 +5117,8 @@ impl JsonValue {
                 format!("[{}]", items.join(", "))
             }
             JsonValue::Object(pairs) => {
-                let items: Vec<String> = pairs.iter()
+                let items: Vec<String> = pairs
+                    .iter()
                     .map(|(k, v)| format!("\"{}\": {}", k, v.display()))
                     .collect();
                 format!("{{{}}}", items.join(", "))
@@ -4751,10 +5216,10 @@ struct Defs {
     interfaces: HashMap<String, InterfaceDef>,
     // Phase 1: precomputed symbol indexes so name/type resolution is O(1)
     // instead of a linear scan over every key.
-    fn_index: HashMap<Symbol, String>,   // interned func name -> full name
-    fn_bare: HashMap<String, Symbol>,    // bare suffix (e.g. "HashMap") -> func symbol
+    fn_index: HashMap<Symbol, String>, // interned func name -> full name
+    fn_bare: HashMap<String, Symbol>,  // bare suffix (e.g. "HashMap") -> func symbol
     type_index: HashMap<Symbol, String>, // interned type name -> full name
-    type_bare: HashMap<String, Symbol>,  // bare suffix -> type symbol (struct/state/iface)
+    type_bare: HashMap<String, Symbol>, // bare suffix -> type symbol (struct/state/iface)
     // Charger FFI: Lime function name -> (native linkable symbol, params, ret)
     // Keyed by (name, arity) so that C++ overloaded extern symbols sharing a
     // Lime name (e.g. `widget_area` with 1 vs 2 args) can both be resolved.
@@ -4779,25 +5244,40 @@ impl Defs {
         };
         // Result(T, E) 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｳ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓溘・荳ｻ・ｸ・ｷ繝ｻ・ｹ繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ陞ゅ・・ｽ・ｽ繝ｻ・ｻ鬮ｯ・ｷ闔ｨ螟ｲ・ｽ・｣繝ｻ・ｰ: 鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・･鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬯ｩ蜉ｱ・代・・ｽ繝ｻ・ｲ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驕ｶ髮・｣ｰ・､繝ｻ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ/State 鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・｣繝ｻ・ｰ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｿ髫ｰ雋ｻ・ｽ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ譏ｴ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬨ｾ・｡郢晢ｽｻ        // 鬮ｯ譎｢・ｽ・ｷ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・･ Success / Error 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｶ・｣・ｰ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩穂ｼ夲ｽｽ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬮ｯ・ｷ繝ｻ・ｷ髣比ｼ夲ｽｽ・｣驕ｯ・ｶ繝ｻ・ｳ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮陷夲ｽｱ鬯ｪ・ｭ陷奇｣ｰ繝ｻ・ｭ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬯ｮ・ｫ繝ｻ・ｪ繝ｻ縺､ﾂ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬯ｮ・ｫ陋ｹ繝ｻ・ｽ・ｽ繝ｻ・ｧ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驕ｶ鄙ｫ繝ｻ
         // Ok / Err 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮｣豈費ｽｼ螟ｲ・ｽ・ｽ繝ｻ・｣鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・･鬩幢ｽ､隰ｫ・ｾ繝ｻ・ｽ繝ｻ・ｯ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
-        defs.state_variants.insert("Success".to_string(), "Result".to_string());
-        defs.state_variants.insert("Error".to_string(), "Result".to_string());
+        defs.state_variants
+            .insert("Success".to_string(), "Result".to_string());
+        defs.state_variants
+            .insert("Error".to_string(), "Result".to_string());
         defs.states.insert(
             "Result".to_string(),
             vec!["Success".to_string(), "Error".to_string()],
         );
-        defs.variant_fields.insert("Success".to_string(), vec![("_0".to_string(), "T".to_string())]);
-        defs.variant_fields.insert("Error".to_string(), vec![("_0".to_string(), "E".to_string())]);
-        defs.enum_type_params.insert("Result".to_string(), vec!["T".to_string(), "E".to_string()]);
+        defs.variant_fields.insert(
+            "Success".to_string(),
+            vec![("_0".to_string(), "T".to_string())],
+        );
+        defs.variant_fields.insert(
+            "Error".to_string(),
+            vec![("_0".to_string(), "E".to_string())],
+        );
+        defs.enum_type_params
+            .insert("Result".to_string(), vec!["T".to_string(), "E".to_string()]);
 
-        defs.state_variants.insert("Some".to_string(), "Option".to_string());
-        defs.state_variants.insert("None".to_string(), "Option".to_string());
+        defs.state_variants
+            .insert("Some".to_string(), "Option".to_string());
+        defs.state_variants
+            .insert("None".to_string(), "Option".to_string());
         defs.states.insert(
             "Option".to_string(),
             vec!["Some".to_string(), "None".to_string()],
         );
-        defs.variant_fields.insert("Some".to_string(), vec![("_0".to_string(), "T".to_string())]);
+        defs.variant_fields.insert(
+            "Some".to_string(),
+            vec![("_0".to_string(), "T".to_string())],
+        );
         defs.variant_fields.insert("None".to_string(), vec![]);
-        defs.enum_type_params.insert("Option".to_string(), vec!["T".to_string()]);
+        defs.enum_type_params
+            .insert("Option".to_string(), vec!["T".to_string()]);
         defs
     }
 
@@ -4833,7 +5313,10 @@ impl Defs {
     // Resolve a bare name to its full type name using the precomputed index.
     // Replaces the previous O(S+I+T) linear scan in `type_from_str`.
     pub(crate) fn resolve_type(&self, name: &str) -> Option<String> {
-        if self.structs.contains_key(name) || self.states.contains_key(name) || self.interfaces.contains_key(name) {
+        if self.structs.contains_key(name)
+            || self.states.contains_key(name)
+            || self.interfaces.contains_key(name)
+        {
             return Some(name.to_string());
         }
         let bare = bare_name(name);
@@ -4996,7 +5479,8 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                 methods,
             } => {
                 if !type_params.is_empty() {
-                    defs.enum_type_params.insert(name.clone(), type_params.clone());
+                    defs.enum_type_params
+                        .insert(name.clone(), type_params.clone());
                 }
                 let var_names: Vec<String> = variants.iter().map(|(n, _)| n.clone()).collect();
                 for (vname, fields) in variants {
@@ -5027,7 +5511,11 @@ fn collect_defs(stmts: &[Stmt], defs: &mut Defs) {
                 );
                 collect_defs(body, defs);
             }
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 collect_defs(then_branch, defs);
                 if let Some(els) = else_branch {
                     collect_defs(els, defs);
@@ -5055,8 +5543,26 @@ impl PartialEq for Value {
             (Value::Map(a), Value::Map(b)) => a == b,
             (Value::Set(a), Value::Set(b)) => a == b,
             (Value::Option(a), Value::Option(b)) => a == b,
-            (Value::State { name: an, values: av }, Value::State { name: bn, values: bv }) => an == bn && av == bv,
-            (Value::Struct { name: an, fields: af }, Value::Struct { name: bn, fields: bf }) => an == bn && af == bf,
+            (
+                Value::State {
+                    name: an,
+                    values: av,
+                },
+                Value::State {
+                    name: bn,
+                    values: bv,
+                },
+            ) => an == bn && av == bv,
+            (
+                Value::Struct {
+                    name: an,
+                    fields: af,
+                },
+                Value::Struct {
+                    name: bn,
+                    fields: bf,
+                },
+            ) => an == bn && af == bf,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::FuncRef(a), Value::FuncRef(b)) => a == b,
             (Value::Json(a), Value::Json(b)) => a.display() == b.display(),
@@ -5142,7 +5648,8 @@ impl Value {
                 format!("Slice[{}]", strs.join(", "))
             }
             Value::Map(m) => {
-                let entries: Vec<String> = m.iter()
+                let entries: Vec<String> = m
+                    .iter()
                     .map(|(k, v)| format!("{}: {}", k.to_string(), v.to_string()))
                     .collect();
                 format!("Map({{{}}})", entries.join(", "))
@@ -5152,11 +5659,11 @@ impl Value {
                 format!("Set({})", elems.join(", "))
             }
             Value::StringBuilder(s) => s.clone(),
-        Value::Option(opt) => match opt {
-            Some(v) => format!("Some({})", v.to_string()),
-            None => "None".to_string(),
-        },
-        Value::State { name, values } => {
+            Value::Option(opt) => match opt {
+                Some(v) => format!("Some({})", v.to_string()),
+                None => "None".to_string(),
+            },
+            Value::State { name, values } => {
                 if values.is_empty() {
                     name.clone()
                 } else {
@@ -5168,10 +5675,14 @@ impl Value {
             Value::Future { func, .. } => format!("<future {}>", func),
             Value::FuncRef(name) => format!("<fn {}>", name),
             Value::Closure { params, .. } => {
-                let parts: Vec<String> = params.iter()
+                let parts: Vec<String> = params
+                    .iter()
                     .map(|(n, t)| {
-                        if t == "_" { n.clone() }
-                        else { format!("{}: {}", t, n) }
+                        if t == "_" {
+                            n.clone()
+                        } else {
+                            format!("{}: {}", t, n)
+                        }
                     })
                     .collect();
                 format!("<fn({})>", parts.join(", "))
@@ -5359,7 +5870,10 @@ fn type_from_str(s: &str, defs: &Defs) -> Type {
         return cached.clone();
     }
     let t = type_from_str_impl(s, defs);
-    global_type_cache().lock().unwrap().insert(s.to_string(), t.clone());
+    global_type_cache()
+        .lock()
+        .unwrap()
+        .insert(s.to_string(), t.clone());
     t
 }
 
@@ -5392,7 +5906,10 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
             let param_types: Vec<Type> = if params_str.trim().is_empty() {
                 Vec::new()
             } else {
-                params_str.split(',').map(|p| type_from_str(p.trim(), defs)).collect()
+                params_str
+                    .split(',')
+                    .map(|p| type_from_str(p.trim(), defs))
+                    .collect()
             };
             let ret_type = type_from_str(ret_str, defs);
             return Type::Fn(param_types, Box::new(ret_type));
@@ -5412,7 +5929,7 @@ fn type_from_str_impl(s: &str, defs: &Defs) -> Type {
     }
     // Tuple types: (int, str)
     if s.starts_with('(') && s.ends_with(')') {
-        let inner = &s[1..s.len()-1];
+        let inner = &s[1..s.len() - 1];
         if !inner.is_empty() {
             let mut elems = Vec::new();
             let mut depth = 0i32;
@@ -5842,12 +6359,7 @@ fn eval_struct_method_or_call(
 }
 
 // struct 鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻinterface 鬩幢ｽ｢繝ｻ・ｧ鬮ｮ蛹ｺ・ｨ螂・ｽｽ・｢陝ｷ繝ｻ・｣・ｰ陞滂ｽｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE arg 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ讖ｸ・ｽ・ｳ髮九・・ｽ・ｯ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髯ｷ闌ｨ・ｽ・ｷ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髣費｣ｰ陋ｹ繝ｻ・ｽ・ｽ繝ｻ・ｾ驛｢譎｢・ｽ・ｻ Add(Point)驛｢譎｢・ｽ・ｻ驛｢譎｢・ｽ・ｻ
-fn struct_implements_interface_with(
-    defs: &Defs,
-    sname: &str,
-    iface_name: &str,
-    arg: &str,
-) -> bool {
+fn struct_implements_interface_with(defs: &Defs, sname: &str, iface_name: &str, arg: &str) -> bool {
     let sdef = match defs.structs.get(sname) {
         Some(s) => s,
         None => return false,
@@ -5927,7 +6439,11 @@ fn resolve_operator_interface(
     // Return None for primitives so resolve_operators_expr uses Builtin
     // (int/str/float don't have operator-overload struct methods).
     if lt == &Type::Var("_".to_string()) || rt == &Type::Var("_".to_string()) {
-        let concrete = if lt != &Type::Var("_".to_string()) { lt } else { rt };
+        let concrete = if lt != &Type::Var("_".to_string()) {
+            lt
+        } else {
+            rt
+        };
         return match concrete {
             Type::Struct(n) => {
                 let sname = n.clone();
@@ -5935,17 +6451,23 @@ fn resolve_operator_interface(
                     "+" => {
                         if struct_implements_interface_with(defs, &sname, "Add", &sname) {
                             Some(("add".to_string(), Type::Struct(sname)))
-                        } else { None }
+                        } else {
+                            None
+                        }
                     }
                     "==" | "!=" => {
                         if struct_implements_interface_with(defs, &sname, "Equal", &sname) {
                             Some(("equal".to_string(), Type::Bool))
-                        } else { None }
+                        } else {
+                            None
+                        }
                     }
                     "<" | ">" | "<=" | ">=" => {
                         if struct_implements_interface_with(defs, &sname, "Compare", &sname) {
                             Some(("compare".to_string(), Type::Bool))
-                        } else { None }
+                        } else {
+                            None
+                        }
                     }
                     _ => None,
                 }
@@ -6032,8 +6554,13 @@ fn resolve_operators_defs(defs: &mut Defs) {
         }
     }
 
-    let mut mworks: Vec<(String, String, HashMap<String, Vec<String>>, HashMap<String, Type>, Vec<Stmt>)> =
-        Vec::new();
+    let mut mworks: Vec<(
+        String,
+        String,
+        HashMap<String, Vec<String>>,
+        HashMap<String, Type>,
+        Vec<Stmt>,
+    )> = Vec::new();
     for (sname, sdef) in defs.structs.iter() {
         for (mname, mdef) in &sdef.methods {
             let mut cons: HashMap<String, Vec<String>> = HashMap::new();
@@ -6047,13 +6574,7 @@ fn resolve_operators_defs(defs: &mut Defs) {
             for (pname, ptype) in &mdef.params {
                 env.insert(pname.clone(), type_from_str(ptype, defs));
             }
-            mworks.push((
-                sname.clone(),
-                mname.clone(),
-                cons,
-                env,
-                mdef.body.clone(),
-            ));
+            mworks.push((sname.clone(), mname.clone(), cons, env, mdef.body.clone()));
         }
     }
     for (sname, mname, cons, env, mut body) in mworks {
@@ -6081,7 +6602,11 @@ fn resolve_operators_stmt(
             resolve_operators_expr(value, defs, env, constraints);
         }
         Stmt::Assign { value, .. } => resolve_operators_expr(value, defs, env, constraints),
-        Stmt::If { cond, then_branch, else_branch } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             resolve_operators_expr(cond, defs, env, constraints);
             resolve_operators_stmts(then_branch, defs, constraints, env);
             if let Some(b) = else_branch {
@@ -6092,7 +6617,11 @@ fn resolve_operators_stmt(
             resolve_operators_expr(cond, defs, env, constraints);
             resolve_operators_stmts(body, defs, constraints, env);
         }
-        Stmt::For { var, iterable, body } => {
+        Stmt::For {
+            var,
+            iterable,
+            body,
+        } => {
             // iterable 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｫ髯ｬ諛医′郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｽ郢晢ｽｻvar 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ髯ｷ莨夲ｽｽ・ｱ驕ｯ・ｶ繝ｻ・ｻ鬮ｴ謇假ｽｽ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ貅倥・郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驕ｶ莨・ｽｦ・ｴ隲ｱ繝ｻ繝ｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ闔ｨ螟ｲ・ｽ・｣繝ｻ・ｰ
             if let Ok(it_ty) = infer_type(iterable, env, defs, constraints) {
                 let elem = match &it_ty {
@@ -6104,14 +6633,22 @@ fn resolve_operators_stmt(
             resolve_operators_expr(iterable, defs, env, constraints);
             resolve_operators_stmts(body, defs, constraints, env);
         }
-        Stmt::Return { explicit_type: _, value: Some(e) } => resolve_operators_expr(e, defs, env, constraints),
+        Stmt::Return {
+            explicit_type: _,
+            value: Some(e),
+        } => resolve_operators_expr(e, defs, env, constraints),
         Stmt::Match { expr, arms, .. } => {
             resolve_operators_expr(expr, defs, env, constraints);
             for (_, body) in arms.iter_mut() {
                 resolve_operators_stmts(body, defs, constraints, env);
             }
         }
-        Stmt::Fn { params, body, constraints: fc, .. } => {
+        Stmt::Fn {
+            params,
+            body,
+            constraints: fc,
+            ..
+        } => {
             let mut fenv = env.clone();
             let mut fcons = constraints.clone();
             for (tv, iface) in fc {
@@ -6194,8 +6731,8 @@ fn infer_type(
                 "io_write_stdout" | "io_write_stderr" => Ok(Type::Bool),
                 "read_file" => Ok(Type::String),
                 "write_file" | "append_file" | "remove_file" | "file_exists" | "fs_exists"
-                    | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file" | "fs_is_dir"
-                    | "fs_remove_dir" => Ok(Type::Bool),
+                | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file" | "fs_is_dir"
+                | "fs_remove_dir" => Ok(Type::Bool),
                 "fs_size" => Ok(Type::Int),
                 "fs_metadata" => Ok(Type::Struct("fs.FileMetadata".to_string())),
                 "fs_list_dir" | "fs_read_lines" => Ok(Type::List(Box::new(Type::String))),
@@ -6203,8 +6740,8 @@ fn infer_type(
                 "time_now" => Ok(Type::Float),
                 "time_sleep" => Ok(Type::Bool),
                 "split" => Ok(Type::List(Box::new(Type::String))),
-                "trim" | "slice" | "to_upper" | "to_lower" | "replace" | "repeat"
-                    | "contains" | "starts_with" | "ends_with" | "byte_len" => {
+                "trim" | "slice" | "to_upper" | "to_lower" | "replace" | "repeat" | "contains"
+                | "starts_with" | "ends_with" | "byte_len" => {
                     // String-operation builtins: return String for most,
                     // Bool for contains/starts_with/ends_with
                     match func.as_str() {
@@ -6283,10 +6820,10 @@ fn infer_type(
                             return Err("clamp() expects float arguments".to_string());
                         }
                     }
-                     Ok(Type::Float)
+                    Ok(Type::Float)
                 }
-                "trunc" | "exp" | "log" | "log10"
-                | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
+                "trunc" | "exp" | "log" | "log10" | "sin" | "cos" | "tan" | "asin" | "acos"
+                | "atan" => {
                     if args.len() != 1 {
                         return Err(format!("{}() takes exactly 1 argument", func));
                     }
@@ -6297,9 +6834,7 @@ fn infer_type(
                         Err(format!("{}() expects a float argument", func))
                     }
                 }
-                "math_pi" | "math_e" => {
-                    Ok(Type::Float)
-                }
+                "math_pi" | "math_e" => Ok(Type::Float),
                 // List: list_insert, list_set, list_get, list_clear, list_sort, list_clone
                 "list_insert" => {
                     if let Some(first) = args.first() {
@@ -6391,91 +6926,125 @@ fn infer_type(
                 "stack_len" | "stack_size" => Ok(Type::Int),
                 "stack_is_empty" => Ok(Type::Bool),
                 "json_parse" => {
-                    if args.len() != 1 { return Err("json_parse() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_parse() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Json)
                 }
                 "json_stringify" => {
-                    if args.len() != 1 { return Err("json_stringify() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_stringify() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "json_get" => {
-                    if args.len() != 2 { return Err("json_get() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("json_get() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::Json)))
                 }
                 "json_has" => {
-                    if args.len() != 2 { return Err("json_has() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("json_has() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "json_len" => {
-                    if args.len() != 1 { return Err("json_len() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_len() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Int)
                 }
                 "json_at" => {
-                    if args.len() != 2 { return Err("json_at() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("json_at() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Json)
                 }
                 "json_as_string" => {
-                    if args.len() != 1 { return Err("json_as_string() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_as_string() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "json_as_int" => {
-                    if args.len() != 1 { return Err("json_as_int() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_as_int() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Int)
                 }
                 "json_as_float" => {
-                    if args.len() != 1 { return Err("json_as_float() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_as_float() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Float)
                 }
                 "json_as_bool" => {
-                    if args.len() != 1 { return Err("json_as_bool() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("json_as_bool() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "json_null" | "json_object" | "json_array" => {
-                    if !args.is_empty() { return Err(format!("{}() takes no arguments", func)); }
+                    if !args.is_empty() {
+                        return Err(format!("{}() takes no arguments", func));
+                    }
                     Ok(Type::Json)
                 }
                 "json_set" => {
-                    if args.len() != 3 { return Err("json_set() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err("json_set() takes exactly 3 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Json)
                 }
                 "json_push" => {
-                    if args.len() != 2 { return Err("json_push() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("json_push() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Json)
                 }
                 "option_some" => {
-                    if args.len() != 1 { return Err("option_some() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("option_some() takes exactly 1 argument".to_string());
+                    }
                     let inner = infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(inner)))
                 }
                 "option_none" => {
-                    if !args.is_empty() { return Err("option_none() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("option_none() takes no arguments".to_string());
+                    }
                     Ok(Type::Option(Box::new(Type::Unknown)))
                 }
                 "option_is_some" | "option_is_none" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "option_extract" => {
-                    if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("option_extract() takes exactly 1 argument".to_string());
+                    }
                     let opt_ty = infer_type(&args[0], env, defs, constraints)?;
                     match opt_ty {
                         Type::Option(inner) => Ok(*inner),
@@ -6483,51 +7052,75 @@ fn infer_type(
                     }
                 }
                 "option_extract_or" => {
-                    if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("option_extract_or() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)
                 }
                 "option_map" => {
-                    if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("option_map() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::Unknown)))
                 }
                 "option_and" => {
-                    if args.len() != 2 { return Err("option_and() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("option_and() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::Unknown)))
                 }
                 "option_or" => {
-                    if args.len() != 2 { return Err("option_or() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("option_or() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::Unknown)))
                 }
                 "option_equals" => {
-                    if args.len() != 2 { return Err("option_equals() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("option_equals() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "result_success" => {
-                    if args.len() != 1 { return Err("result_success() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("result_success() takes exactly 1 argument".to_string());
+                    }
                     let inner = infer_type(&args[0], env, defs, constraints)?;
-                    Ok(Type::State(format!("Result({},unknown)", type_to_string(&inner))))
+                    Ok(Type::State(format!(
+                        "Result({},unknown)",
+                        type_to_string(&inner)
+                    )))
                 }
                 "result_error" => {
-                    if args.len() != 1 { return Err("result_error() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("result_error() takes exactly 1 argument".to_string());
+                    }
                     let inner = infer_type(&args[0], env, defs, constraints)?;
-                    Ok(Type::State(format!("Result(unknown,{})", type_to_string(&inner))))
+                    Ok(Type::State(format!(
+                        "Result(unknown,{})",
+                        type_to_string(&inner)
+                    )))
                 }
                 "result_is_success" | "result_is_error" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "result_extract" => {
-                    if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("result_extract() takes exactly 1 argument".to_string());
+                    }
                     let res_ty = infer_type(&args[0], env, defs, constraints)?;
                     match res_ty {
                         Type::State(s) if s.starts_with("Result(") => {
@@ -6540,368 +7133,561 @@ fn infer_type(
                     }
                 }
                 "result_extract_or" => {
-                    if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("result_extract_or() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)
                 }
                 "result_map" => {
-                    if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("result_map() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::State("Result(unknown,unknown)".to_string()))
                 }
                 "result_and" => {
-                    if args.len() != 2 { return Err("result_and() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("result_and() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::State("Result(unknown,unknown)".to_string()))
                 }
                 "result_or" => {
-                    if args.len() != 2 { return Err("result_or() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("result_or() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::State("Result(unknown,unknown)".to_string()))
                 }
                 "result_equals" => {
-                    if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("result_equals() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "path_join" => {
-                    if args.len() != 2 { return Err("path_join() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("path_join() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::String)
                 }
-                "path_basename" | "path_dirname" | "path_filename" | "path_extension" | "path_normalize" | "path_parent" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                "path_basename" | "path_dirname" | "path_filename" | "path_extension"
+                | "path_normalize" | "path_parent" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "path_is_absolute" => {
-                    if args.len() != 1 { return Err("path_is_absolute() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("path_is_absolute() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "path_equals" => {
-                    if args.len() != 2 { return Err("path_equals() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("path_equals() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "os_name" | "os_arch" | "os_platform" | "os_hostname" | "os_cwd" => {
-                    if !args.is_empty() { return Err(format!("{}() takes no arguments", func)); }
+                    if !args.is_empty() {
+                        return Err(format!("{}() takes no arguments", func));
+                    }
                     Ok(Type::String)
                 }
                 "os_set_cwd" => {
-                    if args.len() != 1 { return Err("os_set_cwd() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("os_set_cwd() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "env_get" => {
-                    if args.len() != 1 { return Err("env_get() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("env_get() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::String)))
                 }
                 "env_has" => {
-                    if args.len() != 1 { return Err("env_has() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("env_has() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "env_set" => {
-                    if args.len() != 2 { return Err("env_set() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("env_set() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "env_remove" => {
-                    if args.len() != 1 { return Err("env_remove() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("env_remove() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "env_all" => {
-                    if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("env_all() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
                 // ===== Regex operations (Phase C-1.10) =====
                 "regex_compile" => {
-                    if args.len() != 1 { return Err("regex_compile() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("regex_compile() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::String)))
                 }
                 "regex_is_match" => {
-                    if args.len() != 2 { return Err("regex_is_match() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("regex_is_match() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "regex_match" | "regex_find" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Option(Box::new(Type::String)))
                 }
                 "regex_find_all" => {
-                    if args.len() != 2 { return Err("regex_find_all() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("regex_find_all() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::List(Box::new(Type::String)))
                 }
                 "regex_replace" | "regex_replace_all" => {
-                    if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+                    if args.len() != 3 {
+                        return Err(format!("{}() takes exactly 3 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "regex_split" => {
-                    if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("regex_split() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::List(Box::new(Type::String)))
                 }
                 // ===== Process operations (Phase C-1.11) =====
                 "process_spawn" => {
-                    if args.len() != 2 { return Err("process_spawn() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("process_spawn() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "process_run" | "process_output" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "process_wait" => {
-                    if args.len() != 1 { return Err("process_wait() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("process_wait() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Int)
                 }
                 "process_kill" => {
-                    if args.len() != 1 { return Err("process_kill() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("process_kill() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "process_status" => {
-                    if args.len() != 1 { return Err("process_status() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("process_status() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "process_args" => {
-                    if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("process_args() takes no arguments".to_string());
+                    }
                     Ok(Type::List(Box::new(Type::String)))
                 }
                 // ===== Requests operations (Phase C-1.12) =====
                 "requests_client_new" => {
-                    if !args.is_empty() { return Err("requests_client_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_client_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown) // opaque handle
                 }
                 "requests_client_builder_new" => {
-                    if !args.is_empty() { return Err("requests_client_builder_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_client_builder_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
                 "requests_client_builder_build" => {
-                    if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_client_builder_build() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_client_builder_default_headers" => {
-                    if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_client_builder_default_headers() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_client_builder_timeout" | "requests_client_builder_redirect_limit" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_client_builder_redirect_disabled" => {
-                    if args.len() != 1 { return Err("requests_client_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_client_builder_redirect_disabled() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_client_builder_proxy" => {
-                    if args.len() != 2 { return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_client_builder_proxy() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_client_builder_tls_config" => {
-                    if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_client_builder_tls_config() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_new" => {
-                    if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_request_builder_new() takes exactly 3 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_header" => {
-                    if args.len() != 3 { return Err("requests_request_builder_header() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_request_builder_header() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_headers" | "requests_request_builder_multipart" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_query" | "requests_request_builder_form" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_json" => {
-                    if args.len() != 2 { return Err("requests_request_builder_json() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_json() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_timeout" | "requests_request_builder_redirect_limit" => {
-                    if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_redirect_disabled" => {
-                    if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_request_builder_redirect_disabled() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_basic_auth" => {
-                    if args.len() != 3 { return Err("requests_request_builder_basic_auth() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_request_builder_basic_auth() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_bearer_auth" => {
-                    if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_bearer_auth() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_send" => {
-                    if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("requests_send() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown) // Result(Response, RequestError)
                 }
                 "requests_response_status" => {
-                    if args.len() != 1 { return Err("requests_response_status() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_status() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Int) // StatusCode
                 }
                 "requests_response_headers" => {
-                    if args.len() != 1 { return Err("requests_response_headers() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_headers() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_response_url" => {
-                    if args.len() != 1 { return Err("requests_response_url() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("requests_response_url() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "requests_response_text" => {
-                    if args.len() != 1 { return Err("requests_response_text() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("requests_response_text() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "requests_response_bytes" => {
-                    if args.len() != 1 { return Err("requests_response_bytes() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_bytes() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_response_json" => {
-                    if args.len() != 1 { return Err("requests_response_json() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("requests_response_json() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_response_content_length" => {
-                    if args.len() != 1 { return Err("requests_response_content_length() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_content_length() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Int)
                 }
-                "requests_response_is_success" | "requests_response_is_client_error" | "requests_response_is_server_error" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                "requests_response_is_success"
+                | "requests_response_is_client_error"
+                | "requests_response_is_server_error" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "requests_response_error_for_status" => {
-                    if args.len() != 1 { return Err("requests_response_error_for_status() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_error_for_status() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown) // Result(Response, RequestError)
                 }
                 "requests_status_code_code" => {
-                    if args.len() != 1 { return Err("requests_status_code_code() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_status_code_code() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Int)
                 }
-                "requests_status_code_is_success" | "requests_status_code_is_client_error"
-                | "requests_status_code_is_server_error" | "requests_status_code_is_redirect" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                "requests_status_code_is_success"
+                | "requests_status_code_is_client_error"
+                | "requests_status_code_is_server_error"
+                | "requests_status_code_is_redirect" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "requests_header_map_new" => {
-                    if !args.is_empty() { return Err("requests_header_map_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_header_map_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
-                "requests_header_map_insert" | "requests_header_map_append" | "requests_header_map_remove" => {
-                    if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
+                "requests_header_map_insert"
+                | "requests_header_map_append"
+                | "requests_header_map_remove" => {
+                    if args.len() != 3 {
+                        return Err(format!("{}() takes exactly 3 arguments", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_header_map_get" => {
-                    if args.len() != 2 { return Err("requests_header_map_get() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_header_map_get() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown) // Option(str)
                 }
                 "requests_header_map_contains" => {
-                    if args.len() != 2 { return Err("requests_header_map_contains() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_header_map_contains() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
                 "requests_multipart_new" => {
-                    if !args.is_empty() { return Err("requests_multipart_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_multipart_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
                 "requests_multipart_text" => {
-                    if args.len() != 3 { return Err("requests_multipart_text() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_multipart_text() takes exactly 3 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_multipart_file" => {
-                    if args.len() != 3 { return Err("requests_multipart_file() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_multipart_file() takes exactly 3 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_multipart_file_with_metadata" => {
-                    if args.len() != 5 { return Err("requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string()); }
+                    if args.len() != 5 {
+                        return Err(
+                            "requests_multipart_file_with_metadata() takes exactly 5 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
@@ -6910,190 +7696,321 @@ fn infer_type(
                     Ok(Type::Unknown)
                 }
                 "requests_tls_config_new" => {
-                    if !args.is_empty() { return Err("requests_tls_config_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_tls_config_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
                 "requests_tls_config_add_ca_cert" => {
-                    if args.len() != 2 { return Err("requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_tls_config_add_ca_cert() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_tls_config_add_client_cert" => {
-                    if args.len() != 3 { return Err("requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_tls_config_add_client_cert() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
-                "requests_tls_config_danger_accept_invalid_certs" | "requests_tls_config_danger_accept_invalid_hostnames" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                "requests_tls_config_danger_accept_invalid_certs"
+                | "requests_tls_config_danger_accept_invalid_hostnames" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_cookie_jar_new" => {
-                    if !args.is_empty() { return Err("requests_cookie_jar_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_cookie_jar_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
                 "requests_cookie_jar_add" => {
-                    if args.len() != 2 { return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_cookie_jar_add() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_cookie_parse" => {
-                    if args.len() != 1 { return Err("requests_cookie_parse() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("requests_cookie_parse() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_response_copy_to" => {
-                    if args.len() != 2 { return Err("requests_response_copy_to() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_response_copy_to() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_response_chunks" => {
-                    if args.len() != 2 { return Err("requests_response_chunks() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_response_chunks() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_response_stream" => {
-                    if args.len() != 1 { return Err("requests_response_stream() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_stream() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_stream_read" => {
-                    if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("requests_stream_read() takes exactly 2 arguments".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unknown) // Option(bytes)
                 }
                 "requests_stream_has_more" => {
-                    if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_stream_has_more() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Bool)
                 }
-                "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
-                | "requests_header_map_free" | "requests_multipart_free"
-                | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
-                    if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
+                "requests_client_free"
+                | "requests_request_builder_free"
+                | "requests_response_free"
+                | "requests_header_map_free"
+                | "requests_multipart_free"
+                | "requests_tls_config_free"
+                | "requests_cookie_jar_free"
+                | "requests_stream_free" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_new" => {
-                    if !args.is_empty() { return Err("requests_session_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err("requests_session_new() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
                 "requests_session_request" => {
-                    if args.len() != 3 { return Err("requests_session_request() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_session_request() takes exactly 3 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_request_builder_set_headers" => {
-                    if args.len() != 2 { return Err("requests_request_builder_set_headers() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_set_headers() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_request_builder_verify" => {
-                    if args.len() != 2 { return Err("requests_request_builder_verify() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_verify() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_response_headers_list" => {
-                    if args.len() != 1 { return Err("requests_response_headers_list() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_headers_list() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown)
                 }
                 "requests_session_free" => {
-                    if args.len() != 1 { return Err("requests_session_free() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err("requests_session_free() takes exactly 1 argument".to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 // Cookie jar operations
                 "requests_cookie_jar_add_parsed" => {
-                    if args.len() != 2 { return Err("requests_cookie_jar_add_parsed() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err("requests_cookie_jar_add_parsed() takes exactly 2 arguments"
+                            .to_string());
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_cookie_jar_update_from_response" => {
-                    if args.len() != 3 { return Err("requests_cookie_jar_update_from_response() takes exactly 3 arguments".to_string()); }
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_cookie_jar_update_from_response() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_cookie_jar_get_cookie_header" => {
-                    if args.len() != 2 { return Err("requests_cookie_jar_get_cookie_header() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_cookie_jar_get_cookie_header() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 "requests_cookie_jar_get_all" => {
-                    if args.len() != 1 { return Err("requests_cookie_jar_get_all() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_cookie_jar_get_all() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown) // list(str)
                 }
                 "requests_cookie_jar_get" => {
-                    if args.len() != 2 { return Err("requests_cookie_jar_get() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_cookie_jar_get() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::String)
                 }
                 // Session setters
                 "requests_session_set_default_headers" => {
-                    if args.len() != 2 { return Err("requests_session_set_default_headers() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_session_set_default_headers() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_set_default_params" => {
-                    if args.len() != 2 { return Err("requests_session_set_default_params() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_session_set_default_params() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_set_timeout" => {
-                    if args.len() != 2 { return Err("requests_session_set_timeout() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_session_set_timeout() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_set_verify" => {
-                    if args.len() != 2 { return Err("requests_session_set_verify() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_session_set_verify() takes exactly 2 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_set_redirect_limit" => {
-                    if args.len() != 2 { return Err("requests_session_set_redirect_limit() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_session_set_redirect_limit() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_set_disable_redirects" => {
-                    if args.len() != 2 { return Err("requests_session_set_disable_redirects() takes exactly 2 arguments".to_string()); }
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_session_set_disable_redirects() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_session_cookies" => {
-                    if args.len() != 1 { return Err("requests_session_cookies() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_session_cookies() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown) // list(str)
                 }
                 // Redirect history
                 "requests_redirect_history_new" => {
-                    if !args.is_empty() { return Err("requests_redirect_history_new() takes no arguments".to_string()); }
+                    if !args.is_empty() {
+                        return Err(
+                            "requests_redirect_history_new() takes no arguments".to_string()
+                        );
+                    }
                     Ok(Type::Unknown)
                 }
                 "requests_redirect_history_add" => {
-                    if args.len() != 4 { return Err("requests_redirect_history_add() takes exactly 4 arguments".to_string()); }
+                    if args.len() != 4 {
+                        return Err(
+                            "requests_redirect_history_add() takes exactly 4 arguments".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     infer_type(&args[1], env, defs, constraints)?;
                     infer_type(&args[2], env, defs, constraints)?;
@@ -7101,17 +8018,30 @@ fn infer_type(
                     Ok(Type::Unit)
                 }
                 "requests_redirect_history_list" => {
-                    if args.len() != 1 { return Err("requests_redirect_history_list() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_redirect_history_list() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown) // list(str)
                 }
                 "requests_redirect_history_free" => {
-                    if args.len() != 1 { return Err("requests_redirect_history_free() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_redirect_history_free() takes exactly 1 argument".to_string()
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unit)
                 }
                 "requests_response_redirect_history" => {
-                    if args.len() != 1 { return Err("requests_response_redirect_history() takes exactly 1 argument".to_string()); }
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_redirect_history() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
                     infer_type(&args[0], env, defs, constraints)?;
                     Ok(Type::Unknown) // list(str)
                 }
@@ -7125,11 +8055,17 @@ fn infer_type(
                         let concrete_state = if let Some(tp) = enum_tp {
                             if !tp.is_empty() {
                                 let fields = defs.variant_fields.get(&resolved);
-                                let mut concrete_args: Vec<String> = vec!["unknown".to_string(); tp.len()];
+                                let mut concrete_args: Vec<String> =
+                                    vec!["unknown".to_string(); tp.len()];
                                 if let Some(flds) = fields {
                                     for (arg, (_, ftype)) in args.iter().zip(flds.iter()) {
                                         if let Some(pos) = tp.iter().position(|p| p == ftype) {
-                                            concrete_args[pos] = type_to_string(&infer_type(arg, env, defs, constraints)?);
+                                            concrete_args[pos] = type_to_string(&infer_type(
+                                                arg,
+                                                env,
+                                                defs,
+                                                constraints,
+                                            )?);
                                         }
                                     }
                                 }
@@ -7179,7 +8115,8 @@ fn infer_type(
                                 } else {
                                     match infer_generic_args(&resolved, args, env, defs, None) {
                                         Ok(targs) => {
-                                            let sub = subst_type(rt, &f.type_params, &targs.join(","));
+                                            let sub =
+                                                subst_type(rt, &f.type_params, &targs.join(","));
                                             Ok(type_from_str(&sub, defs))
                                         }
                                         Err(_) => {
@@ -7197,7 +8134,11 @@ fn infer_type(
                 }
             }
         }
-        Expr::MethodCall { object, method, args } => {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
             let ot = infer_type(object, env, defs, constraints)?;
             match ot {
                 Type::Struct(s) => {
@@ -7209,7 +8150,8 @@ fn infer_type(
                     for (k, v) in constraints.iter() {
                         tmp_env.constraints.insert(k.clone(), v.clone());
                     }
-                    if let Some(ty) = check_library_struct_method(&s, method, args, &tmp_env, defs) {
+                    if let Some(ty) = check_library_struct_method(&s, method, args, &tmp_env, defs)
+                    {
                         return ty;
                     }
                     if let Some(sd) = defs.structs.get(&s) {
@@ -7236,10 +8178,11 @@ fn infer_type(
                     "len" | "byte_len" | "length" | "byte" => Ok(Type::Int),
                     "chr" | "push_byte" => Ok(Type::String),
                     "chars" | "bytes" => Ok(Type::Array(Box::new(Type::String))),
-                    "slice" | "trim" | "to_upper" | "to_lower" | "replace"
-                        | "repeat" | "read" => Ok(Type::String),
-                    "contains" | "starts_with" | "ends_with" | "exists"
-                        | "remove" | "write" | "append" => Ok(Type::Bool),
+                    "slice" | "trim" | "to_upper" | "to_lower" | "replace" | "repeat" | "read" => {
+                        Ok(Type::String)
+                    }
+                    "contains" | "starts_with" | "ends_with" | "exists" | "remove" | "write"
+                    | "append" => Ok(Type::Bool),
                     "metadata" => Ok(Type::Struct("fs.FileMetadata".to_string())),
                     _ => Ok(Type::Unknown),
                 },
@@ -7265,7 +8208,9 @@ fn infer_type(
             }
         }
         Expr::UnOp { operand, .. } => infer_type(operand, env, defs, constraints),
-        Expr::BinOp { left, op, right, .. } => {
+        Expr::BinOp {
+            left, op, right, ..
+        } => {
             let lt = infer_type(left, env, defs, constraints)?;
             let rt = infer_type(right, env, defs, constraints)?;
             if let Some((_, t)) = resolve_operator_interface(defs, &lt, &rt, op, constraints) {
@@ -7327,9 +8272,8 @@ fn infer_type(
             Ok(Type::Unknown)
         }
         Expr::FnDef { params, body } => {
-            let param_types: Vec<Type> = params.iter()
-                .map(|(_, t)| type_from_str(t, defs))
-                .collect();
+            let param_types: Vec<Type> =
+                params.iter().map(|(_, t)| type_from_str(t, defs)).collect();
             let mut env_vars = env.clone();
             for (pname, ptype) in params {
                 env_vars.insert(pname.clone(), type_from_str(ptype, defs));
@@ -7351,7 +8295,12 @@ fn resolve_operators_expr(
     constraints: &HashMap<String, Vec<String>>,
 ) {
     match e {
-        Expr::BinOp { left, right, op, resolved_operator } => {
+        Expr::BinOp {
+            left,
+            right,
+            op,
+            resolved_operator,
+        } => {
             // 鬮ｯ譏ｴ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ闔・･霑ｴ・ｾ驕ｶ莨・ｽｦ・ｴ陜苓侭繝ｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｮ謇具ｽｶ・｣繝ｻ・ｽ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ髯具ｽｹ繝ｻ・ｻ驛｢譎｢・ｽ・ｭ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓溽ｹ晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻBinOp 鬩幢ｽ｢繝ｻ・ｧ驛｢・ｧ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ繝ｻ縺､ﾂ驛｢譎｢・ｽ・ｻ驛｢譎｢・ｽ・ｻ
             resolve_operators_expr(left, defs, env, constraints);
             resolve_operators_expr(right, defs, env, constraints);
@@ -7383,9 +8332,7 @@ fn resolve_operators_expr(
                 resolve_operators_expr(a, defs, env, constraints);
             }
         }
-        Expr::FieldAccess { object, .. } => {
-            resolve_operators_expr(object, defs, env, constraints)
-        }
+        Expr::FieldAccess { object, .. } => resolve_operators_expr(object, defs, env, constraints),
         Expr::Array(items) => {
             for it in items.iter_mut() {
                 resolve_operators_expr(it, defs, env, constraints);
@@ -7399,7 +8346,6 @@ fn resolve_operators_expr(
         _ => {}
     }
 }
-
 
 // 鬮ｫ・ｴ髯具ｽｾ隴・ｽ｡郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髯ｷ・ｷ隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｮ髮九・・ｽ・ｯ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ驛｢譎｢・ｽ・ｻ鬮ｫ・ｶ・つ髫ｲ蟶吶・郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ: 鬩搾ｽｵ繝ｻ・ｺ髯ｷ・ｷ繝ｻ・ｶ驕ｶ蜀苓ｷ昴・・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ struct 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ驕ｯ・ｶ繝ｻ・ｻ鬩搾ｽｵ繝ｻ・ｲ驕ｶ荳橸ｽ｢繝ｻ雎ｪ繝ｻ・ｹ繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驕ｯ・ｶ繝ｻ・ｲ interface 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ
 // 鬮｣蛹・ｽｽ・ｳ繝ｻ縺､ﾂ鬯ｮ・｢繝ｻ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髯ｷ・ｷ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髫ｶ蜻ｵ・ｶ・｣繝ｻ・ｽ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驕ｯ・ｶ繝ｻ・ｲ鬯ｨ・ｾ繝ｻ・｡郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ髯ｷ・ｿ繝ｻ・･郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ髯具ｽｹ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ鬯ｩ蟶吶・郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ蜈ｷ・ｽ・ｻ驛｢譎｢・ｽ・ｻ驕ｶ莨・ｽｷ・ｹ陜ｮ蠑ｱ繝ｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｴ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髮九・竏槭・・ｽ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ
@@ -7453,9 +8399,7 @@ fn check_constraint(
     expected: &Type,
 ) -> Result<(), String> {
     match (expected, actual) {
-        (Type::List(e_exp), Type::List(e_act)) => {
-            check_constraint(defs, constraints, e_act, e_exp)
-        }
+        (Type::List(e_exp), Type::List(e_act)) => check_constraint(defs, constraints, e_act, e_exp),
         (Type::Option(e_exp), Type::Option(e_act)) => {
             check_constraint(defs, constraints, e_act, e_exp)
         }
@@ -7467,9 +8411,7 @@ fn check_constraint(
             for (ctv, iface) in constraints {
                 if ctv == tv {
                     let ok = match concrete {
-                        Type::Struct(sname) => {
-                            struct_satisfies_interface(defs, sname, iface)
-                        }
+                        Type::Struct(sname) => struct_satisfies_interface(defs, sname, iface),
                         Type::Interface(iname, _) => iname == iface,
                         Type::Unknown => true,
                         _ => false,
@@ -7551,7 +8493,8 @@ fn check_library_struct_method(
             }
             ret(Type::Float)
         }
-        ("fs.FileMetadata", "size") | ("fs.FileMetadata", "is_dir")
+        ("fs.FileMetadata", "size")
+        | ("fs.FileMetadata", "is_dir")
         | ("fs.FileMetadata", "is_file") => {
             if let Some(e) = check_args(&[]) {
                 return Some(e);
@@ -7618,7 +8561,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             } else if let Some(state_name) = defs.state_variants.get(name) {
                 Ok(Type::State(state_name.clone()))
             } else if let Some(fdef) = defs.functions.get(name) {
-                let param_types: Vec<Type> = fdef.params.iter()
+                let param_types: Vec<Type> = fdef
+                    .params
+                    .iter()
                     .map(|(_, t)| type_from_str(t, defs))
                     .collect();
                 let ret = match &fdef.return_type {
@@ -7635,7 +8580,10 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             let st = check_expr(start, env, defs)?;
             let et = check_expr(end, env, defs)?;
             if st != Type::Int && st != Type::Unknown {
-                return Err(format!("Type error: range start must be int (got {:?})", st));
+                return Err(format!(
+                    "Type error: range start must be int (got {:?})",
+                    st
+                ));
             }
             if et != Type::Int && et != Type::Unknown {
                 return Err(format!("Type error: range end must be int (got {:?})", et));
@@ -7676,7 +8624,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
         }
 
-        Expr::BinOp { left, op, right, .. } => {
+        Expr::BinOp {
+            left, op, right, ..
+        } => {
             let lt = check_expr(left, env, defs)?;
             let rt = check_expr(right, env, defs)?;
 
@@ -7693,11 +8643,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     {
                         Ok(Type::Bool)
                     } else if !type_eq(&lt, &rt) {
-                        return Err(type_mismatch_msg(
-                            "cannot compare values",
-                            &lt,
-                            &rt,
-                        ));
+                        return Err(type_mismatch_msg("cannot compare values", &lt, &rt));
                     } else {
                         Ok(Type::Bool)
                     }
@@ -7768,867 +8714,1192 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 }
                 "StringBuilder" => {
                     if !args.is_empty() {
-                        return Err(
-                            "Type error: StringBuilder() takes no arguments".to_string()
-                        );
+                        return Err("Type error: StringBuilder() takes no arguments".to_string());
                     }
                     // StringBuilder 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ蟋薙・・ｹ隴∵ｺｽ蝮ｩ繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ驛｢譎｢・ｽ・ｻUnknown 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｩ謳ｾ・ｽ・ｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・･驛｢譎｢・ｽ・ｻ
                     Ok(Type::Unknown)
                 }
                 // 鬮ｫ・ｴ闕ｳ讖ｸ・ｽ・ｮ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・､郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮陷夲ｽｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬨ｾ蛹・ｽｽ・ｻ鬯ｩ・ｪ繝ｻ・､ API驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｴ髯具ｽｾ隴・ｽ｡郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髯ｷ・ｷ隴趣ｽ｢繝ｻ・ｽ繝ｻ・､鬨ｾ蛹・ｽｽ・ｻ鬯ｩ・ｪ繝ｻ・､鬯ｩ蜍滓牒隰・ｽｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髮九・竏槭・・ｽ遶擾ｽｫ繝ｻ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｲ繝ｻ・｢髣包ｽｳ隶抵ｽｫ繝ｻ・ｳ陷･遽ﾂ繝ｻ・ｧ驛｢譎｢・ｽ・ｻ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｰ繝ｻ・ｰ髯晢ｽｷ繝ｻ・｢郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
                 // bool 鬮ｯ讓奇ｽｺ・ｽ陋ｻ・､鬯ｩ・ｪ繝ｻ・､鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｩ蜍滓牒隰・ｽｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｰ繝ｻ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ蛹ｺ・ｻ繧托ｽｽ・ｽ繝ｻ・､ -> bool 鬮｣蛹・ｽｽ・ｳ髫ｶ譛ｱ螳ｦ繝ｻ・ｺ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
-        "int" | "float" | "str" => {
-            if args.len() != 1 {
-                return Err(format!(
-                    "Type error: {}() takes exactly 1 argument",
-                    func
-                ));
-            }
-            // 鬮ｯ貅ｷ・､・ｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮｣豈費ｽｼ螟ｲ・ｽ・ｽ繝ｻ・ｻ鬮ｫ・ｲ繝ｻ・｢髣包ｽｳ隶灘･・ｽｽ・｢陝ｶ・ｷ繝ｻ・ｹ繝ｻ・ｧ鬮ｮ蛹ｺ・ｧ・ｫ繝ｻ・･繝ｻ・ｳ鬮ｯ讖ｸ・ｽ・ｳ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽEnknown 鬩幢ｽ｢繝ｻ・ｧ驛｢・ｧ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ繝ｻ縺､ﾂ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
-            check_expr(&args[0], env, defs)?;
-            match func.as_str() {
-                "int" => Ok(Type::Int),
-                "float" => Ok(Type::Float),
-                "str" => Ok(Type::String),
-                _ => Ok(Type::Unknown),
-            }
-        }
-        // std.io / std.fs runtime builtins (Phase 10 P3)
-        "input" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::String)
-        }
-        "eprint" | "eprintln" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Unit)
-        }
-        "io_read_line" | "io_read_all" => {
-            if !args.is_empty() {
-                return Err(format!("Type error: {}() takes no arguments", func));
-            }
-            Ok(Type::String)
-        }
-        "io_write_stdout" | "io_write_stderr" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Bool)
-        }
-        "read_file" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::String)
-        }
-        "write_file" | "append_file" | "remove_file" | "file_exists" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Bool)
-        }
-        "fs_exists" | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file" | "fs_is_dir" | "fs_remove_dir" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Bool)
-        }
-        "fs_size" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Int)
-        }
-        "fs_metadata" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Struct("fs.FileMetadata".to_string()))
-        }
-        "fs_list_dir" | "fs_read_lines" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::List(Box::new(Type::String)))
-        }
-        "fs_write_lines" => {
-            for a in args { check_expr(a, env, defs)?; }
-            Ok(Type::Bool)
-        }
-        // Math builtins (sqrt/abs/min/max/clamp/pow) 遯ｶ繝ｻhandled here so they
-        // don't shadow themselves via `resolve_pkg_name` inside package bodies.
-        "sqrt" | "abs" | "floor" | "ceil" | "round" => {
-            if args.len() != 1 {
-                return Err(format!("Type error: {}() takes exactly 1 argument", func));
-            }
-            let at = check_expr(&args[0], env, defs)?;
-            if at == Type::Float || at == Type::Unknown {
-                Ok(Type::Float)
-            } else {
-                Err(format!("Type error: {}() expects a float argument", func))
-            }
-        }
-        "min" | "max" => {
-            if args.len() != 2 {
-                return Err(format!("Type error: {}() takes exactly 2 arguments", func));
-            }
-            let at1 = check_expr(&args[0], env, defs)?;
-            let at2 = check_expr(&args[1], env, defs)?;
-            if (at1 == Type::Float || at1 == Type::Unknown) && (at2 == Type::Float || at2 == Type::Unknown) {
-                Ok(Type::Float)
-            } else {
-                Err(format!("Type error: {}() expects float arguments", func))
-            }
-        }
-        "clamp" => {
-            if args.len() != 3 {
-                return Err("Type error: clamp() takes exactly 3 arguments".to_string());
-            }
-            for a in args {
-                let at = check_expr(a, env, defs)?;
-                if at != Type::Float && at != Type::Unknown {
-                    return Err("Type error: clamp() expects float arguments".to_string());
+                "int" | "float" | "str" => {
+                    if args.len() != 1 {
+                        return Err(format!("Type error: {}() takes exactly 1 argument", func));
+                    }
+                    // 鬮ｯ貅ｷ・､・ｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮｣豈費ｽｼ螟ｲ・ｽ・ｽ繝ｻ・ｻ鬮ｫ・ｲ繝ｻ・｢髣包ｽｳ隶灘･・ｽｽ・｢陝ｶ・ｷ繝ｻ・ｹ繝ｻ・ｧ鬮ｮ蛹ｺ・ｧ・ｫ繝ｻ・･繝ｻ・ｳ鬮ｯ讖ｸ・ｽ・ｳ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽEnknown 鬩幢ｽ｢繝ｻ・ｧ驛｢・ｧ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ繝ｻ縺､ﾂ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
+                    check_expr(&args[0], env, defs)?;
+                    match func.as_str() {
+                        "int" => Ok(Type::Int),
+                        "float" => Ok(Type::Float),
+                        "str" => Ok(Type::String),
+                        _ => Ok(Type::Unknown),
+                    }
                 }
-            }
-            Ok(Type::Float)
-        }
-        "pow" => {
-            if args.len() != 2 {
-                return Err("Type error: pow() takes exactly 2 arguments".to_string());
-            }
-            let at1 = check_expr(&args[0], env, defs)?;
-            let at2 = check_expr(&args[1], env, defs)?;
-            if (at1 == Type::Float || at1 == Type::Unknown) && (at2 == Type::Float || at2 == Type::Unknown) {
-                Ok(Type::Float)
-            } else {
-                Err(format!("Type error: pow() expects float arguments"))
-            }
-        }
-        "trunc" | "exp" | "log" | "log10" => {
-            if args.len() != 1 {
-                return Err(format!("Type error: {}() takes exactly 1 argument", func));
-            }
-            let at = check_expr(&args[0], env, defs)?;
-            if at == Type::Float || at == Type::Unknown {
-                Ok(Type::Float)
-            } else {
-                Err(format!("Type error: {}() expects a float argument", func))
-            }
-        }
-        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
-            if args.len() != 1 {
-                return Err(format!("Type error: {}() takes exactly 1 argument", func));
-            }
-            let at = check_expr(&args[0], env, defs)?;
-            if at == Type::Float || at == Type::Unknown {
-                Ok(Type::Float)
-            } else {
-                Err(format!("Type error: {}() expects a float argument", func))
-            }
-        }
-        "math_pi" | "math_e" => {
-            if !args.is_empty() {
-                return Err(format!("Type error: {}() takes no arguments", func));
-            }
-            Ok(Type::Float)
-        }
-        "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort" | "list_clone" | "list_empty" => {
-            for a in args { check_expr(a, env, defs)?; }
-            match func.as_str() {
-                "list_insert" | "list_set" | "list_clear" | "list_empty" => Ok(Type::Unknown),
-                "list_get" => Ok(Type::Unknown),
-                "list_sort" | "list_clone" => Ok(Type::Unknown),
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "map_len" | "map_size" | "map_is_empty" | "map_insert" | "map_get" | "map_remove"
-        | "map_contains_key" | "map_keys" | "map_values" | "map_clear" | "map_clone" | "map_empty" => {
-            for a in args { check_expr(a, env, defs)?; }
-            match func.as_str() {
-                "map_len" | "map_size" => Ok(Type::Int),
-                "map_is_empty" => Ok(Type::Bool),
-                "map_keys" => Ok(Type::List(Box::new(Type::Unknown))),
-                "map_values" => Ok(Type::List(Box::new(Type::Unknown))),
-                "map_get" => Ok(Type::Option(Box::new(Type::Unknown))),
-                "map_contains_key" | "map_insert" | "map_remove" | "map_clear" | "map_clone" | "map_empty" => {
+                // std.io / std.fs runtime builtins (Phase 10 P3)
+                "input" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::String)
+                }
+                "eprint" | "eprintln" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Unit)
+                }
+                "io_read_line" | "io_read_all" => {
+                    if !args.is_empty() {
+                        return Err(format!("Type error: {}() takes no arguments", func));
+                    }
+                    Ok(Type::String)
+                }
+                "io_write_stdout" | "io_write_stderr" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Bool)
+                }
+                "read_file" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::String)
+                }
+                "write_file" | "append_file" | "remove_file" | "file_exists" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Bool)
+                }
+                "fs_exists" | "fs_create_dir" | "fs_copy" | "fs_rename" | "fs_is_file"
+                | "fs_is_dir" | "fs_remove_dir" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Bool)
+                }
+                "fs_size" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Int)
+                }
+                "fs_metadata" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Struct("fs.FileMetadata".to_string()))
+                }
+                "fs_list_dir" | "fs_read_lines" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::List(Box::new(Type::String)))
+                }
+                "fs_write_lines" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    Ok(Type::Bool)
+                }
+                // Math builtins (sqrt/abs/min/max/clamp/pow) 遯ｶ繝ｻhandled here so they
+                // don't shadow themselves via `resolve_pkg_name` inside package bodies.
+                "sqrt" | "abs" | "floor" | "ceil" | "round" => {
+                    if args.len() != 1 {
+                        return Err(format!("Type error: {}() takes exactly 1 argument", func));
+                    }
+                    let at = check_expr(&args[0], env, defs)?;
+                    if at == Type::Float || at == Type::Unknown {
+                        Ok(Type::Float)
+                    } else {
+                        Err(format!("Type error: {}() expects a float argument", func))
+                    }
+                }
+                "min" | "max" => {
+                    if args.len() != 2 {
+                        return Err(format!("Type error: {}() takes exactly 2 arguments", func));
+                    }
+                    let at1 = check_expr(&args[0], env, defs)?;
+                    let at2 = check_expr(&args[1], env, defs)?;
+                    if (at1 == Type::Float || at1 == Type::Unknown)
+                        && (at2 == Type::Float || at2 == Type::Unknown)
+                    {
+                        Ok(Type::Float)
+                    } else {
+                        Err(format!("Type error: {}() expects float arguments", func))
+                    }
+                }
+                "clamp" => {
+                    if args.len() != 3 {
+                        return Err("Type error: clamp() takes exactly 3 arguments".to_string());
+                    }
+                    for a in args {
+                        let at = check_expr(a, env, defs)?;
+                        if at != Type::Float && at != Type::Unknown {
+                            return Err("Type error: clamp() expects float arguments".to_string());
+                        }
+                    }
+                    Ok(Type::Float)
+                }
+                "pow" => {
+                    if args.len() != 2 {
+                        return Err("Type error: pow() takes exactly 2 arguments".to_string());
+                    }
+                    let at1 = check_expr(&args[0], env, defs)?;
+                    let at2 = check_expr(&args[1], env, defs)?;
+                    if (at1 == Type::Float || at1 == Type::Unknown)
+                        && (at2 == Type::Float || at2 == Type::Unknown)
+                    {
+                        Ok(Type::Float)
+                    } else {
+                        Err(format!("Type error: pow() expects float arguments"))
+                    }
+                }
+                "trunc" | "exp" | "log" | "log10" => {
+                    if args.len() != 1 {
+                        return Err(format!("Type error: {}() takes exactly 1 argument", func));
+                    }
+                    let at = check_expr(&args[0], env, defs)?;
+                    if at == Type::Float || at == Type::Unknown {
+                        Ok(Type::Float)
+                    } else {
+                        Err(format!("Type error: {}() expects a float argument", func))
+                    }
+                }
+                "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
+                    if args.len() != 1 {
+                        return Err(format!("Type error: {}() takes exactly 1 argument", func));
+                    }
+                    let at = check_expr(&args[0], env, defs)?;
+                    if at == Type::Float || at == Type::Unknown {
+                        Ok(Type::Float)
+                    } else {
+                        Err(format!("Type error: {}() expects a float argument", func))
+                    }
+                }
+                "math_pi" | "math_e" => {
+                    if !args.is_empty() {
+                        return Err(format!("Type error: {}() takes no arguments", func));
+                    }
+                    Ok(Type::Float)
+                }
+                "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort"
+                | "list_clone" | "list_empty" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    match func.as_str() {
+                        "list_insert" | "list_set" | "list_clear" | "list_empty" => {
+                            Ok(Type::Unknown)
+                        }
+                        "list_get" => Ok(Type::Unknown),
+                        "list_sort" | "list_clone" => Ok(Type::Unknown),
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "map_len" | "map_size" | "map_is_empty" | "map_insert" | "map_get"
+                | "map_remove" | "map_contains_key" | "map_keys" | "map_values" | "map_clear"
+                | "map_clone" | "map_empty" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    match func.as_str() {
+                        "map_len" | "map_size" => Ok(Type::Int),
+                        "map_is_empty" => Ok(Type::Bool),
+                        "map_keys" => Ok(Type::List(Box::new(Type::Unknown))),
+                        "map_values" => Ok(Type::List(Box::new(Type::Unknown))),
+                        "map_get" => Ok(Type::Option(Box::new(Type::Unknown))),
+                        "map_contains_key" | "map_insert" | "map_remove" | "map_clear"
+                        | "map_clone" | "map_empty" => Ok(Type::Unknown),
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "set_len" | "set_size" | "set_is_empty" | "set_add" | "set_remove"
+                | "set_contains" | "set_clear" | "set_clone" | "set_empty" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    match func.as_str() {
+                        "set_len" | "set_size" => Ok(Type::Int),
+                        "set_is_empty" | "set_contains" => Ok(Type::Bool),
+                        "set_add" | "set_remove" | "set_clear" | "set_clone" | "set_empty" => {
+                            Ok(Type::Unknown)
+                        }
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_len"
+                | "queue_is_empty" | "queue_clear" | "queue_empty" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    match func.as_str() {
+                        "queue_len" => Ok(Type::Int),
+                        "queue_is_empty" => Ok(Type::Bool),
+                        "queue_pop" | "queue_front" | "queue_back" => Ok(Type::Unknown),
+                        "queue_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "stack_push" | "stack_pop" | "stack_peek" | "stack_len" | "stack_is_empty"
+                | "stack_clear" | "stack_empty" => {
+                    for a in args {
+                        check_expr(a, env, defs)?;
+                    }
+                    match func.as_str() {
+                        "stack_len" => Ok(Type::Int),
+                        "stack_is_empty" => Ok(Type::Bool),
+                        "stack_pop" | "stack_peek" => Ok(Type::Unknown),
+                        "stack_empty" => Ok(Type::List(Box::new(Type::Unknown))),
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "json_parse" => {
+                    if args.len() != 1 {
+                        return Err("json_parse() takes exactly 1 argument (str)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Json)
+                }
+                "json_stringify" => {
+                    if args.len() != 1 {
+                        return Err("json_stringify() takes exactly 1 argument (Json)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::String)
+                }
+                "json_get" => {
+                    if args.len() != 2 {
+                        return Err("json_get() takes exactly 2 arguments (Json, str)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::Json)))
+                }
+                "json_has" => {
+                    if args.len() != 2 {
+                        return Err("json_has() takes exactly 2 arguments (Json, str)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "json_len" => {
+                    if args.len() != 1 {
+                        return Err("json_len() takes exactly 1 argument (Json)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "json_at" => {
+                    if args.len() != 2 {
+                        return Err("json_at() takes exactly 2 arguments (Json, int)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    Ok(Type::Json)
+                }
+                "json_as_string" => {
+                    if args.len() != 1 {
+                        return Err("json_as_string() takes exactly 1 argument (Json)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::String)
+                }
+                "json_as_int" => {
+                    if args.len() != 1 {
+                        return Err("json_as_int() takes exactly 1 argument (Json)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "json_as_float" => {
+                    if args.len() != 1 {
+                        return Err("json_as_float() takes exactly 1 argument (Json)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Float)
+                }
+                "json_as_bool" => {
+                    if args.len() != 1 {
+                        return Err("json_as_bool() takes exactly 1 argument (Json)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "json_null" => {
+                    if !args.is_empty() {
+                        return Err("json_null() takes no arguments".to_string());
+                    }
+                    Ok(Type::Json)
+                }
+                "json_object" => {
+                    if !args.is_empty() {
+                        return Err("json_object() takes no arguments".to_string());
+                    }
+                    Ok(Type::Json)
+                }
+                "json_array" => {
+                    if !args.is_empty() {
+                        return Err("json_array() takes no arguments".to_string());
+                    }
+                    Ok(Type::Json)
+                }
+                "json_set" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "json_set() takes exactly 3 arguments (Json, str, Json)".to_string()
+                        );
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    check_expr(&args[2], env, defs)?;
+                    Ok(Type::Json)
+                }
+                "json_push" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "json_push() takes exactly 2 arguments (Json, Json)".to_string()
+                        );
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    Ok(Type::Json)
+                }
+                "option_some" => {
+                    if args.len() != 1 {
+                        return Err("option_some() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_none" => {
+                    if !args.is_empty() {
+                        return Err("option_none() takes no arguments".to_string());
+                    }
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_is_some" | "option_is_none" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "option_extract" => {
+                    if args.len() != 1 {
+                        return Err("option_extract() takes exactly 1 argument".to_string());
+                    }
+                    let opt_ty = check_expr(&args[0], env, defs)?;
+                    match opt_ty {
+                        Type::Option(inner) => Ok(*inner),
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "option_extract_or" => {
+                    if args.len() != 2 {
+                        return Err("option_extract_or() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)
+                }
+                "option_map" => {
+                    if args.len() != 2 {
+                        return Err("option_map() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_and" => {
+                    if args.len() != 2 {
+                        return Err("option_and() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_or" => {
+                    if args.len() != 2 {
+                        return Err("option_or() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::Unknown)))
+                }
+                "option_equals" => {
+                    if args.len() != 2 {
+                        return Err("option_equals() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "result_success" => {
+                    if args.len() != 1 {
+                        return Err("result_success() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_error" => {
+                    if args.len() != 1 {
+                        return Err("result_error() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_is_success" | "result_is_error" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "result_extract" => {
+                    if args.len() != 1 {
+                        return Err("result_extract() takes exactly 1 argument".to_string());
+                    }
+                    let res_ty = check_expr(&args[0], env, defs)?;
+                    match res_ty {
+                        Type::State(s) if s.starts_with("Result(") => {
+                            let inner = s.strip_prefix("Result(").unwrap_or("");
+                            let first = inner.split(',').next().unwrap_or("unknown");
+                            Ok(type_from_str(first.trim(), defs))
+                        }
+                        _ => Ok(Type::Unknown),
+                    }
+                }
+                "result_extract_or" => {
+                    if args.len() != 2 {
+                        return Err("result_extract_or() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)
+                }
+                "result_map" => {
+                    if args.len() != 2 {
+                        return Err("result_map() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_and" => {
+                    if args.len() != 2 {
+                        return Err("result_and() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_or" => {
+                    if args.len() != 2 {
+                        return Err("result_or() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::State("Result(unknown,unknown)".to_string()))
+                }
+                "result_equals" => {
+                    if args.len() != 2 {
+                        return Err("result_equals() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "path_join" => {
+                    if args.len() != 2 {
+                        return Err("path_join() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::String)
+                }
+                "path_basename" | "path_dirname" | "path_filename" | "path_extension"
+                | "path_normalize" | "path_parent" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::String)
+                }
+                "path_is_absolute" => {
+                    if args.len() != 1 {
+                        return Err("path_is_absolute() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "path_equals" => {
+                    if args.len() != 2 {
+                        return Err("path_equals() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "os_name" | "os_arch" | "os_platform" | "os_hostname" | "os_cwd" => {
+                    if !args.is_empty() {
+                        return Err(format!("{}() takes no arguments", func));
+                    }
+                    Ok(Type::String)
+                }
+                "os_set_cwd" => {
+                    if args.len() != 1 {
+                        return Err("os_set_cwd() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "env_get" => {
+                    if args.len() != 1 {
+                        return Err("env_get() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::String)))
+                }
+                "env_has" => {
+                    if args.len() != 1 {
+                        return Err("env_has() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "env_set" => {
+                    if args.len() != 2 {
+                        return Err("env_set() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "env_remove" => {
+                    if args.len() != 1 {
+                        return Err("env_remove() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "env_all" => {
+                    if !args.is_empty() {
+                        return Err("env_all() takes no arguments".to_string());
+                    }
                     Ok(Type::Unknown)
                 }
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "set_len" | "set_size" | "set_is_empty" | "set_add" | "set_remove" | "set_contains"
-        | "set_clear" | "set_clone" | "set_empty" => {
-            for a in args { check_expr(a, env, defs)?; }
-            match func.as_str() {
-                "set_len" | "set_size" => Ok(Type::Int),
-                "set_is_empty" | "set_contains" => Ok(Type::Bool),
-                "set_add" | "set_remove" | "set_clear" | "set_clone" | "set_empty" => Ok(Type::Unknown),
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_len"
-        | "queue_is_empty" | "queue_clear" | "queue_empty" => {
-            for a in args { check_expr(a, env, defs)?; }
-            match func.as_str() {
-                "queue_len" => Ok(Type::Int),
-                "queue_is_empty" => Ok(Type::Bool),
-                "queue_pop" | "queue_front" | "queue_back" => Ok(Type::Unknown),
-                "queue_empty" => Ok(Type::List(Box::new(Type::Unknown))),
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "stack_push" | "stack_pop" | "stack_peek" | "stack_len" | "stack_is_empty" | "stack_clear" | "stack_empty" => {
-            for a in args { check_expr(a, env, defs)?; }
-            match func.as_str() {
-                "stack_len" => Ok(Type::Int),
-                "stack_is_empty" => Ok(Type::Bool),
-                "stack_pop" | "stack_peek" => Ok(Type::Unknown),
-                "stack_empty" => Ok(Type::List(Box::new(Type::Unknown))),
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "json_parse" => {
-            if args.len() != 1 {
-                return Err("json_parse() takes exactly 1 argument (str)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::Json)
-        }
-        "json_stringify" => {
-            if args.len() != 1 {
-                return Err("json_stringify() takes exactly 1 argument (Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::String)
-        }
-        "json_get" => {
-            if args.len() != 2 {
-                return Err("json_get() takes exactly 2 arguments (Json, str)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)?;
-            Ok(Type::Option(Box::new(Type::Json)))
-        }
-        "json_has" => {
-            if args.len() != 2 {
-                return Err("json_has() takes exactly 2 arguments (Json, str)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "json_len" => {
-            if args.len() != 1 {
-                return Err("json_len() takes exactly 1 argument (Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::Int)
-        }
-        "json_at" => {
-            if args.len() != 2 {
-                return Err("json_at() takes exactly 2 arguments (Json, int)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)?;
-            Ok(Type::Json)
-        }
-        "json_as_string" => {
-            if args.len() != 1 {
-                return Err("json_as_string() takes exactly 1 argument (Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::String)
-        }
-        "json_as_int" => {
-            if args.len() != 1 {
-                return Err("json_as_int() takes exactly 1 argument (Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::Int)
-        }
-        "json_as_float" => {
-            if args.len() != 1 {
-                return Err("json_as_float() takes exactly 1 argument (Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::Float)
-        }
-        "json_as_bool" => {
-            if args.len() != 1 {
-                return Err("json_as_bool() takes exactly 1 argument (Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "json_null" => {
-            if !args.is_empty() {
-                return Err("json_null() takes no arguments".to_string());
-            }
-            Ok(Type::Json)
-        }
-        "json_object" => {
-            if !args.is_empty() {
-                return Err("json_object() takes no arguments".to_string());
-            }
-            Ok(Type::Json)
-        }
-        "json_array" => {
-            if !args.is_empty() {
-                return Err("json_array() takes no arguments".to_string());
-            }
-            Ok(Type::Json)
-        }
-        "json_set" => {
-            if args.len() != 3 {
-                return Err("json_set() takes exactly 3 arguments (Json, str, Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)?;
-            check_expr(&args[2], env, defs)?;
-            Ok(Type::Json)
-        }
-        "json_push" => {
-            if args.len() != 2 {
-                return Err("json_push() takes exactly 2 arguments (Json, Json)".to_string());
-            }
-            check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)?;
-            Ok(Type::Json)
-        }
-        "option_some" => {
-            if args.len() != 1 { return Err("option_some() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Option(Box::new(Type::Unknown)))
-        }
-        "option_none" => {
-            if !args.is_empty() { return Err("option_none() takes no arguments".to_string()); }
-            Ok(Type::Option(Box::new(Type::Unknown)))
-        }
-        "option_is_some" | "option_is_none" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "option_extract" => {
-            if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
-            let opt_ty = check_expr(&args[0], env, defs)?;
-            match opt_ty {
-                Type::Option(inner) => Ok(*inner),
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "option_extract_or" => {
-            if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)
-        }
-        "option_map" => {
-            if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Option(Box::new(Type::Unknown)))
-        }
-        "option_and" => {
-            if args.len() != 2 { return Err("option_and() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Option(Box::new(Type::Unknown)))
-        }
-        "option_or" => {
-            if args.len() != 2 { return Err("option_or() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Option(Box::new(Type::Unknown)))
-        }
-        "option_equals" => {
-            if args.len() != 2 { return Err("option_equals() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "result_success" => {
-            if args.len() != 1 { return Err("result_success() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::State("Result(unknown,unknown)".to_string()))
-        }
-        "result_error" => {
-            if args.len() != 1 { return Err("result_error() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::State("Result(unknown,unknown)".to_string()))
-        }
-        "result_is_success" | "result_is_error" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "result_extract" => {
-            if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
-            let res_ty = check_expr(&args[0], env, defs)?;
-            match res_ty {
-                Type::State(s) if s.starts_with("Result(") => {
-                    let inner = s.strip_prefix("Result(").unwrap_or("");
-                    let first = inner.split(',').next().unwrap_or("unknown");
-                    Ok(type_from_str(first.trim(), defs))
+                // ===== Regex operations (Phase C-1.10) =====
+                "regex_compile" => {
+                    if args.len() != 1 {
+                        return Err("regex_compile() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::String)))
                 }
-                _ => Ok(Type::Unknown),
-            }
-        }
-        "result_extract_or" => {
-            if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            check_expr(&args[1], env, defs)
-        }
-        "result_map" => {
-            if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::State("Result(unknown,unknown)".to_string()))
-        }
-        "result_and" => {
-            if args.len() != 2 { return Err("result_and() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::State("Result(unknown,unknown)".to_string()))
-        }
-        "result_or" => {
-            if args.len() != 2 { return Err("result_or() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::State("Result(unknown,unknown)".to_string()))
-        }
-        "result_equals" => {
-            if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "path_join" => {
-            if args.len() != 2 { return Err("path_join() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::String)
-        }
-        "path_basename" | "path_dirname" | "path_filename" | "path_extension" | "path_normalize" | "path_parent" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::String)
-        }
-        "path_is_absolute" => {
-            if args.len() != 1 { return Err("path_is_absolute() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "path_equals" => {
-            if args.len() != 2 { return Err("path_equals() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "os_name" | "os_arch" | "os_platform" | "os_hostname" | "os_cwd" => {
-            if !args.is_empty() { return Err(format!("{}() takes no arguments", func)); }
-            Ok(Type::String)
-        }
-        "os_set_cwd" => {
-            if args.len() != 1 { return Err("os_set_cwd() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "env_get" => {
-            if args.len() != 1 { return Err("env_get() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Option(Box::new(Type::String)))
-        }
-        "env_has" => {
-            if args.len() != 1 { return Err("env_has() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "env_set" => {
-            if args.len() != 2 { return Err("env_set() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "env_remove" => {
-            if args.len() != 1 { return Err("env_remove() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "env_all" => {
-            if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        // ===== Regex operations (Phase C-1.10) =====
-        "regex_compile" => {
-            if args.len() != 1 { return Err("regex_compile() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Option(Box::new(Type::String)))
-        }
-        "regex_is_match" => {
-            if args.len() != 2 { return Err("regex_is_match() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "regex_match" | "regex_find" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Option(Box::new(Type::String)))
-        }
-        "regex_find_all" => {
-            if args.len() != 2 { return Err("regex_find_all() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::List(Box::new(Type::String)))
-        }
-        "regex_replace" | "regex_replace_all" => {
-            if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::String)
-        }
-        "regex_split" => {
-            if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::List(Box::new(Type::String)))
-        }
-        // ===== Process operations (Phase C-1.11) =====
-        "process_spawn" => {
-            if args.len() != 2 { return Err("process_spawn() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Int)
-        }
-        "process_run" | "process_output" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::String)
-        }
-        "process_wait" => {
-            if args.len() != 1 { return Err("process_wait() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Int)
-        }
-        "process_kill" => {
-            if args.len() != 1 { return Err("process_kill() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "process_status" => {
-            if args.len() != 1 { return Err("process_status() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::String)
-        }
-        "process_args" => {
-            if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
-            Ok(Type::List(Box::new(Type::String)))
-        }
-        // ===== Requests operations (Phase C-1.12) =====
-        "requests_client_new" => {
-            if !args.is_empty() { return Err("requests_client_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_new" => {
-            if !args.is_empty() { return Err("requests_client_builder_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_build" => {
-            if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_default_headers" => {
-            if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_timeout" | "requests_client_builder_redirect_limit" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_redirect_disabled" => {
-            if args.len() != 1 { return Err("requests_client_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_proxy" => {
-            if args.len() != 2 { return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_client_builder_tls_config" => {
-            if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_new" => {
-            if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_header" => {
-            if args.len() != 3 { return Err("requests_request_builder_header() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_headers" | "requests_request_builder_multipart" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_query" | "requests_request_builder_form" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_json" => {
-            if args.len() != 2 { return Err("requests_request_builder_json() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_timeout" | "requests_request_builder_redirect_limit" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_redirect_disabled" => {
-            if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_basic_auth" => {
-            if args.len() != 3 { return Err("requests_request_builder_basic_auth() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_bearer_auth" => {
-            if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_send" => {
-            if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_response_status" => {
-            if args.len() != 1 { return Err("requests_response_status() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Int)
-        }
-        "requests_response_headers" => {
-            if args.len() != 1 { return Err("requests_response_headers() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_response_url" => {
-            if args.len() != 1 { return Err("requests_response_url() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::String)
-        }
-        "requests_response_text" => {
-            if args.len() != 1 { return Err("requests_response_text() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::String)
-        }
-        "requests_response_bytes" | "requests_response_json" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_response_content_length" => {
-            if args.len() != 1 { return Err("requests_response_content_length() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Int)
-        }
-        "requests_response_is_success" | "requests_response_is_client_error" | "requests_response_is_server_error" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "requests_response_error_for_status" => {
-            if args.len() != 1 { return Err("requests_response_error_for_status() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_status_code_code" => {
-            if args.len() != 1 { return Err("requests_status_code_code() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Int)
-        }
-        "requests_status_code_is_success" | "requests_status_code_is_client_error"
-        | "requests_status_code_is_server_error" | "requests_status_code_is_redirect" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "requests_header_map_new" => {
-            if !args.is_empty() { return Err("requests_header_map_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_header_map_insert" | "requests_header_map_append" | "requests_header_map_remove" => {
-            if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_header_map_get" => {
-            if args.len() != 2 { return Err("requests_header_map_get() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_header_map_contains" => {
-            if args.len() != 2 { return Err("requests_header_map_contains() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "requests_multipart_new" => {
-            if !args.is_empty() { return Err("requests_multipart_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_multipart_text" => {
-            if args.len() != 3 { return Err("requests_multipart_text() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_multipart_file" => {
-            if args.len() != 3 { return Err("requests_multipart_file() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_multipart_file_with_metadata" => {
-            if args.len() != 5 { return Err("requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            let _ = check_expr(&args[3], env, defs)?;
-            let _ = check_expr(&args[4], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_tls_config_new" => {
-            if !args.is_empty() { return Err("requests_tls_config_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_tls_config_add_ca_cert" => {
-            if args.len() != 2 { return Err("requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_tls_config_add_client_cert" => {
-            if args.len() != 3 { return Err("requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_tls_config_danger_accept_invalid_certs" | "requests_tls_config_danger_accept_invalid_hostnames" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_cookie_jar_new" => {
-            if !args.is_empty() { return Err("requests_cookie_jar_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_cookie_jar_add" => {
-            if args.len() != 2 { return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_cookie_parse" => {
-            if args.len() != 1 { return Err("requests_cookie_parse() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_response_copy_to" => {
-            if args.len() != 2 { return Err("requests_response_copy_to() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_response_chunks" => {
-            if args.len() != 2 { return Err("requests_response_chunks() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_response_stream" => {
-            if args.len() != 1 { return Err("requests_response_stream() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_stream_read" => {
-            if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_stream_has_more" => {
-            if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Bool)
-        }
-        "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
-        | "requests_header_map_free" | "requests_multipart_free"
-        | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
-            if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unit)
-        }
-        "requests_session_new" => {
-            if !args.is_empty() { return Err("requests_session_new() takes no arguments".to_string()); }
-            Ok(Type::Unknown)
-        }
-        "requests_session_request" => {
-            if args.len() != 3 { return Err("requests_session_request() takes exactly 3 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            let _ = check_expr(&args[2], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_request_builder_set_headers" => {
-            if args.len() != 2 { return Err("requests_request_builder_set_headers() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unit)
-        }
-        "requests_request_builder_verify" => {
-            if args.len() != 2 { return Err("requests_request_builder_verify() takes exactly 2 arguments".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            let _ = check_expr(&args[1], env, defs)?;
-            Ok(Type::Unit)
-        }
-        "requests_response_headers_list" => {
-            if args.len() != 1 { return Err("requests_response_headers_list() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unknown)
-        }
-        "requests_session_free" => {
-            if args.len() != 1 { return Err("requests_session_free() takes exactly 1 argument".to_string()); }
-            let _ = check_expr(&args[0], env, defs)?;
-            Ok(Type::Unit)
-        }
-        other => {
+                "regex_is_match" => {
+                    if args.len() != 2 {
+                        return Err("regex_is_match() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "regex_match" | "regex_find" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Option(Box::new(Type::String)))
+                }
+                "regex_find_all" => {
+                    if args.len() != 2 {
+                        return Err("regex_find_all() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::List(Box::new(Type::String)))
+                }
+                "regex_replace" | "regex_replace_all" => {
+                    if args.len() != 3 {
+                        return Err(format!("{}() takes exactly 3 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::String)
+                }
+                "regex_split" => {
+                    if args.len() != 2 {
+                        return Err("regex_split() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::List(Box::new(Type::String)))
+                }
+                // ===== Process operations (Phase C-1.11) =====
+                "process_spawn" => {
+                    if args.len() != 2 {
+                        return Err("process_spawn() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "process_run" | "process_output" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::String)
+                }
+                "process_wait" => {
+                    if args.len() != 1 {
+                        return Err("process_wait() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "process_kill" => {
+                    if args.len() != 1 {
+                        return Err("process_kill() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "process_status" => {
+                    if args.len() != 1 {
+                        return Err("process_status() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::String)
+                }
+                "process_args" => {
+                    if !args.is_empty() {
+                        return Err("process_args() takes no arguments".to_string());
+                    }
+                    Ok(Type::List(Box::new(Type::String)))
+                }
+                // ===== Requests operations (Phase C-1.12) =====
+                "requests_client_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_client_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_client_builder_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_build" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_client_builder_build() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_default_headers" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_client_builder_default_headers() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_timeout" | "requests_client_builder_redirect_limit" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_redirect_disabled" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_client_builder_redirect_disabled() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_proxy" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_client_builder_proxy() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_client_builder_tls_config" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_client_builder_tls_config() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_new" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_request_builder_new() takes exactly 3 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_header" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_request_builder_header() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_headers" | "requests_request_builder_multipart" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_query" | "requests_request_builder_form" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_json" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_json() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_timeout" | "requests_request_builder_redirect_limit" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_redirect_disabled" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_request_builder_redirect_disabled() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_basic_auth" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_request_builder_basic_auth() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_bearer_auth" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_bearer_auth() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_send" => {
+                    if args.len() != 1 {
+                        return Err("requests_send() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_status" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_status() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "requests_response_headers" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_headers() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_url" => {
+                    if args.len() != 1 {
+                        return Err("requests_response_url() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::String)
+                }
+                "requests_response_text" => {
+                    if args.len() != 1 {
+                        return Err("requests_response_text() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::String)
+                }
+                "requests_response_bytes" | "requests_response_json" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_content_length" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_content_length() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "requests_response_is_success"
+                | "requests_response_is_client_error"
+                | "requests_response_is_server_error" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "requests_response_error_for_status" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_error_for_status() takes exactly 1 argument"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_status_code_code" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_status_code_code() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "requests_status_code_is_success"
+                | "requests_status_code_is_client_error"
+                | "requests_status_code_is_server_error"
+                | "requests_status_code_is_redirect" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "requests_header_map_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_header_map_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_header_map_insert"
+                | "requests_header_map_append"
+                | "requests_header_map_remove" => {
+                    if args.len() != 3 {
+                        return Err(format!("{}() takes exactly 3 arguments", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_header_map_get" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_header_map_get() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_header_map_contains" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_header_map_contains() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "requests_multipart_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_multipart_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_multipart_text" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_multipart_text() takes exactly 3 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_multipart_file" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_multipart_file() takes exactly 3 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_multipart_file_with_metadata" => {
+                    if args.len() != 5 {
+                        return Err(
+                            "requests_multipart_file_with_metadata() takes exactly 5 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    let _ = check_expr(&args[3], env, defs)?;
+                    let _ = check_expr(&args[4], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_tls_config_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_add_ca_cert" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_tls_config_add_ca_cert() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_add_client_cert" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_tls_config_add_client_cert() takes exactly 3 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_tls_config_danger_accept_invalid_certs"
+                | "requests_tls_config_danger_accept_invalid_hostnames" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_cookie_jar_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_cookie_jar_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_cookie_jar_add" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_cookie_jar_add() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_cookie_parse" => {
+                    if args.len() != 1 {
+                        return Err("requests_cookie_parse() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_copy_to" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_response_copy_to() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_chunks" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_response_chunks() takes exactly 2 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_response_stream" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_stream() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_stream_read" => {
+                    if args.len() != 2 {
+                        return Err("requests_stream_read() takes exactly 2 arguments".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_stream_has_more" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_stream_has_more() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Bool)
+                }
+                "requests_client_free"
+                | "requests_request_builder_free"
+                | "requests_response_free"
+                | "requests_header_map_free"
+                | "requests_multipart_free"
+                | "requests_tls_config_free"
+                | "requests_cookie_jar_free"
+                | "requests_stream_free" => {
+                    if args.len() != 1 {
+                        return Err(format!("{}() takes exactly 1 argument", func));
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "requests_session_new" => {
+                    if !args.is_empty() {
+                        return Err("requests_session_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Unknown)
+                }
+                "requests_session_request" => {
+                    if args.len() != 3 {
+                        return Err(
+                            "requests_session_request() takes exactly 3 arguments".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    let _ = check_expr(&args[2], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_request_builder_set_headers" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_set_headers() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "requests_request_builder_verify" => {
+                    if args.len() != 2 {
+                        return Err(
+                            "requests_request_builder_verify() takes exactly 2 arguments"
+                                .to_string(),
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    let _ = check_expr(&args[1], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "requests_response_headers_list" => {
+                    if args.len() != 1 {
+                        return Err(
+                            "requests_response_headers_list() takes exactly 1 argument".to_string()
+                        );
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unknown)
+                }
+                "requests_session_free" => {
+                    if args.len() != 1 {
+                        return Err("requests_session_free() takes exactly 1 argument".to_string());
+                    }
+                    let _ = check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                other => {
                     // Function reference in env (e.g. `let f = add; f(3, 4)`)
                     if let Some(t) = env.vars.get(other) {
                         match t {
@@ -8697,11 +9968,13 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         let concrete_state = if let Some(tp) = enum_tp {
                             if !tp.is_empty() {
                                 let fields = defs.variant_fields.get(&resolved);
-                                let mut concrete_args: Vec<String> = vec!["unknown".to_string(); tp.len()];
+                                let mut concrete_args: Vec<String> =
+                                    vec!["unknown".to_string(); tp.len()];
                                 if let Some(flds) = fields {
                                     for (arg, (_, ftype)) in args.iter().zip(flds.iter()) {
                                         if let Some(pos) = tp.iter().position(|p| p == ftype) {
-                                            concrete_args[pos] = type_to_string(&check_expr(arg, env, defs)?);
+                                            concrete_args[pos] =
+                                                type_to_string(&check_expr(arg, env, defs)?);
                                         }
                                     }
                                 }
@@ -8722,12 +9995,17 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                                     args.len()
                                 ));
                             }
-                            for (i, (arg, (fname, ftype))) in args.iter().zip(fields.iter()).enumerate() {
+                            for (i, (arg, (fname, ftype))) in
+                                args.iter().zip(fields.iter()).enumerate()
+                            {
                                 let at = check_expr(arg, env, defs)?;
                                 let expected = resolve_field_type(&concrete_state, ftype, defs);
                                 if !type_eq(&at, &expected) {
                                     return Err(type_mismatch_msg(
-                                        &format!("variant {} field {} (arg {})", resolved, fname, i),
+                                        &format!(
+                                            "variant {} field {} (arg {})",
+                                            resolved, fname, i
+                                        ),
                                         &expected,
                                         &at,
                                     ));
@@ -8761,7 +10039,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                                     &at,
                                 ));
                             }
-                            if let Err(e) = check_constraint(defs, &fdef.constraints, &at, &expected)
+                            if let Err(e) =
+                                check_constraint(defs, &fdef.constraints, &at, &expected)
                             {
                                 return Err(format!(
                                     "Type error: argument '{}' of {}: {}",
@@ -8779,7 +10058,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     // Lime body. Resolve by (name, arity) and return its declared
                     // type. No `define` is emitted; the symbol is supplied by the
                     // prepared Charger native artifact injected at link time.
-                    if let Some((_, _, ret)) = defs.extern_symbols.get(&(func.clone(), args.len())) {
+                    if let Some((_, _, ret)) = defs.extern_symbols.get(&(func.clone(), args.len()))
+                    {
                         for a in args {
                             check_expr(a, env, defs)?;
                         }
@@ -8851,7 +10131,11 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
             }
         }
 
-        Expr::MethodCall { object, method, args } => {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
             let obj_ty = check_expr(object, env, defs)?;
             match obj_ty {
                 Type::Struct(name) => {
@@ -8863,16 +10147,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         return ty;
                     }
                     if let Some(sdef) = defs.structs.get(&name) {
-                        let mdef = sdef
-                            .methods
-                            .get(method)
-                            .cloned()
-                            .ok_or_else(|| {
-                                format!(
-                                    "Type error: unknown method '{}' on struct {}",
-                                    method, name
-                                )
-                            })?;
+                        let mdef = sdef.methods.get(method).cloned().ok_or_else(|| {
+                            format!("Type error: unknown method '{}' on struct {}", method, name)
+                        })?;
                         if args.len() != mdef.params.len() {
                             return Err(format!(
                                 "Type error: method {}.{} expects {} argument(s), got {}",
@@ -8903,19 +10180,20 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                 // Interface 鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ interface 鬯ｩ蜉ｱ・代・・ｽ繝ｻ・ｲ鬮ｯ・ｷ繝ｻ・ｷ鬯ｮ・ｦ繝ｻ・ｪ驍ｵ・ｲ陞ｳ螟ｲ・ｽ・ｮ・つ髫ｲ蟶帶ｲｺ繝ｻ・ｸ鬯倩ｲｻ・ｽ・ｸ繝ｻ・ｺ髯ｷ莨夲ｽｽ・ｱ繝ｻ縺､ﾂ驕ｶ謫ｾ・ｽ・ｵ鬩搾ｽｯ繝ｻ・ｾ鬩幢ｽ｢繝ｻ・ｧ鬯ｮ・ｮ遶擾ｽｵ繝ｻ・｢陝ｶ・ｷ繝ｻ・ｹ繝ｻ・ｧ髯橸ｽｳ陞滂ｽｲ繝ｻ・ｽ繝ｻ・ｿ髫ｴ竏ｵ閻ｸ繝ｻ・ｿ繝ｻ・ｽE
                 // 驛｢譎｢・ｽ・ｻ髣費｣ｰ繝ｻ・･郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髮狗ｿｫ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驍ｵ・ｺ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴乗・・ｽ・ｻ繝ｻ・｣驛｢譎｢・ｽ・｡E鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ讖ｸ・ｽ・ｳ髮九・・ｽ・ｯ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髫ｴ・ｴ繝ｻ・ｧ髯ｷ繝ｻ・ｽ・ｾ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・ｷ鬯ｮ・ｮ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｡ struct 鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｯ繝ｻ・ｦ髯滓坩・ｯ莨夲ｽｽ・ｽ陷證ｦ・ｽ・ｹ繝ｻ・ｧ髯滓坩・ｯ莨夲ｽｽ・ｽ陷茨ｽｷ繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ
                 Type::Interface(iface, _) => {
-                    let idef = defs.interfaces.get(&iface).ok_or_else(|| {
-                        format!("Type error: unknown interface '{}'", iface)
-                    })?;
-                    let imsig = idef
-                        .methods
-                        .iter()
-                        .find(|m| m.name == *method)
-                        .ok_or_else(|| {
-                            format!(
-                                "Type error: interface '{}' has no method '{}'",
-                                iface, method
-                            )
-                        })?;
+                    let idef = defs
+                        .interfaces
+                        .get(&iface)
+                        .ok_or_else(|| format!("Type error: unknown interface '{}'", iface))?;
+                    let imsig =
+                        idef.methods
+                            .iter()
+                            .find(|m| m.name == *method)
+                            .ok_or_else(|| {
+                                format!(
+                                    "Type error: interface '{}' has no method '{}'",
+                                    iface, method
+                                )
+                            })?;
                     if args.len() != imsig.params.len() {
                         return Err(format!(
                             "Type error: interface method {}.{} expects {} argument(s), got {}",
@@ -8955,7 +10233,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     "byte" => {
                         if args.len() != 1 {
                             return Err(
-                                "Type error: String.byte() takes exactly 1 argument".to_string(),
+                                "Type error: String.byte() takes exactly 1 argument".to_string()
                             );
                         }
                         let at = check_expr(&args[0], env, defs)?;
@@ -8969,9 +10247,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "push_byte" => {
                         if args.len() != 1 {
-                            return Err(
-                                "Type error: String.push_byte() takes exactly 1 argument".to_string(),
-                            );
+                            return Err("Type error: String.push_byte() takes exactly 1 argument"
+                                .to_string());
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if at != Type::Int && at != Type::Unknown {
@@ -8994,8 +10271,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     "slice" => {
                         if args.len() != 2 {
                             return Err(
-                                "Type error: String.slice() takes exactly 2 arguments"
-                                    .to_string(),
+                                "Type error: String.slice() takes exactly 2 arguments".to_string()
                             );
                         }
                         for a in args {
@@ -9069,9 +10345,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "read" => {
                         if !args.is_empty() {
-                            return Err(
-                                "Type error: String.read() takes no arguments".to_string()
-                            );
+                            return Err("Type error: String.read() takes no arguments".to_string());
                         }
                         Ok(Type::String)
                     }
@@ -9098,10 +10372,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         Ok(Type::Struct("fs.FileMetadata".to_string()))
                     }
-                    other => Err(format!(
-                        "Type error: unknown method '{}' on str",
-                        other
-                    )),
+                    other => Err(format!("Type error: unknown method '{}' on str", other)),
                 },
                 // List 鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ髮・つ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髯区ｻゑｽｽ・･驕ｯ・ｶ繝ｻ・ｳ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
                 Type::List(elem) => match method.as_str() {
@@ -9113,7 +10384,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "add" => {
                         if args.len() != 1 {
-                            return Err("Type error: List.add() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: List.add() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if !type_eq(&at, &*elem) {
@@ -9126,7 +10399,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "get" => {
                         if args.len() != 1 {
-                            return Err("Type error: List.get() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: List.get() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if at != Type::Int && at != Type::Unknown {
@@ -9139,7 +10414,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "set" => {
                         if args.len() != 2 {
-                            return Err("Type error: List.set() takes exactly 2 arguments".to_string());
+                            return Err(
+                                "Type error: List.set() takes exactly 2 arguments".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if at != Type::Int && at != Type::Unknown {
@@ -9159,7 +10436,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "push" => {
                         if args.len() != 1 {
-                            return Err("Type error: List.push() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: List.push() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if !type_eq(&at, &*elem) {
@@ -9199,7 +10478,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "index_of" => {
                         if args.len() != 1 {
-                            return Err("Type error: List.index_of() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: List.index_of() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if !type_eq(&at, &*elem) {
@@ -9212,7 +10493,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "contains" => {
                         if args.len() != 1 {
-                            return Err("Type error: List.contains() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: List.contains() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if !type_eq(&at, &*elem) {
@@ -9229,10 +10512,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         Ok(Type::List(elem.clone()))
                     }
-                    other => Err(format!(
-                        "Type error: unknown method '{}' on List",
-                        other
-                    )),
+                    other => Err(format!("Type error: unknown method '{}' on List", other)),
                 },
                 // StringBuilder / Array / 鬩搾ｽｵ繝ｻ・ｺ髫ｴ雜｣・ｽ・｢郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬮｣遒大ｴ滄椨・ｩ髫ｴ・ｴ陝ｶ・ｷ繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｽ繝ｻ・｢鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ讓奇ｽｻ繧托ｽｽ・ｿ繝ｻ・ｽE 鬯ｩ謳ｾ・ｽ・ｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬮ｯ・ｷ繝ｻ・･驛｢譎｢・ｽ・ｻ
                 // Float 鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬮ｯ諛ｷ髮・つ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE髯区ｻゑｽｽ・･驕ｯ・ｶ繝ｻ・ｳ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
@@ -9257,7 +10537,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "get" => {
                         if args.len() != 1 {
-                            return Err("Type error: Slice.get() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: Slice.get() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if at != Type::Int && at != Type::Unknown {
@@ -9270,7 +10552,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "contains" => {
                         if args.len() != 1 {
-                            return Err("Type error: Slice.contains() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: Slice.contains() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if !type_eq(&at, &*elem) {
@@ -9283,7 +10567,9 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "index_of" => {
                         if args.len() != 1 {
-                            return Err("Type error: Slice.index_of() takes exactly 1 argument".to_string());
+                            return Err(
+                                "Type error: Slice.index_of() takes exactly 1 argument".to_string()
+                            );
                         }
                         let at = check_expr(&args[0], env, defs)?;
                         if !type_eq(&at, &*elem) {
@@ -9296,28 +10582,22 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                     }
                     "reverse" => {
                         if !args.is_empty() {
-                            return Err("Type error: Slice.reverse() takes no arguments".to_string());
+                            return Err(
+                                "Type error: Slice.reverse() takes no arguments".to_string()
+                            );
                         }
                         Ok(Type::Slice(elem.clone()))
                     }
-                    other => Err(format!(
-                        "Type error: unknown method '{}' on str",
-                        other
-                    )),
+                    other => Err(format!("Type error: unknown method '{}' on str", other)),
                 },
                 Type::Int | Type::Long => match method.as_str() {
                     "chr" => {
                         if !args.is_empty() {
-                            return Err(
-                                "Type error: int.chr() takes no arguments".to_string(),
-                            );
+                            return Err("Type error: int.chr() takes no arguments".to_string());
                         }
                         Ok(Type::String)
                     }
-                    other => Err(format!(
-                        "Type error: unknown method '{}' on int",
-                        other
-                    )),
+                    other => Err(format!("Type error: unknown method '{}' on int", other)),
                 },
                 Type::Float => match method.as_str() {
                     "abs" => {
@@ -9350,10 +10630,7 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         }
                         Ok(Type::Float)
                     }
-                    other => Err(format!(
-                        "Type error: unknown method '{}' on Float",
-                        other
-                    )),
+                    other => Err(format!("Type error: unknown method '{}' on Float", other)),
                 },
                 Type::Unknown => Ok(Type::Unknown),
                 other => Err(format!(
@@ -9418,9 +10695,8 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
         }
 
         Expr::FnDef { params, body } => {
-            let param_types: Vec<Type> = params.iter()
-                .map(|(_, t)| type_from_str(t, defs))
-                .collect();
+            let param_types: Vec<Type> =
+                params.iter().map(|(_, t)| type_from_str(t, defs)).collect();
             // Infer return type from body
             let mut env_vars: HashMap<String, Type> = HashMap::new();
             for (pname, ptype) in params {
@@ -9571,7 +10847,12 @@ fn check_stmt_inner(
     diags: &mut Vec<Diagnostic>,
 ) -> Result<(), String> {
     match stmt {
-        Stmt::Let { name, type_hint, value, .. } => {
+        Stmt::Let {
+            name,
+            type_hint,
+            value,
+            ..
+        } => {
             let v_ty = check_expr(value, env, defs)?;
             let declared = match type_hint {
                 Some(h) => type_from_str(h, defs),
@@ -9603,7 +10884,10 @@ fn check_stmt_inner(
             Ok(())
         }
 
-        Stmt::Return { explicit_type, value } => {
+        Stmt::Return {
+            explicit_type,
+            value,
+        } => {
             if let Some(et) = explicit_type {
                 if let Some(rt) = expected_return {
                     if !type_eq(rt, et) {
@@ -9626,22 +10910,29 @@ fn check_stmt_inner(
                         }
                     }
                     match expected_return {
-                        Some(rt) if *rt != Type::Unknown && !type_eq(rt, &v_ty) => Err(
-                            type_mismatch_msg("return type mismatch", rt, &v_ty),
-                        ),
+                        Some(rt) if *rt != Type::Unknown && !type_eq(rt, &v_ty) => {
+                            Err(type_mismatch_msg("return type mismatch", rt, &v_ty))
+                        }
                         _ => Ok(()),
                     }
                 }
                 None => {
                     if explicit_type.is_some() {
-                        return Err("Type error: explicit return type requires a value expression".to_string());
+                        return Err(
+                            "Type error: explicit return type requires a value expression"
+                                .to_string(),
+                        );
                     }
                     Ok(())
                 }
             }
-        },
+        }
 
-        Stmt::If { cond, then_branch, else_branch } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             let c_ty = check_expr(cond, env, defs)?;
             if c_ty != Type::Bool && c_ty != Type::Unknown {
                 return Err(format!(
@@ -9649,16 +10940,32 @@ fn check_stmt_inner(
                     c_ty
                 ));
             }
-            check_stmts(then_branch, env, defs, expected_return, is_async, loc, diags);
-            if !diags.is_empty() { return Err(String::new()); }
+            check_stmts(
+                then_branch,
+                env,
+                defs,
+                expected_return,
+                is_async,
+                loc,
+                diags,
+            );
+            if !diags.is_empty() {
+                return Err(String::new());
+            }
             if let Some(els) = else_branch {
                 check_stmts(els, env, defs, expected_return, is_async, loc, diags);
-            if !diags.is_empty() { return Err(String::new()); }
+                if !diags.is_empty() {
+                    return Err(String::new());
+                }
             }
             Ok(())
         }
 
-        Stmt::For { var, iterable, body } => {
+        Stmt::For {
+            var,
+            iterable,
+            body,
+        } => {
             let iter_ty = check_expr(iterable, env, defs)?;
             // Iterable 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｫ髯ｬ諛医′郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｽ陜｣・､繝ｻ・ｹ隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｫ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢隴弱・ﾂ隲幢ｽｶ繝ｻ・ｽ繝ｻ・､鬨ｾ蛹・ｽｽ・ｻ髴取ｺｷ・､繧托ｽｽ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ髯ｷ莨夲ｽｽ・ｱ驕ｯ・ｶ繝ｻ・ｻ鬮ｴ謇假ｽｽ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ貅倥・郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｮ荳ｻ譯√・・ｽ繝ｻ・ｨ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・･
             let elem_ty = match &iter_ty {
@@ -9669,8 +10976,18 @@ fn check_stmt_inner(
             };
             let mut loop_env = env.clone();
             loop_env.insert(var.clone(), elem_ty);
-            check_stmts(body, &mut loop_env, defs, expected_return, is_async, loc, diags);
-            if !diags.is_empty() { return Err(String::new()); }
+            check_stmts(
+                body,
+                &mut loop_env,
+                defs,
+                expected_return,
+                is_async,
+                loc,
+                diags,
+            );
+            if !diags.is_empty() {
+                return Err(String::new());
+            }
             Ok(())
         }
 
@@ -9683,7 +11000,9 @@ fn check_stmt_inner(
                 ));
             }
             check_stmts(body, env, defs, expected_return, is_async, loc, diags);
-            if !diags.is_empty() { return Err(String::new()); }
+            if !diags.is_empty() {
+                return Err(String::new());
+            }
             Ok(())
         }
 
@@ -9697,13 +11016,25 @@ fn check_stmt_inner(
                         Pattern::Catch => {
                             has_wildcard = true;
                             check_stmts(body, env, defs, expected_return, is_async, loc, diags);
-                            if !diags.is_empty() { return Err(String::new()); }
+                            if !diags.is_empty() {
+                                return Err(String::new());
+                            }
                         }
                         Pattern::Tuple(elems) | Pattern::Try { elems } => {
                             let mut arm_env = env.clone();
                             bind_tuple_pattern(elems, elem_types, defs, &mut arm_env)?;
-                            check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
-                            if !diags.is_empty() { return Err(String::new()); }
+                            check_stmts(
+                                body,
+                                &mut arm_env,
+                                defs,
+                                expected_return,
+                                is_async,
+                                loc,
+                                diags,
+                            );
+                            if !diags.is_empty() {
+                                return Err(String::new());
+                            }
                         }
                         other => {
                             return Err(format!(
@@ -9714,7 +11045,9 @@ fn check_stmt_inner(
                     }
                 }
                 if !has_wildcard
-                    && !arms.iter().any(|(p, _)| matches!(p, Pattern::Tuple(_) | Pattern::Try { .. }))
+                    && !arms
+                        .iter()
+                        .any(|(p, _)| matches!(p, Pattern::Tuple(_) | Pattern::Try { .. }))
                 {
                     return Err(
                         "Type error: match on tuple is not exhaustive (add a `catch:` arm or a `try (...)` pattern)"
@@ -9727,7 +11060,10 @@ fn check_stmt_inner(
             // 鬯ｩ謳ｾ・ｽ・ｯ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｩ邇ｲ諷｣繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｶ・つ髫ｲ蟶帶ｲｺ繝ｻ・ｸ陞ゅ・・ｽ・ｿ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽEtate 鬮ｯ諛ｷ驕懊・・ｿ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬮ｯ諛ｶ・ｽ・｣郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ鬮｣魃会ｽｽ・ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
             let (state_name, variants) = if let Type::State(sn) = &m_ty {
                 let base = struct_base(sn);
-                (sn.clone(), defs.states.get(&base).cloned().unwrap_or_default())
+                (
+                    sn.clone(),
+                    defs.states.get(&base).cloned().unwrap_or_default(),
+                )
             } else if let Type::Option(inner) = &m_ty {
                 let sn = format!("Option({})", type_to_string(inner));
                 (sn, vec!["Some".to_string(), "None".to_string()])
@@ -9742,17 +11078,24 @@ fn check_stmt_inner(
                     if matches!(pattern, Pattern::Catch) {
                         has_wildcard = true;
                         check_stmts(body, env, defs, expected_return, is_async, loc, diags);
-                        if !diags.is_empty() { return Err(String::new()); }
+                        if !diags.is_empty() {
+                            return Err(String::new());
+                        }
                         continue;
                     }
 
                     if let Pattern::Try { elems } = pattern {
                         let pname = "Success";
                         if !variants.contains(&pname.to_string()) {
-                            let known: Vec<String> = variants.iter().filter(|v| *v != "Success" && *v != "Error").cloned().collect();
+                            let known: Vec<String> = variants
+                                .iter()
+                                .filter(|v| *v != "Success" && *v != "Error")
+                                .cloned()
+                                .collect();
                             return Err(format!(
                                 "Type error: unknown variant '{}' for state {}. available variants: {}",
-                                pname, state_name,
+                                pname,
+                                state_name,
                                 known.join(", ")
                             ));
                         }
@@ -9760,21 +11103,40 @@ fn check_stmt_inner(
                         let mut arm_env = env.clone();
                         let fields = defs.variant_fields.get(pname);
                         let field_types: Vec<Type> = fields
-                            .map(|f| f.iter().map(|(_, ft)| resolve_field_type(&state_name, ft, defs)).collect())
+                            .map(|f| {
+                                f.iter()
+                                    .map(|(_, ft)| resolve_field_type(&state_name, ft, defs))
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         bind_tuple_pattern(elems, &field_types, defs, &mut arm_env)?;
-                        check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
-                        if !diags.is_empty() { return Err(String::new()); }
+                        check_stmts(
+                            body,
+                            &mut arm_env,
+                            defs,
+                            expected_return,
+                            is_async,
+                            loc,
+                            diags,
+                        );
+                        if !diags.is_empty() {
+                            return Err(String::new());
+                        }
                         continue;
                     }
 
                     if let Pattern::Error = pattern {
                         let pname = "Error";
                         if !variants.contains(&pname.to_string()) {
-                            let known: Vec<String> = variants.iter().filter(|v| *v != "Success" && *v != "Error").cloned().collect();
+                            let known: Vec<String> = variants
+                                .iter()
+                                .filter(|v| *v != "Success" && *v != "Error")
+                                .cloned()
+                                .collect();
                             return Err(format!(
                                 "Type error: unknown variant '{}' for state {}. available variants: {}",
-                                pname, state_name,
+                                pname,
+                                state_name,
                                 known.join(", ")
                             ));
                         }
@@ -9786,8 +11148,18 @@ fn check_stmt_inner(
                             .map(|(_, ft)| resolve_field_type(&state_name, ft, defs))
                             .unwrap_or(Type::Unknown);
                         arm_env.insert("error".to_string(), err_ty);
-                        check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
-                        if !diags.is_empty() { return Err(String::new()); }
+                        check_stmts(
+                            body,
+                            &mut arm_env,
+                            defs,
+                            expected_return,
+                            is_async,
+                            loc,
+                            diags,
+                        );
+                        if !diags.is_empty() {
+                            return Err(String::new());
+                        }
                         continue;
                     }
 
@@ -9797,10 +11169,15 @@ fn check_stmt_inner(
                         Pattern::Catch | Pattern::Try { .. } | Pattern::Error => unreachable!(),
                     };
                     if !variants.contains(&pname) {
-                        let known: Vec<String> = variants.iter().filter(|v| *v != "Success" && *v != "Error").cloned().collect();
+                        let known: Vec<String> = variants
+                            .iter()
+                            .filter(|v| *v != "Success" && *v != "Error")
+                            .cloned()
+                            .collect();
                         return Err(format!(
                             "Type error: unknown variant '{}' for state {}. available variants: {}",
-                            pname, state_name,
+                            pname,
+                            state_name,
                             known.join(", ")
                         ));
                     }
@@ -9817,8 +11194,18 @@ fn check_stmt_inner(
                             arm_env.insert(b.clone(), ty);
                         }
                     }
-                    check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
-                    if !diags.is_empty() { return Err(String::new()); }
+                    check_stmts(
+                        body,
+                        &mut arm_env,
+                        defs,
+                        expected_return,
+                        is_async,
+                        loc,
+                        diags,
+                    );
+                    if !diags.is_empty() {
+                        return Err(String::new());
+                    }
                 }
 
                 if !has_wildcard {
@@ -9836,7 +11223,9 @@ fn check_stmt_inner(
                     let mut arm_env = env.clone();
                     let (pname, bindings) = match pattern {
                         Pattern::Variant { name, bindings } => (name.clone(), bindings.clone()),
-                        Pattern::Try { elems } => ("Success".to_string(), pattern_binding_names(elems)),
+                        Pattern::Try { elems } => {
+                            ("Success".to_string(), pattern_binding_names(elems))
+                        }
                         Pattern::Error => ("Error".to_string(), vec!["error".to_string()]),
                         Pattern::Catch => (String::new(), vec![]),
                         Pattern::Tuple(elems) => (String::new(), pattern_binding_names(elems)),
@@ -9851,8 +11240,18 @@ fn check_stmt_inner(
                             arm_env.insert(b.clone(), ty);
                         }
                     }
-                    check_stmts(body, &mut arm_env, defs, expected_return, is_async, loc, diags);
-                    if !diags.is_empty() { return Err(String::new()); }
+                    check_stmts(
+                        body,
+                        &mut arm_env,
+                        defs,
+                        expected_return,
+                        is_async,
+                        loc,
+                        diags,
+                    );
+                    if !diags.is_empty() {
+                        return Err(String::new());
+                    }
                 }
             }
             Ok(())
@@ -9877,7 +11276,10 @@ fn check_stmt_inner(
                     }
                 }
                 None => {
-                    return Err(format!("Type error: assignment to undeclared variable '{}'", name));
+                    return Err(format!(
+                        "Type error: assignment to undeclared variable '{}'",
+                        name
+                    ));
                 }
             }
             env.insert(name.clone(), v_ty);
@@ -9890,7 +11292,9 @@ fn check_stmt_inner(
         Stmt::State { .. } => Ok(()),
         Stmt::Defer { body } => {
             check_stmts(body, env, defs, expected_return, is_async, loc, diags);
-            if !diags.is_empty() { return Err(String::new()); }
+            if !diags.is_empty() {
+                return Err(String::new());
+            }
             Ok(())
         }
         _ => Ok(()),
@@ -10016,11 +11420,7 @@ fn check_function(
 
 /// Infer the return type of a function body using the full type environment
 /// (params + local let-bindings populated during type checking).
-fn infer_return_type_from_body(
-    body: &[Stmt],
-    env: &TypeEnv,
-    defs: &Defs,
-) -> Result<Type, String> {
+fn infer_return_type_from_body(body: &[Stmt], env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
     let mut ret_type: Option<Type> = None;
     scan_return_types(body, env, defs, &mut ret_type)?;
     Ok(ret_type.unwrap_or(Type::Unit))
@@ -10034,11 +11434,17 @@ fn scan_return_types(
 ) -> Result<(), String> {
     for stmt in stmts {
         match stmt {
-            Stmt::Return { explicit_type, value } => {
+            Stmt::Return {
+                explicit_type,
+                value,
+            } => {
                 let t = match (explicit_type, value) {
                     (Some(et), _) => {
                         if value.is_none() {
-                            return Err("Type error: explicit return type requires a value expression".to_string());
+                            return Err(
+                                "Type error: explicit return type requires a value expression"
+                                    .to_string(),
+                            );
                         }
                         et.clone()
                     }
@@ -10059,21 +11465,25 @@ fn scan_return_types(
                         } else if *existing == Type::Unit || t == Type::Unit {
                             return Err(format!(
                                 "Type error: cannot mix void and {} return",
-                                type_to_string(if *existing == Type::Unit { &t } else { existing })
+                                type_to_string(if *existing == Type::Unit {
+                                    &t
+                                } else {
+                                    existing
+                                })
                             ));
                         } else {
-                            return Err(type_mismatch_msg(
-                                "return type mismatch",
-                                existing,
-                                &t,
-                            ));
+                            return Err(type_mismatch_msg("return type mismatch", existing, &t));
                         }
                     }
                     None => *ret_type = Some(t),
                     _ => {}
                 }
             }
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 scan_return_types(then_branch, env, defs, ret_type)?;
                 if let Some(eb) = else_branch {
                     scan_return_types(eb, env, defs, ret_type)?;
@@ -10113,6 +11523,11 @@ struct Diagnostic {
     /// an indented hint line after the message. Stored separately from the
     /// message so future renderers can present it differently.
     hint: Option<String>,
+    /// Stable error code (e.g. "E0001"). When present, rendered in the tag:
+    /// `error[E0001] file:line:col: message`.
+    code: Option<String>,
+    /// Optional source snippet (line text from the source file) for context.
+    source_line: Option<String>,
 }
 
 impl Diagnostic {
@@ -10125,6 +11540,8 @@ impl Diagnostic {
             message,
             has_position: true,
             hint: None,
+            code: None,
+            source_line: None,
         }
     }
 
@@ -10137,6 +11554,8 @@ impl Diagnostic {
             message,
             has_position: false,
             hint: None,
+            code: None,
+            source_line: None,
         }
     }
 
@@ -10150,6 +11569,8 @@ impl Diagnostic {
             message,
             has_position: true,
             hint: None,
+            code: None,
+            source_line: None,
         }
     }
 
@@ -10163,6 +11584,8 @@ impl Diagnostic {
             message,
             has_position: false,
             hint: None,
+            code: None,
+            source_line: None,
         }
     }
 
@@ -10171,28 +11594,57 @@ impl Diagnostic {
         self.hint = hint;
         self
     }
+
+    /// Attach a stable error code (e.g. "E0001").
+    fn with_code(mut self, code: &str) -> Diagnostic {
+        self.code = Some(code.to_string());
+        self
+    }
+
+    /// Attach a source snippet for context.
+    fn with_source_line(mut self, line: String) -> Diagnostic {
+        self.source_line = Some(line);
+        self
+    }
 }
 
-/// Render a `Diagnostic` into the historical `error[type] <file>:<line>:<col>`
-/// text form, preserving byte-for-byte compatibility with the prior
-/// `LocMap::annotate` output used by tests and the CLI. Warnings use a
-/// `warning[type]` prefix instead of `error[type]` (Phase 11 Step 7). When a
-/// `hint` is present, an indented "did you mean '...'?" line is appended
-/// (Phase 11 Step 6).
+/// Render a `Diagnostic` into a Rust-like text form with error codes,
+/// file/line/col, source snippets, and optional hints.
 fn render_diagnostic(d: &Diagnostic) -> String {
-    let tag = match d.level {
-        DiagnosticLevel::Error => "error[type]",
-        DiagnosticLevel::Warning => "warning[type]",
+    let tag = match (&d.level, &d.code) {
+        (DiagnosticLevel::Error, Some(code)) => format!("error[{}]", code),
+        (DiagnosticLevel::Error, None) => "error[type]".to_string(),
+        (DiagnosticLevel::Warning, Some(code)) => format!("warning[{}]", code),
+        (DiagnosticLevel::Warning, None) => "warning[type]".to_string(),
     };
     let base = if d.has_position {
-        format!("{} {}:{}:{}\n{}", tag, d.file, d.line, d.col, d.message)
+        // Header: error[E0001] file:line:col
+        let header = format!("{} {}:{}:{}", tag, d.file, d.line, d.col);
+        // Source snippet with caret pointer
+        let snippet = if let Some(ref src) = d.source_line {
+            let line_num = format!("{}", d.line);
+            let pad = " ".repeat(line_num.len());
+            let caret_col = if d.col > 0 { d.col - 1 } else { 0 };
+            let caret = " ".repeat(caret_col) + "^";
+            format!(
+                "\n{} |\n{} | {}\n{} | {}",
+                pad,
+                line_num,
+                src.trim(),
+                pad,
+                caret
+            )
+        } else {
+            String::new()
+        };
+        format!("{}{}\n{}", header, snippet, d.message)
     } else if d.level == DiagnosticLevel::Warning {
         format!("warning: {}", d.message)
     } else {
         d.message.clone()
     };
     match &d.hint {
-        Some(s) => format!("{}\n  did you mean '{}'?", base, s),
+        Some(s) => format!("{}\n  = help: did you mean '{}'?", base, s),
         None => base,
     }
 }
@@ -10223,9 +11675,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i;
         for j in 1..=m {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -10291,10 +11741,96 @@ impl LocMap {
     /// statement's source location when known. Statement-level granularity:
     /// nested expression errors inherit the enclosing statement's position.
     fn diagnostic(&self, stmt: &Stmt, msg: String) -> Diagnostic {
+        let code = classify_type_error(&msg);
+        let source_line = self.source_line_for(stmt);
         match self.loc_of(stmt) {
-            Some((line, col)) => Diagnostic::error(self.file.clone(), line, col, msg),
-            None => Diagnostic::error_no_pos(msg),
+            Some((line, col)) => {
+                let mut d = Diagnostic::error(self.file.clone(), line, col, msg);
+                if let Some(c) = code {
+                    d = d.with_code(&c);
+                }
+                if let Some(sl) = source_line {
+                    d = d.with_source_line(sl);
+                }
+                d
+            }
+            None => {
+                let mut d = Diagnostic::error_no_pos(msg);
+                if let Some(c) = code {
+                    d = d.with_code(&c);
+                }
+                d
+            }
         }
+    }
+
+    /// Read the source line for a statement (for snippet rendering).
+    fn source_line_for(&self, stmt: &Stmt) -> Option<String> {
+        let (line, _col) = self.loc_of(stmt)?;
+        let contents = std::fs::read_to_string(&self.file).ok()?;
+        contents.lines().nth(line - 1).map(|s| s.to_string())
+    }
+}
+
+/// Classify a type error message into a stable error code.
+fn classify_type_error(msg: &str) -> Option<String> {
+    let m = msg.strip_prefix("Type error: ").unwrap_or(msg);
+    if m.starts_with("undefined variable ") {
+        Some("E0201".to_string())
+    } else if m.starts_with("unknown function ") {
+        Some("E0202".to_string())
+    } else if m.starts_with("unknown field ") || m.contains("field access on non-struct") {
+        Some("E0203".to_string())
+    } else if m.starts_with("unknown method ") {
+        Some("E0204".to_string())
+    } else if m.starts_with("tuple index ") && m.contains("out of bounds") {
+        Some("E0205".to_string())
+    } else if m.starts_with("cannot index non-tuple") {
+        Some("E0206".to_string())
+    } else if m.starts_with("function ") && m.contains("expects") && m.contains("argument(s)") {
+        Some("E0207".to_string())
+    } else if m.starts_with("argument ") && m.contains("expected") {
+        Some("E0208".to_string())
+    } else if m.starts_with("match on state ") && m.contains("not exhaustive") {
+        Some("E0209".to_string())
+    } else if m.starts_with("variant ") && m.contains("requires") && m.contains("field(s)") {
+        Some("E0210".to_string())
+    } else if m.starts_with("cannot negate type ") {
+        Some("E0211".to_string())
+    } else if m.starts_with("unknown unary operator ") {
+        Some("E0212".to_string())
+    } else if m.starts_with("unknown binary operator ") {
+        Some("E0213".to_string())
+    } else if m.starts_with("logical operator requires bool") {
+        Some("E0214".to_string())
+    } else if m.contains("does not satisfy constraint") {
+        Some("E0215".to_string())
+    } else if m.starts_with("range ") && m.contains("must be int") {
+        Some("E0216".to_string())
+    } else if m.starts_with("unknown interface ") {
+        Some("E0217".to_string())
+    } else if m.starts_with("interface ") && m.contains("has no method") {
+        Some("E0218".to_string())
+    } else if m.contains("interface method") && m.contains("expects") {
+        Some("E0219".to_string())
+    } else if m.starts_with("String.") && m.contains("takes") {
+        Some("E0220".to_string())
+    } else if m.starts_with("String.") && m.contains("expects") {
+        Some("E0221".to_string())
+    } else if m.starts_with("List.") && m.contains("takes") {
+        Some("E0222".to_string())
+    } else if m.starts_with("List.") && m.contains("expects") {
+        Some("E0223".to_string())
+    } else if m.starts_with("Slice.") && m.contains("takes") {
+        Some("E0224".to_string())
+    } else if m.starts_with("Slice.") && m.contains("expects") {
+        Some("E0225".to_string())
+    } else if m.contains("expects") && m.contains("field(s)") {
+        Some("E0226".to_string())
+    } else if m.starts_with("expected ") {
+        Some("E0200".to_string())
+    } else {
+        None
     }
 }
 
@@ -10324,7 +11860,11 @@ fn build_loc_map(
                     }
                 }
             }
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 build_loc_map(then_branch, locs, idx, map);
                 if let Some(eb) = else_branch {
                     build_loc_map(eb, locs, idx, map);
@@ -10349,7 +11889,10 @@ fn make_loc_map(stmts: &[Stmt], locs: &[(usize, usize)], file: &str) -> LocMap {
     let mut by_addr = HashMap::new();
     let mut idx = 0usize;
     build_loc_map(stmts, locs, &mut idx, &mut by_addr);
-    LocMap { by_addr, file: file.to_string() }
+    LocMap {
+        by_addr,
+        file: file.to_string(),
+    }
 }
 
 fn type_check(stmts: &[Stmt], defs: &mut Defs) -> Result<(), String> {
@@ -10373,7 +11916,16 @@ fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(
             } => {
                 let _ = type_params;
                 let mut inferred = None;
-                if let Err(e) = check_function(params, constraints, &None, body, defs, *is_async, loc, &mut inferred) {
+                if let Err(e) = check_function(
+                    params,
+                    constraints,
+                    &None,
+                    body,
+                    defs,
+                    *is_async,
+                    loc,
+                    &mut inferred,
+                ) {
                     // Preserve the historical `In function '...':` wrapper
                     // (one line, joined before the first located error). The
                     // whole function body's collected errors are rendered here
@@ -10427,7 +11979,9 @@ fn type_check_located(stmts: &[Stmt], defs: &mut Defs, loc: &LocMap) -> Result<(
                         for d in mdiags {
                             diags.push(Diagnostic::error_no_pos(format!(
                                 "In method '{}.{}': {}",
-                                name, mname, render_diagnostic(&d)
+                                name,
+                                mname,
+                                render_diagnostic(&d)
                             )));
                         }
                     }
@@ -10517,8 +12071,12 @@ fn expr_vars(e: &Expr, out: &mut Vec<String>) {
         }
         Expr::Slice { target, start, end } => {
             expr_vars(target, out);
-            if let Some(s) = start { expr_vars(s, out); }
-            if let Some(e) = end { expr_vars(e, out); }
+            if let Some(s) = start {
+                expr_vars(s, out);
+            }
+            if let Some(e) = end {
+                expr_vars(e, out);
+            }
         }
         Expr::Await(inner) => expr_vars(inner, out),
         _ => {}
@@ -10536,7 +12094,10 @@ fn collect_escape_seeds(stmts: &[Stmt], seeds: &mut Vec<String>) {
     for s in stmts {
         match s {
             // 鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・ｷ鬯ｮ・ｮ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｡鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ鬮ｯ・ｷ繝ｻ・ｻ鬮ｯ・ｷ繝ｻ・ｷ髣比ｼ夲ｽｽ・｣驕ｯ・ｶ繝ｻ・ｳ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ: return <expr> 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・ｷ鬯ｮ・ｮ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｡
-            Stmt::Return { explicit_type: _, value: Some(e) } => expr_vars(e, seeds),
+            Stmt::Return {
+                explicit_type: _,
+                value: Some(e),
+            } => expr_vars(e, seeds),
             // lime 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｩ鬮ｯ・ｷ繝ｻ・ｷ髣比ｼ夲ｽｽ・｣驕ｯ・ｶ繝ｻ・ｳ: await foo(x) 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ x 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ Future frame 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
             Stmt::Expr(Expr::Await(inner)) => {
                 if let Expr::Call { args, .. } = inner.as_ref() {
@@ -10546,7 +12107,11 @@ fn collect_escape_seeds(stmts: &[Stmt], seeds: &mut Vec<String>) {
                 }
             }
             // 鬮ｯ讖ｸ・ｽ・ｳ髮九・・ｽ・ｯ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髫ｴ・ｴ繝ｻ・ｧ髯ｷ繝ｻ・ｽ・ｾ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ鬩幢ｽ｢隴手・讚ｨ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｩ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｼ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬯ｩ蠅難ｽｩ・ｸ繝ｻ・ｽ繝ｻ・ｪ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 collect_escape_seeds(then_branch, seeds);
                 if let Some(els) = else_branch {
                     collect_escape_seeds(els, seeds);
@@ -10581,7 +12146,11 @@ fn collect_sources(stmts: &[Stmt], sources: &mut HashMap<String, Vec<String>>) {
                 expr_vars(value, &mut vs);
                 sources.insert(name.clone(), vs);
             }
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 collect_sources(then_branch, sources);
                 if let Some(els) = else_branch {
                     collect_sources(els, sources);
@@ -10644,10 +12213,20 @@ fn stmt_has_await(s: &Stmt) -> bool {
     match s {
         Stmt::Expr(Expr::Await(_)) => true,
         Stmt::Let { value, .. } => expr_has_await(value),
-        Stmt::Return { explicit_type: _, value: Some(e) } => expr_has_await(e),
-        Stmt::If { then_branch, else_branch, .. } => {
+        Stmt::Return {
+            explicit_type: _,
+            value: Some(e),
+        } => expr_has_await(e),
+        Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
             then_branch.iter().any(stmt_has_await)
-                || else_branch.as_ref().map(|b| b.iter().any(stmt_has_await)).unwrap_or(false)
+                || else_branch
+                    .as_ref()
+                    .map(|b| b.iter().any(stmt_has_await))
+                    .unwrap_or(false)
         }
         Stmt::While { body, .. } => body.iter().any(stmt_has_await),
         Stmt::For { body, .. } => body.iter().any(stmt_has_await),
@@ -10680,9 +12259,16 @@ fn stmt_vars(s: &Stmt, out: &mut Vec<String>) {
             out.push(name.clone());
             expr_vars(value, out);
         }
-        Stmt::Return { explicit_type: _, value: Some(e) } => expr_vars(e, out),
+        Stmt::Return {
+            explicit_type: _,
+            value: Some(e),
+        } => expr_vars(e, out),
         Stmt::Expr(e) => expr_vars(e, out),
-        Stmt::If { cond, then_branch, else_branch } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             expr_vars(cond, out);
             for b in then_branch {
                 stmt_vars(b, out);
@@ -10699,7 +12285,11 @@ fn stmt_vars(s: &Stmt, out: &mut Vec<String>) {
                 stmt_vars(b, out);
             }
         }
-        Stmt::For { var, iterable, body } => {
+        Stmt::For {
+            var,
+            iterable,
+            body,
+        } => {
             out.push(var.clone());
             expr_vars(iterable, out);
             for b in body {
@@ -10745,11 +12335,7 @@ fn analyze_block(
 
     for s in stmts {
         match s {
-            Stmt::Let {
-                name,
-                place,
-                ..
-            } => {
+            Stmt::Let { name, place, .. } => {
                 let decision = match place {
                     Some(MemoryPlace::Heap) => MemoryPlace::Heap,
                     Some(MemoryPlace::Stack) => {
@@ -10781,7 +12367,11 @@ fn analyze_block(
                 analyze_block(body, *fasync, defs, report)?;
                 let _ = fname;
             }
-            Stmt::If { then_branch, else_branch, .. } => {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 analyze_block(then_branch, is_async, defs, report)?;
                 if let Some(els) = else_branch {
                     analyze_block(els, is_async, defs, report)?;
@@ -10870,7 +12460,10 @@ mod mangle_tests {
             ("Option(int)", "Option_28int_29"),
             ("Result(int, string)", "Result_28int_2C_20string_29"),
             ("collections.HashMap", "collections_2EHashMap"),
-            ("Option(Result(double, bool))", "Option_28Result_28double_2C_20bool_29_29"),
+            (
+                "Option(Result(double, bool))",
+                "Option_28Result_28double_2C_20bool_29_29",
+            ),
         ];
         for (src, want) in cases {
             assert_eq!(mangle_type_arg(src), want, "encode {}", src);
@@ -10962,11 +12555,19 @@ fn monomorphize_type_str(t: &str, type_params: &[String], type_args: &[&str]) ->
     result
 }
 
-fn monomorphize_function(fdef: &FunctionDef, type_params: &[String], type_args: &[&str]) -> FunctionDef {
-    let params: Vec<(String, String)> = fdef.params.iter()
+fn monomorphize_function(
+    fdef: &FunctionDef,
+    type_params: &[String],
+    type_args: &[&str],
+) -> FunctionDef {
+    let params: Vec<(String, String)> = fdef
+        .params
+        .iter()
         .map(|(n, t)| (n.clone(), monomorphize_type_str(t, type_params, type_args)))
         .collect();
-    let return_type = fdef.return_type.as_ref()
+    let return_type = fdef
+        .return_type
+        .as_ref()
         .map(|rt| monomorphize_type_str(rt, type_params, type_args));
     FunctionDef {
         type_params: Vec::new(),
@@ -10986,9 +12587,10 @@ fn infer_generic_args(
     defs: &Defs,
     expected: Option<&Type>,
 ) -> Result<Vec<String>, String> {
-    let fdef = defs.functions.get(func_name).ok_or_else(|| {
-        format!("function '{}' not found", func_name)
-    })?;
+    let fdef = defs
+        .functions
+        .get(func_name)
+        .ok_or_else(|| format!("function '{}' not found", func_name))?;
     if fdef.type_params.is_empty() {
         return Err(format!("'{}' is not a generic function", func_name));
     }
@@ -11175,7 +12777,8 @@ fn collect_var_bindings(
         // Mixed representation: `Some(x)` produces `State("Option(int)")` while
         // a generic helper parameter is written `Option(T)`. Unify the two by
         // recursing on the state's concrete inner type.
-        (Type::State(name), Type::Option(pat_inner)) | (Type::Option(pat_inner), Type::State(name)) => {
+        (Type::State(name), Type::Option(pat_inner))
+        | (Type::Option(pat_inner), Type::State(name)) => {
             if struct_base(name) == "Option" {
                 let concrete_args = generic_args_of(name);
                 if let Some(con_inner) = concrete_args.first() {
@@ -11286,7 +12889,8 @@ fn collect_mono_from_expr(
                         mangled: mangled.clone(),
                     };
                     if !mono_fdefs.contains_key(&key) {
-                        let type_param_strs: Vec<&str> = type_args.iter().map(|s| s.as_str()).collect();
+                        let type_param_strs: Vec<&str> =
+                            type_args.iter().map(|s| s.as_str()).collect();
                         let mono = monomorphize_function(fdef, &fdef.type_params, &type_param_strs);
                         mono_fdefs.insert(key, mono);
                         worklist.push(mangled.clone());
@@ -11364,7 +12968,12 @@ fn collect_mono_from_stmts(
 ) -> Result<(), String> {
     for s in stmts {
         match s {
-            Stmt::Let { name, value, type_hint, .. } => {
+            Stmt::Let {
+                name,
+                value,
+                type_hint,
+                ..
+            } => {
                 // Infer type and update env before walking the value
                 if let Ok(t) = infer_type(value, env, defs, &HashMap::new()) {
                     env.insert(name.clone(), t);
@@ -11378,9 +12987,20 @@ fn collect_mono_from_stmts(
                     env.insert(name.clone(), exp.clone());
                 }
                 let exp_ref = expected.as_ref();
-                collect_mono_from_expr(value, env, defs, mono_fdefs, call_updates, worklist, exp_ref)?;
+                collect_mono_from_expr(
+                    value,
+                    env,
+                    defs,
+                    mono_fdefs,
+                    call_updates,
+                    worklist,
+                    exp_ref,
+                )?;
             }
-            Stmt::Return { explicit_type: _, value } => {
+            Stmt::Return {
+                explicit_type: _,
+                value,
+            } => {
                 if let Some(e) = value {
                     collect_mono_from_expr(e, env, defs, mono_fdefs, call_updates, worklist, None)?;
                 }
@@ -11394,20 +13014,42 @@ fn collect_mono_from_stmts(
                 }
                 collect_mono_from_expr(value, env, defs, mono_fdefs, call_updates, worklist, None)?;
             }
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 collect_mono_from_expr(cond, env, defs, mono_fdefs, call_updates, worklist, None)?;
                 let mut then_env = env.clone();
-                collect_mono_from_stmts(then_branch, &mut then_env, defs, mono_fdefs, call_updates, worklist)?;
+                collect_mono_from_stmts(
+                    then_branch,
+                    &mut then_env,
+                    defs,
+                    mono_fdefs,
+                    call_updates,
+                    worklist,
+                )?;
                 if let Some(eb) = else_branch {
                     let mut else_env = env.clone();
-                    collect_mono_from_stmts(eb, &mut else_env, defs, mono_fdefs, call_updates, worklist)?;
+                    collect_mono_from_stmts(
+                        eb,
+                        &mut else_env,
+                        defs,
+                        mono_fdefs,
+                        call_updates,
+                        worklist,
+                    )?;
                 }
             }
             Stmt::While { cond, body } => {
                 collect_mono_from_expr(cond, env, defs, mono_fdefs, call_updates, worklist, None)?;
                 collect_mono_from_stmts(body, env, defs, mono_fdefs, call_updates, worklist)?;
             }
-            Stmt::For { var, iterable, body } => {
+            Stmt::For {
+                var,
+                iterable,
+                body,
+            } => {
                 if let Ok(it_ty) = infer_type(iterable, env, defs, &HashMap::new()) {
                     let elem = match &it_ty {
                         Type::List(e) => (**e).clone(),
@@ -11415,14 +13057,29 @@ fn collect_mono_from_stmts(
                     };
                     env.insert(var.clone(), elem);
                 }
-                collect_mono_from_expr(iterable, env, defs, mono_fdefs, call_updates, worklist, None)?;
+                collect_mono_from_expr(
+                    iterable,
+                    env,
+                    defs,
+                    mono_fdefs,
+                    call_updates,
+                    worklist,
+                    None,
+                )?;
                 collect_mono_from_stmts(body, env, defs, mono_fdefs, call_updates, worklist)?;
             }
             Stmt::Match { expr, arms } => {
                 collect_mono_from_expr(expr, env, defs, mono_fdefs, call_updates, worklist, None)?;
                 for (_, body) in arms {
                     let mut arm_env = env.clone();
-                    collect_mono_from_stmts(body, &mut arm_env, defs, mono_fdefs, call_updates, worklist)?;
+                    collect_mono_from_stmts(
+                        body,
+                        &mut arm_env,
+                        defs,
+                        mono_fdefs,
+                        call_updates,
+                        worklist,
+                    )?;
                 }
             }
             _ => {}
@@ -11479,14 +13136,21 @@ fn update_call_in_stmts(stmts: &mut [Stmt], call_updates: &HashMap<String, Strin
     for s in stmts.iter_mut() {
         match s {
             Stmt::Let { value, .. } => update_call_in_expr(value, call_updates),
-            Stmt::Return { explicit_type: _, value } => {
+            Stmt::Return {
+                explicit_type: _,
+                value,
+            } => {
                 if let Some(e) = value {
                     update_call_in_expr(e, call_updates);
                 }
             }
             Stmt::Expr(e) => update_call_in_expr(e, call_updates),
             Stmt::Assign { value, .. } => update_call_in_expr(value, call_updates),
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 update_call_in_expr(cond, call_updates);
                 update_call_in_stmts(then_branch, call_updates);
                 if let Some(eb) = else_branch {
@@ -11725,7 +13389,9 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
             if !args.is_empty() {
                 return Err("read() takes no arguments".to_string());
             }
-            fs::read_to_string(s).map(Value::String).map_err(|e| format!("read('{}') failed: {}", s, e))
+            fs::read_to_string(s)
+                .map(Value::String)
+                .map_err(|e| format!("read('{}') failed: {}", s, e))
         }
         "append" => {
             if args.len() != 1 {
@@ -11758,8 +13424,8 @@ fn eval_string_method(s: &str, method: &str, args: &[Value]) -> Result<Value, St
             if !args.is_empty() {
                 return Err("metadata() takes no arguments".to_string());
             }
-            let meta = std::fs::metadata(s)
-                .map_err(|e| format!("metadata('{}') failed: {}", s, e))?;
+            let meta =
+                std::fs::metadata(s).map_err(|e| format!("metadata('{}') failed: {}", s, e))?;
             let size = meta.len() as i64;
             let is_dir = meta.is_dir();
             let is_file = meta.is_file();
@@ -11950,17 +13616,25 @@ fn resolve_pkg_name(defs: &Defs, name: &str) -> Option<String> {
 /// Cross-platform path helpers for the interpreter path builtins.
 /// Always use '/' as separator; handle both '/' and '\' as separators;
 /// treat any path starting with '/' or 'X:' as absolute.
-fn path_is_sep_char(c: char) -> bool { c == '/' || c == '\\' }
+fn path_is_sep_char(c: char) -> bool {
+    c == '/' || c == '\\'
+}
 
 fn path_normalize_slashes(s: &str) -> String {
     s.chars().map(|c| if c == '\\' { '/' } else { c }).collect()
 }
 
 fn path_is_abs_str(s: &str) -> bool {
-    if s.is_empty() { return false; }
+    if s.is_empty() {
+        return false;
+    }
     let bytes = s.as_bytes();
-    if bytes[0] == b'/' { return true; }
-    if bytes.len() >= 2 && bytes[1] == b':' { return true; }
+    if bytes[0] == b'/' {
+        return true;
+    }
+    if bytes.len() >= 2 && bytes[1] == b':' {
+        return true;
+    }
     false
 }
 
@@ -11970,15 +13644,26 @@ fn path_normalize_impl(s: &str) -> String {
     let parts: Vec<&str> = s.split('/').collect();
     let mut stack: Vec<&str> = Vec::new();
     for part in &parts {
-        if *part == "." || part.is_empty() { continue; }
-        if *part == ".." { stack.pop(); continue; }
+        if *part == "." || part.is_empty() {
+            continue;
+        }
+        if *part == ".." {
+            stack.pop();
+            continue;
+        }
         stack.push(part);
     }
     if stack.is_empty() {
-        return if is_abs { "/".to_string() } else { ".".to_string() };
+        return if is_abs {
+            "/".to_string()
+        } else {
+            ".".to_string()
+        };
     }
     let mut result = String::new();
-    if is_abs { result.push('/'); }
+    if is_abs {
+        result.push('/');
+    }
     result.push_str(&stack.join("/"));
     result
 }
@@ -11986,92 +13671,300 @@ fn path_normalize_impl(s: &str) -> String {
 fn is_runtime_builtin(name: &str) -> bool {
     matches!(
         name,
-        "and" | "or" | "not" | "print" | "println" | "len" | "StringBuilder" | "int" | "float"
-            | "str" | "panic" | "Some" | "None" | "push" | "pop" | "first" | "last" | "index_of"
-            | "contains_item" | "contains" | "starts_with" | "ends_with" | "trim" | "replace"
-            | "split" | "slice" | "byte_len" | "reverse" | "remove_at" | "to_upper" | "to_lower"
-            | "repeat" | "time_now" | "time_sleep" | "read_file" | "write_file" | "append_file"
-            | "remove_file" | "file_exists" | "fs_exists" | "fs_size" | "fs_metadata"
-             | "fs_list_dir" | "fs_create_dir" | "fs_copy" | "fs_rename"
-             | "fs_is_file" | "fs_is_dir" | "fs_remove_dir" | "fs_read_lines" | "fs_write_lines"
-             | "input" | "eprint" | "eprintln"
-             | "io_read_line" | "io_read_all" | "io_write_stdout" | "io_write_stderr"
-             | "abs" | "sqrt" | "floor" | "ceil" | "round" | "min" | "max" | "clamp" | "pow"
-             | "trunc" | "exp" | "log" | "log10"
-             | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
-             | "math_pi" | "math_e"
-             | "is_empty" | "find" | "count" | "trim_start" | "trim_end" | "join"
-             | "to_int" | "to_float" | "equals" | "compare"
-             | "list_insert" | "list_set" | "list_get" | "list_clear" | "list_sort" | "list_clone" | "list_empty"
-             | "map_len" | "map_is_empty" | "map_insert" | "map_get" | "map_remove" | "map_contains_key"
-             | "map_keys" | "map_values" | "map_clear" | "map_clone" | "map_empty"
-             | "set_len" | "set_is_empty" | "set_add" | "set_remove" | "set_contains" | "set_clear" | "set_clone" | "set_empty"
-             | "queue_push" | "queue_pop" | "queue_front" | "queue_back" | "queue_len" | "queue_is_empty" | "queue_clear" | "queue_empty"
-             | "stack_push" | "stack_pop" | "stack_peek" | "stack_len" | "stack_is_empty" | "stack_clear" | "stack_empty"
-             | "json_parse" | "json_stringify"
-             | "json_get" | "json_has" | "json_len" | "json_at"
-             | "json_as_string" | "json_as_int" | "json_as_float" | "json_as_bool"
-             | "json_null" | "json_object" | "json_array"
-             | "json_set" | "json_push"
-             | "option_some" | "option_none" | "option_is_some" | "option_is_none"
-             | "option_extract" | "option_extract_or" | "option_map"
-             | "option_and" | "option_or" | "option_equals"
-             | "result_success" | "result_error" | "result_is_success" | "result_is_error"
-             | "result_extract" | "result_extract_or" | "result_map"
-             | "result_and" | "result_or" | "result_equals"
-             | "path_join" | "path_basename" | "path_dirname" | "path_filename"
-             | "path_extension" | "path_is_absolute" | "path_normalize"
-             | "path_equals" | "path_parent"
-             | "os_name" | "os_arch" | "os_platform" | "os_hostname"
-             | "os_cwd" | "os_set_cwd"
-             | "env_get" | "env_has" | "env_set" | "env_remove" | "env_all"
-             | "regex_compile" | "regex_is_match" | "regex_match" | "regex_find"
-             | "regex_find_all" | "regex_replace" | "regex_replace_all" | "regex_split"
-               | "process_spawn" | "process_run" | "process_output" | "process_wait" | "process_kill" | "process_status" | "process_args"
-              | "requests_client_new" | "requests_client_builder_new" | "requests_client_builder_build"
-              | "requests_client_builder_default_headers" | "requests_client_builder_timeout"
-              | "requests_client_builder_redirect_limit" | "requests_client_builder_redirect_disabled"
-              | "requests_client_builder_proxy" | "requests_client_builder_tls_config"
-              | "requests_request_builder_new" | "requests_request_builder_header"
-              | "requests_request_builder_headers" | "requests_request_builder_query"
-              | "requests_request_builder_body_bytes" | "requests_request_builder_body_str"
-              | "requests_request_builder_json" | "requests_request_builder_form"
-              | "requests_request_builder_multipart" | "requests_request_builder_timeout"
-              | "requests_request_builder_redirect_limit" | "requests_request_builder_redirect_disabled"
-              | "requests_request_builder_basic_auth" | "requests_request_builder_bearer_auth"
-              | "requests_send"
-              | "requests_response_status" | "requests_response_headers" | "requests_response_url"
-              | "requests_response_text" | "requests_response_bytes" | "requests_response_json"
-              | "requests_response_content_length"
-              | "requests_response_is_success" | "requests_response_is_client_error" | "requests_response_is_server_error"
-              | "requests_response_error_for_status"
-              | "requests_status_code_code" | "requests_status_code_is_success"
-              | "requests_status_code_is_client_error" | "requests_status_code_is_server_error" | "requests_status_code_is_redirect"
-              | "requests_header_map_new" | "requests_header_map_insert" | "requests_header_map_append"
-              | "requests_header_map_remove" | "requests_header_map_get" | "requests_header_map_contains"
-              | "requests_multipart_new" | "requests_multipart_text" | "requests_multipart_file"
-              | "requests_multipart_file_with_metadata"
-              | "requests_tls_config_new" | "requests_tls_config_add_ca_cert"
-              | "requests_tls_config_add_client_cert" | "requests_tls_config_danger_accept_invalid_certs"
-              | "requests_tls_config_danger_accept_invalid_hostnames"
-              | "requests_cookie_jar_new" | "requests_cookie_jar_add" | "requests_cookie_parse"
-              | "requests_response_copy_to" | "requests_response_chunks" | "requests_response_stream"
-              | "requests_stream_read" | "requests_stream_has_more"
-              | "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
-              | "requests_header_map_free" | "requests_multipart_free"
-              | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free"
-              | "requests_session_new" | "requests_session_request"
-              | "requests_request_builder_set_headers" | "requests_request_builder_verify"
-              | "requests_response_headers_list" | "requests_session_free"
-              | "requests_cookie_jar_add_parsed" | "requests_cookie_jar_update_from_response"
-              | "requests_cookie_jar_get_cookie_header" | "requests_cookie_jar_get_all" | "requests_cookie_jar_get"
-              | "requests_session_set_default_headers" | "requests_session_set_default_params"
-              | "requests_session_set_timeout" | "requests_session_set_verify"
-              | "requests_session_set_redirect_limit" | "requests_session_set_disable_redirects"
-              | "requests_session_cookies"
-              | "requests_redirect_history_new" | "requests_redirect_history_add"
-              | "requests_redirect_history_list" | "requests_redirect_history_free"
-              | "requests_response_redirect_history"
+        "and"
+            | "or"
+            | "not"
+            | "print"
+            | "println"
+            | "len"
+            | "StringBuilder"
+            | "int"
+            | "float"
+            | "str"
+            | "panic"
+            | "Some"
+            | "None"
+            | "push"
+            | "pop"
+            | "first"
+            | "last"
+            | "index_of"
+            | "contains_item"
+            | "contains"
+            | "starts_with"
+            | "ends_with"
+            | "trim"
+            | "replace"
+            | "split"
+            | "slice"
+            | "byte_len"
+            | "reverse"
+            | "remove_at"
+            | "to_upper"
+            | "to_lower"
+            | "repeat"
+            | "time_now"
+            | "time_sleep"
+            | "read_file"
+            | "write_file"
+            | "append_file"
+            | "remove_file"
+            | "file_exists"
+            | "fs_exists"
+            | "fs_size"
+            | "fs_metadata"
+            | "fs_list_dir"
+            | "fs_create_dir"
+            | "fs_copy"
+            | "fs_rename"
+            | "fs_is_file"
+            | "fs_is_dir"
+            | "fs_remove_dir"
+            | "fs_read_lines"
+            | "fs_write_lines"
+            | "input"
+            | "eprint"
+            | "eprintln"
+            | "io_read_line"
+            | "io_read_all"
+            | "io_write_stdout"
+            | "io_write_stderr"
+            | "abs"
+            | "sqrt"
+            | "floor"
+            | "ceil"
+            | "round"
+            | "min"
+            | "max"
+            | "clamp"
+            | "pow"
+            | "trunc"
+            | "exp"
+            | "log"
+            | "log10"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "math_pi"
+            | "math_e"
+            | "is_empty"
+            | "find"
+            | "count"
+            | "trim_start"
+            | "trim_end"
+            | "join"
+            | "to_int"
+            | "to_float"
+            | "equals"
+            | "compare"
+            | "list_insert"
+            | "list_set"
+            | "list_get"
+            | "list_clear"
+            | "list_sort"
+            | "list_clone"
+            | "list_empty"
+            | "map_len"
+            | "map_is_empty"
+            | "map_insert"
+            | "map_get"
+            | "map_remove"
+            | "map_contains_key"
+            | "map_keys"
+            | "map_values"
+            | "map_clear"
+            | "map_clone"
+            | "map_empty"
+            | "set_len"
+            | "set_is_empty"
+            | "set_add"
+            | "set_remove"
+            | "set_contains"
+            | "set_clear"
+            | "set_clone"
+            | "set_empty"
+            | "queue_push"
+            | "queue_pop"
+            | "queue_front"
+            | "queue_back"
+            | "queue_len"
+            | "queue_is_empty"
+            | "queue_clear"
+            | "queue_empty"
+            | "stack_push"
+            | "stack_pop"
+            | "stack_peek"
+            | "stack_len"
+            | "stack_is_empty"
+            | "stack_clear"
+            | "stack_empty"
+            | "json_parse"
+            | "json_stringify"
+            | "json_get"
+            | "json_has"
+            | "json_len"
+            | "json_at"
+            | "json_as_string"
+            | "json_as_int"
+            | "json_as_float"
+            | "json_as_bool"
+            | "json_null"
+            | "json_object"
+            | "json_array"
+            | "json_set"
+            | "json_push"
+            | "option_some"
+            | "option_none"
+            | "option_is_some"
+            | "option_is_none"
+            | "option_extract"
+            | "option_extract_or"
+            | "option_map"
+            | "option_and"
+            | "option_or"
+            | "option_equals"
+            | "result_success"
+            | "result_error"
+            | "result_is_success"
+            | "result_is_error"
+            | "result_extract"
+            | "result_extract_or"
+            | "result_map"
+            | "result_and"
+            | "result_or"
+            | "result_equals"
+            | "path_join"
+            | "path_basename"
+            | "path_dirname"
+            | "path_filename"
+            | "path_extension"
+            | "path_is_absolute"
+            | "path_normalize"
+            | "path_equals"
+            | "path_parent"
+            | "os_name"
+            | "os_arch"
+            | "os_platform"
+            | "os_hostname"
+            | "os_cwd"
+            | "os_set_cwd"
+            | "env_get"
+            | "env_has"
+            | "env_set"
+            | "env_remove"
+            | "env_all"
+            | "regex_compile"
+            | "regex_is_match"
+            | "regex_match"
+            | "regex_find"
+            | "regex_find_all"
+            | "regex_replace"
+            | "regex_replace_all"
+            | "regex_split"
+            | "process_spawn"
+            | "process_run"
+            | "process_output"
+            | "process_wait"
+            | "process_kill"
+            | "process_status"
+            | "process_args"
+            | "requests_client_new"
+            | "requests_client_builder_new"
+            | "requests_client_builder_build"
+            | "requests_client_builder_default_headers"
+            | "requests_client_builder_timeout"
+            | "requests_client_builder_redirect_limit"
+            | "requests_client_builder_redirect_disabled"
+            | "requests_client_builder_proxy"
+            | "requests_client_builder_tls_config"
+            | "requests_request_builder_new"
+            | "requests_request_builder_header"
+            | "requests_request_builder_headers"
+            | "requests_request_builder_query"
+            | "requests_request_builder_body_bytes"
+            | "requests_request_builder_body_str"
+            | "requests_request_builder_json"
+            | "requests_request_builder_form"
+            | "requests_request_builder_multipart"
+            | "requests_request_builder_timeout"
+            | "requests_request_builder_redirect_limit"
+            | "requests_request_builder_redirect_disabled"
+            | "requests_request_builder_basic_auth"
+            | "requests_request_builder_bearer_auth"
+            | "requests_send"
+            | "requests_response_status"
+            | "requests_response_headers"
+            | "requests_response_url"
+            | "requests_response_text"
+            | "requests_response_bytes"
+            | "requests_response_json"
+            | "requests_response_content_length"
+            | "requests_response_is_success"
+            | "requests_response_is_client_error"
+            | "requests_response_is_server_error"
+            | "requests_response_error_for_status"
+            | "requests_status_code_code"
+            | "requests_status_code_is_success"
+            | "requests_status_code_is_client_error"
+            | "requests_status_code_is_server_error"
+            | "requests_status_code_is_redirect"
+            | "requests_header_map_new"
+            | "requests_header_map_insert"
+            | "requests_header_map_append"
+            | "requests_header_map_remove"
+            | "requests_header_map_get"
+            | "requests_header_map_contains"
+            | "requests_multipart_new"
+            | "requests_multipart_text"
+            | "requests_multipart_file"
+            | "requests_multipart_file_with_metadata"
+            | "requests_tls_config_new"
+            | "requests_tls_config_add_ca_cert"
+            | "requests_tls_config_add_client_cert"
+            | "requests_tls_config_danger_accept_invalid_certs"
+            | "requests_tls_config_danger_accept_invalid_hostnames"
+            | "requests_cookie_jar_new"
+            | "requests_cookie_jar_add"
+            | "requests_cookie_parse"
+            | "requests_response_copy_to"
+            | "requests_response_chunks"
+            | "requests_response_stream"
+            | "requests_stream_read"
+            | "requests_stream_has_more"
+            | "requests_client_free"
+            | "requests_request_builder_free"
+            | "requests_response_free"
+            | "requests_header_map_free"
+            | "requests_multipart_free"
+            | "requests_tls_config_free"
+            | "requests_cookie_jar_free"
+            | "requests_stream_free"
+            | "requests_session_new"
+            | "requests_session_request"
+            | "requests_request_builder_set_headers"
+            | "requests_request_builder_verify"
+            | "requests_response_headers_list"
+            | "requests_session_free"
+            | "requests_cookie_jar_add_parsed"
+            | "requests_cookie_jar_update_from_response"
+            | "requests_cookie_jar_get_cookie_header"
+            | "requests_cookie_jar_get_all"
+            | "requests_cookie_jar_get"
+            | "requests_session_set_default_headers"
+            | "requests_session_set_default_params"
+            | "requests_session_set_timeout"
+            | "requests_session_set_verify"
+            | "requests_session_set_redirect_limit"
+            | "requests_session_set_disable_redirects"
+            | "requests_session_cookies"
+            | "requests_redirect_history_new"
+            | "requests_redirect_history_add"
+            | "requests_redirect_history_list"
+            | "requests_redirect_history_free"
+            | "requests_response_redirect_history"
     )
 }
 
@@ -12102,7 +13995,10 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
             b't' | b'f' => parse_bool(bytes, pos),
             b'n' => parse_null(bytes, pos),
             b'-' | b'0'..=b'9' => parse_number(bytes, pos),
-            _ => Err(format!("JSON parse error: unexpected character '{}' at position {}", bytes[*pos] as char, *pos)),
+            _ => Err(format!(
+                "JSON parse error: unexpected character '{}' at position {}",
+                bytes[*pos] as char, *pos
+            )),
         }
     }
 
@@ -12117,7 +14013,10 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
                 return Err("JSON parse error: unterminated string".to_string());
             }
             match bytes[*pos] {
-                b'"' => { *pos += 1; break; }
+                b'"' => {
+                    *pos += 1;
+                    break;
+                }
                 b'\\' => {
                     *pos += 1;
                     if *pos >= bytes.len() {
@@ -12135,10 +14034,14 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
                         b'u' => {
                             *pos += 1;
                             if *pos + 4 > bytes.len() {
-                                return Err("JSON parse error: incomplete unicode escape".to_string());
+                                return Err(
+                                    "JSON parse error: incomplete unicode escape".to_string()
+                                );
                             }
-                            let hex = std::str::from_utf8(&bytes[*pos..*pos + 4])
-                                .map_err(|_| "JSON parse error: invalid unicode escape".to_string())?;
+                            let hex =
+                                std::str::from_utf8(&bytes[*pos..*pos + 4]).map_err(|_| {
+                                    "JSON parse error: invalid unicode escape".to_string()
+                                })?;
                             let code = u32::from_str_radix(hex, 16)
                                 .map_err(|_| "JSON parse error: invalid unicode hex".to_string())?;
                             if let Some(c) = char::from_u32(code) {
@@ -12146,7 +14049,12 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
                             }
                             *pos += 3; // +1 from the loop
                         }
-                        c => return Err(format!("JSON parse error: invalid escape '\\{}'", c as char)),
+                        c => {
+                            return Err(format!(
+                                "JSON parse error: invalid escape '\\{}'",
+                                c as char
+                            ));
+                        }
                     }
                 }
                 c => s.push(c as char),
@@ -12158,27 +14066,41 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
 
     fn parse_number(bytes: &[u8], pos: &mut usize) -> Result<JsonValue, String> {
         let start = *pos;
-        if bytes[*pos] == b'-' { *pos += 1; }
-        while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+        if bytes[*pos] == b'-' {
+            *pos += 1;
+        }
+        while *pos < bytes.len() && bytes[*pos].is_ascii_digit() {
+            *pos += 1;
+        }
         let mut is_float = false;
         if *pos < bytes.len() && bytes[*pos] == b'.' {
             is_float = true;
             *pos += 1;
-            while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+            while *pos < bytes.len() && bytes[*pos].is_ascii_digit() {
+                *pos += 1;
+            }
         }
         if *pos < bytes.len() && (bytes[*pos] == b'e' || bytes[*pos] == b'E') {
             is_float = true;
             *pos += 1;
-            if *pos < bytes.len() && (bytes[*pos] == b'+' || bytes[*pos] == b'-') { *pos += 1; }
-            while *pos < bytes.len() && bytes[*pos].is_ascii_digit() { *pos += 1; }
+            if *pos < bytes.len() && (bytes[*pos] == b'+' || bytes[*pos] == b'-') {
+                *pos += 1;
+            }
+            while *pos < bytes.len() && bytes[*pos].is_ascii_digit() {
+                *pos += 1;
+            }
         }
         let num_str = std::str::from_utf8(&bytes[start..*pos])
             .map_err(|_| "JSON parse error: invalid number".to_string())?;
         if is_float {
-            let f: f64 = num_str.parse().map_err(|_| format!("JSON parse error: invalid float '{}'", num_str))?;
+            let f: f64 = num_str
+                .parse()
+                .map_err(|_| format!("JSON parse error: invalid float '{}'", num_str))?;
             Ok(JsonValue::Float(f))
         } else {
-            let i: i64 = num_str.parse().map_err(|_| format!("JSON parse error: invalid integer '{}'", num_str))?;
+            let i: i64 = num_str
+                .parse()
+                .map_err(|_| format!("JSON parse error: invalid integer '{}'", num_str))?;
             Ok(JsonValue::Int(i))
         }
     }
@@ -12224,7 +14146,10 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
                 break;
             }
             if bytes[*pos] != b',' {
-                return Err(format!("JSON parse error: expected ',' or ']' at position {}", *pos));
+                return Err(format!(
+                    "JSON parse error: expected ',' or ']' at position {}",
+                    *pos
+                ));
             }
             *pos += 1;
         }
@@ -12262,7 +14187,10 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
                 break;
             }
             if bytes[*pos] != b',' {
-                return Err(format!("JSON parse error: expected ',' or '}}' at position {}", *pos));
+                return Err(format!(
+                    "JSON parse error: expected ',' or '}}' at position {}",
+                    *pos
+                ));
             }
             *pos += 1;
         }
@@ -12272,391 +14200,583 @@ fn json_parse_str(input: &str) -> Result<JsonValue, String> {
     let result = parse_value(bytes, &mut pos)?;
     skip_ws(bytes, &mut pos);
     if pos < bytes.len() {
-        return Err(format!("JSON parse error: trailing content at position {}", pos));
+        return Err(format!(
+            "JSON parse error: trailing content at position {}",
+            pos
+        ));
     }
     Ok(result)
 }
 
-fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Value>, defs: &Defs) -> Result<Option<Value>, String> {
+fn eval_requests_builtin(
+    func: &str,
+    args: &[Expr],
+    env: &mut HashMap<String, Value>,
+    defs: &Defs,
+) -> Result<Option<Value>, String> {
     let result = match func {
         "requests_client_new" => {
-                if !args.is_empty() { return Err("requests_client_new() takes no arguments".to_string()); }
-                let mut fields = Vec::new();
-                fields.push(("type".to_string(), Value::String("Client".to_string())));
-                fields.push(("timeout".to_string(), Value::Int(30)));
-                Ok(Value::Struct { name: "Client".to_string(), fields })
+            if !args.is_empty() {
+                return Err("requests_client_new() takes no arguments".to_string());
             }
-            "requests_client_builder_new" => {
-                if !args.is_empty() { return Err("requests_client_builder_new() takes no arguments".to_string()); }
-                let mut fields = Vec::new();
-                fields.push(("timeout".to_string(), Value::Int(30)));
-                fields.push(("redirect_limit".to_string(), Value::Int(10)));
-                fields.push(("disable_redirects".to_string(), Value::Bool(false)));
-                fields.push(("proxy_url".to_string(), Value::String(String::new())));
-                Ok(Value::Struct { name: "ClientBuilder".to_string(), fields })
+            let mut fields = Vec::new();
+            fields.push(("type".to_string(), Value::String("Client".to_string())));
+            fields.push(("timeout".to_string(), Value::Int(30)));
+            Ok(Value::Struct {
+                name: "Client".to_string(),
+                fields,
+            })
+        }
+        "requests_client_builder_new" => {
+            if !args.is_empty() {
+                return Err("requests_client_builder_new() takes no arguments".to_string());
             }
-            "requests_client_builder_build" => {
-                if args.len() != 1 { return Err("requests_client_builder_build() takes exactly 1 argument".to_string()); }
-                let builder_val = eval_expr(&args[0], env, defs)?;
-                match &builder_val {
-                    Value::Struct { fields, .. } => {
-                        let timeout = fields.iter().find(|(k, _)| k == "timeout")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(30);
-                        let verify = fields.iter().find(|(k, _)| k == "verify")
-                            .and_then(|(_, v)| match v { Value::Bool(b) => Some(*b), _ => None })
-                            .unwrap_or(true);
-                        let redirect_limit = fields.iter().find(|(k, _)| k == "redirect_limit")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(10);
-                        let disable_redirects = fields.iter().find(|(k, _)| k == "disable_redirects")
-                            .and_then(|(_, v)| match v { Value::Bool(b) => Some(*b), _ => None })
-                            .unwrap_or(false);
-                        let default_headers = fields.iter().find(|(k, _)| k == "default_headers")
-                            .and_then(|(_, v)| Some(v.clone()));
-                        let mut out_fields = Vec::new();
-                        out_fields.push(("type".to_string(), Value::String("Client".to_string())));
-                        out_fields.push(("timeout".to_string(), Value::Int(timeout)));
-                        out_fields.push(("verify".to_string(), Value::Bool(verify)));
-                        out_fields.push(("redirect_limit".to_string(), Value::Int(redirect_limit)));
-                        out_fields.push(("disable_redirects".to_string(), Value::Bool(disable_redirects)));
-                        if let Some(dh) = default_headers {
-                            out_fields.push(("default_headers".to_string(), dh));
-                        }
-                        Ok(Value::Struct { name: "Client".to_string(), fields: out_fields })
+            let mut fields = Vec::new();
+            fields.push(("timeout".to_string(), Value::Int(30)));
+            fields.push(("redirect_limit".to_string(), Value::Int(10)));
+            fields.push(("disable_redirects".to_string(), Value::Bool(false)));
+            fields.push(("proxy_url".to_string(), Value::String(String::new())));
+            Ok(Value::Struct {
+                name: "ClientBuilder".to_string(),
+                fields,
+            })
+        }
+        "requests_client_builder_build" => {
+            if args.len() != 1 {
+                return Err("requests_client_builder_build() takes exactly 1 argument".to_string());
+            }
+            let builder_val = eval_expr(&args[0], env, defs)?;
+            match &builder_val {
+                Value::Struct { fields, .. } => {
+                    let timeout = fields
+                        .iter()
+                        .find(|(k, _)| k == "timeout")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(30);
+                    let verify = fields
+                        .iter()
+                        .find(|(k, _)| k == "verify")
+                        .and_then(|(_, v)| match v {
+                            Value::Bool(b) => Some(*b),
+                            _ => None,
+                        })
+                        .unwrap_or(true);
+                    let redirect_limit = fields
+                        .iter()
+                        .find(|(k, _)| k == "redirect_limit")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(10);
+                    let disable_redirects = fields
+                        .iter()
+                        .find(|(k, _)| k == "disable_redirects")
+                        .and_then(|(_, v)| match v {
+                            Value::Bool(b) => Some(*b),
+                            _ => None,
+                        })
+                        .unwrap_or(false);
+                    let default_headers = fields
+                        .iter()
+                        .find(|(k, _)| k == "default_headers")
+                        .and_then(|(_, v)| Some(v.clone()));
+                    let mut out_fields = Vec::new();
+                    out_fields.push(("type".to_string(), Value::String("Client".to_string())));
+                    out_fields.push(("timeout".to_string(), Value::Int(timeout)));
+                    out_fields.push(("verify".to_string(), Value::Bool(verify)));
+                    out_fields.push(("redirect_limit".to_string(), Value::Int(redirect_limit)));
+                    out_fields.push((
+                        "disable_redirects".to_string(),
+                        Value::Bool(disable_redirects),
+                    ));
+                    if let Some(dh) = default_headers {
+                        out_fields.push(("default_headers".to_string(), dh));
                     }
-                    _ => Err("requests_client_builder_build() expects ClientBuilder".to_string()),
+                    Ok(Value::Struct {
+                        name: "Client".to_string(),
+                        fields: out_fields,
+                    })
                 }
+                _ => Err("requests_client_builder_build() expects ClientBuilder".to_string()),
             }
-            "requests_client_builder_default_headers" => {
-                if args.len() != 2 { return Err("requests_client_builder_default_headers() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let headers = eval_expr(&args[1], env, defs)?;
-                match (builder, headers) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "default_headers") {
-                            fields[pos].1 = Value::Array(arr);
-                        } else {
-                            fields.push(("default_headers".to_string(), Value::Array(arr)));
-                        }
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_client_builder_default_headers" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_client_builder_default_headers() takes exactly 2 arguments"
+                        .to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let headers = eval_expr(&args[1], env, defs)?;
+            match (builder, headers) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "default_headers") {
+                        fields[pos].1 = Value::Array(arr);
+                    } else {
+                        fields.push(("default_headers".to_string(), Value::Array(arr)));
                     }
-                    _ => Err("requests_client_builder_default_headers() expects (Struct, list)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_client_builder_default_headers() expects (Struct, list)".to_string(),
+                ),
             }
-            "requests_client_builder_timeout" => {
-                if args.len() != 2 { return Err("requests_client_builder_timeout() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let timeout = eval_expr(&args[1], env, defs)?;
-                match (builder, timeout) {
-                    (Value::Struct { mut fields, name }, Value::Int(t)) => {
-                        if let Some(pos) = fields.iter().position(|(k, _)| k == "timeout") {
-                            fields[pos].1 = Value::Int(t);
-                        } else {
-                            fields.push(("timeout".to_string(), Value::Int(t)));
-                        }
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_client_builder_timeout" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_client_builder_timeout() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let timeout = eval_expr(&args[1], env, defs)?;
+            match (builder, timeout) {
+                (Value::Struct { mut fields, name }, Value::Int(t)) => {
+                    if let Some(pos) = fields.iter().position(|(k, _)| k == "timeout") {
+                        fields[pos].1 = Value::Int(t);
+                    } else {
+                        fields.push(("timeout".to_string(), Value::Int(t)));
                     }
-                    _ => Err("requests_client_builder_timeout() expects (Struct, int)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err("requests_client_builder_timeout() expects (Struct, int)".to_string()),
             }
-            "requests_client_builder_redirect_limit" => {
-                if args.len() != 2 { return Err("requests_client_builder_redirect_limit() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let limit = eval_expr(&args[1], env, defs)?;
-                match (builder, limit) {
-                    (Value::Struct { mut fields, name }, Value::Int(l)) => {
-                        if let Some(pos) = fields.iter().position(|(k, _)| k == "redirect_limit") {
-                            fields[pos].1 = Value::Int(l);
-                        } else {
-                            fields.push(("redirect_limit".to_string(), Value::Int(l)));
-                        }
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_client_builder_redirect_limit" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_client_builder_redirect_limit() takes exactly 2 arguments"
+                        .to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let limit = eval_expr(&args[1], env, defs)?;
+            match (builder, limit) {
+                (Value::Struct { mut fields, name }, Value::Int(l)) => {
+                    if let Some(pos) = fields.iter().position(|(k, _)| k == "redirect_limit") {
+                        fields[pos].1 = Value::Int(l);
+                    } else {
+                        fields.push(("redirect_limit".to_string(), Value::Int(l)));
                     }
-                    _ => Err("requests_client_builder_redirect_limit() expects (Struct, int)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_client_builder_redirect_limit() expects (Struct, int)".to_string(),
+                ),
             }
-            "requests_client_builder_redirect_disabled" => {
-                if args.len() != 1 { return Err("requests_client_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                match builder {
-                    Value::Struct { mut fields, name } => {
-                        if let Some(pos) = fields.iter().position(|(k, _)| k == "disable_redirects") {
-                            fields[pos].1 = Value::Bool(true);
-                        } else {
-                            fields.push(("disable_redirects".to_string(), Value::Bool(true)));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_client_builder_redirect_disabled() expects Struct".to_string()),
-                }
+        }
+        "requests_client_builder_redirect_disabled" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_client_builder_redirect_disabled() takes exactly 1 argument"
+                        .to_string(),
+                );
             }
-            "requests_client_builder_proxy" => {
-                if args.len() != 2 { return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let proxy = eval_expr(&args[1], env, defs)?;
-                match (builder, proxy) {
-                    (Value::Struct { mut fields, name }, Value::String(p)) => {
-                        if let Some(pos) = fields.iter().position(|(k, _)| k == "proxy_url") {
-                            fields[pos].1 = Value::String(p);
-                        } else {
-                            fields.push(("proxy_url".to_string(), Value::String(p)));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_client_builder_proxy() expects (Struct, str)".to_string()),
-                }
-            }
-            "requests_client_builder_tls_config" => {
-                if args.len() != 2 { return Err("requests_client_builder_tls_config() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let tls = eval_expr(&args[1], env, defs)?;
-                match builder {
-                    Value::Struct { mut fields, name } => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "tls_config") {
-                            fields[pos].1 = tls;
-                        } else {
-                            fields.push(("tls_config".to_string(), tls));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_client_builder_tls_config() expects (Struct, TlsConfig)".to_string()),
-                }
-            }
-            "requests_request_builder_new" => {
-                if args.len() != 3 { return Err("requests_request_builder_new() takes exactly 3 arguments".to_string()); }
-                let _client = eval_expr(&args[0], env, defs)?;
-                let method = eval_expr(&args[1], env, defs)?;
-                let url = eval_expr(&args[2], env, defs)?;
-                let method_str = match method { Value::String(s) => s, _ => return Err("requests_request_builder_new() expects string method".to_string()) };
-                let url_str = match url { Value::String(s) => s, _ => return Err("requests_request_builder_new() expects string url".to_string()) };
-                let mut fields = Vec::new();
-                fields.push(("method".to_string(), Value::String(method_str)));
-                fields.push(("url".to_string(), Value::String(url_str)));
-                fields.push(("headers".to_string(), Value::Map(HashMap::new())));
-                fields.push(("body".to_string(), Value::Option(None)));
-                fields.push(("timeout".to_string(), Value::Option(None)));
-                Ok(Value::Struct { name: "RequestBuilder".to_string(), fields })
-            }
-            "requests_request_builder_header" => {
-                if args.len() != 3 { return Err("requests_request_builder_header() takes exactly 3 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let key = eval_expr(&args[1], env, defs)?;
-                let value = eval_expr(&args[2], env, defs)?;
-                match (builder, key, value) {
-                    (Value::Struct { mut fields, name }, Value::String(k), Value::String(v)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
-                            if let Value::Map(mut m) = fields[pos].1.clone() {
-                                m.insert(Value::String(k), Value::String(v));
-                                fields[pos].1 = Value::Map(m);
-                            }
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_header() expects (Struct, str, str)".to_string()),
-                }
-            }
-            "requests_request_builder_headers" => {
-                if args.len() != 2 { return Err("requests_request_builder_headers() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let headers = eval_expr(&args[1], env, defs)?;
-                match (builder, headers) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
-                            if let Value::Map(mut m) = fields[pos].1.clone() {
-                                let mut i = 0;
-                                while i + 1 < arr.len() {
-                                    if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
-                                        m.insert(Value::String(k.clone()), Value::String(v.clone()));
-                                    }
-                                    i += 2;
-                                }
-                                fields[pos].1 = Value::Map(m);
-                            }
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_headers() expects (Struct, list)".to_string()),
-                }
-            }
-            "requests_request_builder_query" => {
-                if args.len() != 2 { return Err("requests_request_builder_query() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let params = eval_expr(&args[1], env, defs)?;
-                match (builder, params) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "params") {
-                            fields[pos].1 = Value::Array(arr);
-                        } else {
-                            fields.push(("params".to_string(), Value::Array(arr)));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_query() expects (Struct, list)".to_string()),
-                }
-            }
-            "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
-                if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let body = eval_expr(&args[1], env, defs)?;
-                match (builder, body) {
-                    (Value::Struct { mut fields, name }, Value::String(b)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(b))));
-                        } else {
-                            fields.push(("body".to_string(), Value::Option(Some(Box::new(Value::String(b))))));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err(format!("{}() expects (Struct, str)", func)),
-                }
-            }
-            "requests_request_builder_json" => {
-                if args.len() != 2 { return Err("requests_request_builder_json() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let json_val = eval_expr(&args[1], env, defs)?;
-                let json_str = match &json_val {
-                    Value::String(s) => s.clone(),
-                    Value::Int(i) => i.to_string(),
-                    Value::Float(f) => f.to_string(),
-                    Value::Bool(b) => b.to_string(),
-                    _ => return Err("requests_request_builder_json() expects a JSON-serializable value".to_string()),
-                };
-                match builder {
-                    Value::Struct { mut fields, name } => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(json_str))));
-                        } else {
-                            fields.push(("body".to_string(), Value::Option(Some(Box::new(Value::String(json_str))))));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_json() expects Struct".to_string()),
-                }
-            }
-            "requests_request_builder_form" => {
-                if args.len() != 2 { return Err("requests_request_builder_form() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let data = eval_expr(&args[1], env, defs)?;
-                match (builder, data) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        // Build form-encoded body from key/value pairs
-                        let mut parts = Vec::new();
-                        let mut i = 0;
-                        while i + 1 < arr.len() {
-                            if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
-                                parts.push(format!("{}={}", k, v));
-                            }
-                            i += 2;
-                        }
-                        let form_body = parts.join("&");
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(form_body))));
-                        } else {
-                            fields.push(("body".to_string(), Value::Option(Some(Box::new(Value::String(form_body))))));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_form() expects (Struct, list)".to_string()),
-                }
-            }
-            "requests_request_builder_multipart" => {
-                if args.len() != 2 { return Err("requests_request_builder_multipart() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let multipart = eval_expr(&args[1], env, defs)?;
-                match (builder, multipart) {
-                    (Value::Struct { mut fields, name }, mp) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "multipart") {
-                            fields[pos].1 = mp;
-                        } else {
-                            fields.push(("multipart".to_string(), mp));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_multipart() expects (Struct, value)".to_string()),
-                }
-            }
-            "requests_request_builder_timeout" => {
-                if args.len() != 2 { return Err("requests_request_builder_timeout() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let timeout = eval_expr(&args[1], env, defs)?;
-                match (builder, timeout) {
-                    (Value::Struct { mut fields, name }, Value::Int(t)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "timeout") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::Int(t))));
-                        } else {
-                            fields.push(("timeout".to_string(), Value::Option(Some(Box::new(Value::Int(t))))));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_timeout() expects (Struct, int)".to_string()),
-                }
-            }
-            "requests_request_builder_redirect_limit" => {
-                if args.len() != 2 { return Err("requests_request_builder_redirect_limit() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let limit = eval_expr(&args[1], env, defs)?;
-                match (builder, limit) {
-                    (Value::Struct { mut fields, name }, Value::Int(l)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "redirect_limit") {
-                            fields[pos].1 = Value::Int(l);
-                        } else {
-                            fields.push(("redirect_limit".to_string(), Value::Int(l)));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_request_builder_redirect_limit() expects (Struct, int)".to_string()),
-                }
-            }
-            "requests_request_builder_redirect_disabled" => {
-                if args.len() != 1 { return Err("requests_request_builder_redirect_disabled() takes exactly 1 argument".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                match builder {
-                    Value::Struct { mut fields, name } => {
+            let builder = eval_expr(&args[0], env, defs)?;
+            match builder {
+                Value::Struct { mut fields, name } => {
+                    if let Some(pos) = fields.iter().position(|(k, _)| k == "disable_redirects") {
+                        fields[pos].1 = Value::Bool(true);
+                    } else {
                         fields.push(("disable_redirects".to_string(), Value::Bool(true)));
-                        Ok(Value::Struct { name, fields })
                     }
-                    _ => Err("requests_request_builder_redirect_disabled() expects RequestBuilder".to_string()),
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_client_builder_redirect_disabled() expects Struct".to_string()),
+            }
+        }
+        "requests_client_builder_proxy" => {
+            if args.len() != 2 {
+                return Err("requests_client_builder_proxy() takes exactly 2 arguments".to_string());
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let proxy = eval_expr(&args[1], env, defs)?;
+            match (builder, proxy) {
+                (Value::Struct { mut fields, name }, Value::String(p)) => {
+                    if let Some(pos) = fields.iter().position(|(k, _)| k == "proxy_url") {
+                        fields[pos].1 = Value::String(p);
+                    } else {
+                        fields.push(("proxy_url".to_string(), Value::String(p)));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_client_builder_proxy() expects (Struct, str)".to_string()),
+            }
+        }
+        "requests_client_builder_tls_config" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_client_builder_tls_config() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let tls = eval_expr(&args[1], env, defs)?;
+            match builder {
+                Value::Struct { mut fields, name } => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "tls_config") {
+                        fields[pos].1 = tls;
+                    } else {
+                        fields.push(("tls_config".to_string(), tls));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(
+                    "requests_client_builder_tls_config() expects (Struct, TlsConfig)".to_string(),
+                ),
+            }
+        }
+        "requests_request_builder_new" => {
+            if args.len() != 3 {
+                return Err("requests_request_builder_new() takes exactly 3 arguments".to_string());
+            }
+            let _client = eval_expr(&args[0], env, defs)?;
+            let method = eval_expr(&args[1], env, defs)?;
+            let url = eval_expr(&args[2], env, defs)?;
+            let method_str = match method {
+                Value::String(s) => s,
+                _ => return Err("requests_request_builder_new() expects string method".to_string()),
+            };
+            let url_str = match url {
+                Value::String(s) => s,
+                _ => return Err("requests_request_builder_new() expects string url".to_string()),
+            };
+            let mut fields = Vec::new();
+            fields.push(("method".to_string(), Value::String(method_str)));
+            fields.push(("url".to_string(), Value::String(url_str)));
+            fields.push(("headers".to_string(), Value::Map(HashMap::new())));
+            fields.push(("body".to_string(), Value::Option(None)));
+            fields.push(("timeout".to_string(), Value::Option(None)));
+            Ok(Value::Struct {
+                name: "RequestBuilder".to_string(),
+                fields,
+            })
+        }
+        "requests_request_builder_header" => {
+            if args.len() != 3 {
+                return Err(
+                    "requests_request_builder_header() takes exactly 3 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            let value = eval_expr(&args[2], env, defs)?;
+            match (builder, key, value) {
+                (Value::Struct { mut fields, name }, Value::String(k), Value::String(v)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
+                        if let Value::Map(mut m) = fields[pos].1.clone() {
+                            m.insert(Value::String(k), Value::String(v));
+                            fields[pos].1 = Value::Map(m);
+                        }
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => {
+                    Err("requests_request_builder_header() expects (Struct, str, str)".to_string())
                 }
             }
-            "requests_request_builder_basic_auth" => {
-                if args.len() != 3 { return Err("requests_request_builder_basic_auth() takes exactly 3 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let user = eval_expr(&args[1], env, defs)?;
-                let password = eval_expr(&args[2], env, defs)?;
-                match (builder, user, password) {
-                    (Value::Struct { mut fields, name }, Value::String(u), Value::String(p)) => {
-                        fields.push(("basic_auth_user".to_string(), Value::String(u)));
-                        fields.push(("basic_auth_pass".to_string(), Value::String(p)));
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_request_builder_headers" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_headers() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let headers = eval_expr(&args[1], env, defs)?;
+            match (builder, headers) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
+                        if let Value::Map(mut m) = fields[pos].1.clone() {
+                            let mut i = 0;
+                            while i + 1 < arr.len() {
+                                if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i + 1])
+                                {
+                                    m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                                }
+                                i += 2;
+                            }
+                            fields[pos].1 = Value::Map(m);
+                        }
                     }
-                    _ => Err("requests_request_builder_basic_auth() expects (RequestBuilder, str, str)".to_string()),
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_request_builder_headers() expects (Struct, list)".to_string()),
+            }
+        }
+        "requests_request_builder_query" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_query() takes exactly 2 arguments".to_string()
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let params = eval_expr(&args[1], env, defs)?;
+            match (builder, params) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "params") {
+                        fields[pos].1 = Value::Array(arr);
+                    } else {
+                        fields.push(("params".to_string(), Value::Array(arr)));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_request_builder_query() expects (Struct, list)".to_string()),
+            }
+        }
+        "requests_request_builder_body_bytes" | "requests_request_builder_body_str" => {
+            if args.len() != 2 {
+                return Err(format!("{}() takes exactly 2 arguments", func));
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let body = eval_expr(&args[1], env, defs)?;
+            match (builder, body) {
+                (Value::Struct { mut fields, name }, Value::String(b)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::String(b))));
+                    } else {
+                        fields.push((
+                            "body".to_string(),
+                            Value::Option(Some(Box::new(Value::String(b)))),
+                        ));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(format!("{}() expects (Struct, str)", func)),
+            }
+        }
+        "requests_request_builder_json" => {
+            if args.len() != 2 {
+                return Err("requests_request_builder_json() takes exactly 2 arguments".to_string());
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let json_val = eval_expr(&args[1], env, defs)?;
+            let json_str = match &json_val {
+                Value::String(s) => s.clone(),
+                Value::Int(i) => i.to_string(),
+                Value::Float(f) => f.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => {
+                    return Err(
+                        "requests_request_builder_json() expects a JSON-serializable value"
+                            .to_string(),
+                    );
+                }
+            };
+            match builder {
+                Value::Struct { mut fields, name } => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::String(json_str))));
+                    } else {
+                        fields.push((
+                            "body".to_string(),
+                            Value::Option(Some(Box::new(Value::String(json_str)))),
+                        ));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_request_builder_json() expects Struct".to_string()),
+            }
+        }
+        "requests_request_builder_form" => {
+            if args.len() != 2 {
+                return Err("requests_request_builder_form() takes exactly 2 arguments".to_string());
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let data = eval_expr(&args[1], env, defs)?;
+            match (builder, data) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    // Build form-encoded body from key/value pairs
+                    let mut parts = Vec::new();
+                    let mut i = 0;
+                    while i + 1 < arr.len() {
+                        if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i + 1]) {
+                            parts.push(format!("{}={}", k, v));
+                        }
+                        i += 2;
+                    }
+                    let form_body = parts.join("&");
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "body") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::String(form_body))));
+                    } else {
+                        fields.push((
+                            "body".to_string(),
+                            Value::Option(Some(Box::new(Value::String(form_body)))),
+                        ));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_request_builder_form() expects (Struct, list)".to_string()),
+            }
+        }
+        "requests_request_builder_multipart" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_multipart() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let multipart = eval_expr(&args[1], env, defs)?;
+            match (builder, multipart) {
+                (Value::Struct { mut fields, name }, mp) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "multipart") {
+                        fields[pos].1 = mp;
+                    } else {
+                        fields.push(("multipart".to_string(), mp));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => {
+                    Err("requests_request_builder_multipart() expects (Struct, value)".to_string())
                 }
             }
-            "requests_request_builder_bearer_auth" => {
-                if args.len() != 2 { return Err("requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let token = eval_expr(&args[1], env, defs)?;
-                match (builder, token) {
-                    (Value::Struct { mut fields, name }, Value::String(t)) => {
-                        fields.push(("bearer_token".to_string(), Value::String(t)));
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_request_builder_timeout" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_timeout() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let timeout = eval_expr(&args[1], env, defs)?;
+            match (builder, timeout) {
+                (Value::Struct { mut fields, name }, Value::Int(t)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "timeout") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::Int(t))));
+                    } else {
+                        fields.push((
+                            "timeout".to_string(),
+                            Value::Option(Some(Box::new(Value::Int(t)))),
+                        ));
                     }
-                    _ => Err("requests_request_builder_bearer_auth() expects (Struct, str)".to_string()),
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err("requests_request_builder_timeout() expects (Struct, int)".to_string()),
+            }
+        }
+        "requests_request_builder_redirect_limit" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_redirect_limit() takes exactly 2 arguments"
+                        .to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let limit = eval_expr(&args[1], env, defs)?;
+            match (builder, limit) {
+                (Value::Struct { mut fields, name }, Value::Int(l)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "redirect_limit") {
+                        fields[pos].1 = Value::Int(l);
+                    } else {
+                        fields.push(("redirect_limit".to_string(), Value::Int(l)));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(
+                    "requests_request_builder_redirect_limit() expects (Struct, int)".to_string(),
+                ),
+            }
+        }
+        "requests_request_builder_redirect_disabled" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_request_builder_redirect_disabled() takes exactly 1 argument"
+                        .to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            match builder {
+                Value::Struct { mut fields, name } => {
+                    fields.push(("disable_redirects".to_string(), Value::Bool(true)));
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(
+                    "requests_request_builder_redirect_disabled() expects RequestBuilder"
+                        .to_string(),
+                ),
+            }
+        }
+        "requests_request_builder_basic_auth" => {
+            if args.len() != 3 {
+                return Err(
+                    "requests_request_builder_basic_auth() takes exactly 3 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let user = eval_expr(&args[1], env, defs)?;
+            let password = eval_expr(&args[2], env, defs)?;
+            match (builder, user, password) {
+                (Value::Struct { mut fields, name }, Value::String(u), Value::String(p)) => {
+                    fields.push(("basic_auth_user".to_string(), Value::String(u)));
+                    fields.push(("basic_auth_pass".to_string(), Value::String(p)));
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(
+                    "requests_request_builder_basic_auth() expects (RequestBuilder, str, str)"
+                        .to_string(),
+                ),
+            }
+        }
+        "requests_request_builder_bearer_auth" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_bearer_auth() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let token = eval_expr(&args[1], env, defs)?;
+            match (builder, token) {
+                (Value::Struct { mut fields, name }, Value::String(t)) => {
+                    fields.push(("bearer_token".to_string(), Value::String(t)));
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => {
+                    Err("requests_request_builder_bearer_auth() expects (Struct, str)".to_string())
                 }
             }
-            "requests_send" => {
-                if args.len() != 1 { return Err("requests_send() takes exactly 1 argument".to_string()); }
-                let builder_val = eval_expr(&args[0], env, defs)?;
-                let (method, url, body_val, headers_val, params_val, basic_auth_user, basic_auth_pass, bearer_token, timeout_val, verify_val) = match &builder_val {
-                    Value::Struct { fields, .. } => {
-                        let method = fields.iter().find(|(k, _)| k == "method")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_else(|| "GET".to_string());
-                        let url = fields.iter().find(|(k, _)| k == "url")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        let body = fields.iter().find(|(k, _)| k == "body")
+        }
+        "requests_send" => {
+            if args.len() != 1 {
+                return Err("requests_send() takes exactly 1 argument".to_string());
+            }
+            let builder_val = eval_expr(&args[0], env, defs)?;
+            let (
+                method,
+                url,
+                body_val,
+                headers_val,
+                params_val,
+                basic_auth_user,
+                basic_auth_pass,
+                bearer_token,
+                timeout_val,
+                verify_val,
+            ) = match &builder_val {
+                Value::Struct { fields, .. } => {
+                    let method = fields
+                        .iter()
+                        .find(|(k, _)| k == "method")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "GET".to_string());
+                    let url = fields
+                        .iter()
+                        .find(|(k, _)| k == "url")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let body =
+                        fields
+                            .iter()
+                            .find(|(k, _)| k == "body")
                             .and_then(|(_, v)| match v {
                                 Value::Option(Some(b)) => match *b.clone() {
                                     Value::String(s) => Some(s),
@@ -12665,951 +14785,1430 @@ fn eval_requests_builtin(func: &str, args: &[Expr], env: &mut HashMap<String, Va
                                 Value::String(s) => Some(s.clone()),
                                 _ => None,
                             });
-                        let headers = fields.iter().find(|(k, _)| k == "headers")
-                            .and_then(|(_, v)| match v { Value::Map(m) => Some(m.clone()), _ => None })
-                            .unwrap_or_default();
-                        let params = fields.iter().find(|(k, _)| k == "params")
-                            .and_then(|(_, v)| match v { Value::Array(a) => Some(a.clone()), _ => None })
-                            .unwrap_or_default();
-                        let basic_auth_user = fields.iter().find(|(k, _)| k == "basic_auth_user")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None });
-                        let basic_auth_pass = fields.iter().find(|(k, _)| k == "basic_auth_pass")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None });
-                        let bearer_token = fields.iter().find(|(k, _)| k == "bearer_token")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None });
-                        let timeout_val = fields.iter().find(|(k, _)| k == "timeout")
+                    let headers = fields
+                        .iter()
+                        .find(|(k, _)| k == "headers")
+                        .and_then(|(_, v)| match v {
+                            Value::Map(m) => Some(m.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let params = fields
+                        .iter()
+                        .find(|(k, _)| k == "params")
+                        .and_then(|(_, v)| match v {
+                            Value::Array(a) => Some(a.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let basic_auth_user = fields
+                        .iter()
+                        .find(|(k, _)| k == "basic_auth_user")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        });
+                    let basic_auth_pass = fields
+                        .iter()
+                        .find(|(k, _)| k == "basic_auth_pass")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        });
+                    let bearer_token = fields.iter().find(|(k, _)| k == "bearer_token").and_then(
+                        |(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        },
+                    );
+                    let timeout_val =
+                        fields
+                            .iter()
+                            .find(|(k, _)| k == "timeout")
                             .and_then(|(_, v)| match v {
                                 Value::Int(i) => Some(*i),
-                                Value::Option(Some(b)) => match **b { Value::Int(i) => Some(i), _ => None },
+                                Value::Option(Some(b)) => match **b {
+                                    Value::Int(i) => Some(i),
+                                    _ => None,
+                                },
                                 _ => None,
                             });
-                        let verify_val = fields.iter().find(|(k, _)| k == "verify")
-                            .and_then(|(_, v)| match v { Value::Bool(b) => Some(*b), _ => None });
-                        (method, url, body, headers, params, basic_auth_user, basic_auth_pass, bearer_token, timeout_val, verify_val)
-                    }
-                    Value::Tuple(parts) if parts.len() >= 2 => {
-                        let method = match &parts[0] { Value::String(s) => s.clone(), _ => "GET".to_string() };
-                        let url = match &parts[1] { Value::String(s) => s.clone(), _ => String::new() };
-                        (method, url, None, HashMap::new(), vec![], None, None, None, None, None)
-                    }
-                    _ => return Err("requests_send() expects a RequestBuilder or tuple".to_string()),
-                };
-                let mut cmd_parts = Vec::new();
-                cmd_parts.push("curl".to_string());
-                cmd_parts.push("-s".to_string());
-                cmd_parts.push("-i".to_string());
-                cmd_parts.push("-X".to_string());
-                cmd_parts.push(method.clone());
-                if let Some(t) = timeout_val {
-                    cmd_parts.push("--connect-timeout".to_string());
-                    cmd_parts.push(t.to_string());
+                    let verify_val =
+                        fields
+                            .iter()
+                            .find(|(k, _)| k == "verify")
+                            .and_then(|(_, v)| match v {
+                                Value::Bool(b) => Some(*b),
+                                _ => None,
+                            });
+                    (
+                        method,
+                        url,
+                        body,
+                        headers,
+                        params,
+                        basic_auth_user,
+                        basic_auth_pass,
+                        bearer_token,
+                        timeout_val,
+                        verify_val,
+                    )
                 }
-                if verify_val == Some(false) {
-                    cmd_parts.push("-k".to_string());
+                Value::Tuple(parts) if parts.len() >= 2 => {
+                    let method = match &parts[0] {
+                        Value::String(s) => s.clone(),
+                        _ => "GET".to_string(),
+                    };
+                    let url = match &parts[1] {
+                        Value::String(s) => s.clone(),
+                        _ => String::new(),
+                    };
+                    (
+                        method,
+                        url,
+                        None,
+                        HashMap::new(),
+                        vec![],
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
                 }
-                for (k, v) in &headers_val {
-                    if let (Value::String(key), Value::String(val)) = (k, v) {
-                        cmd_parts.push("-H".to_string());
-                        cmd_parts.push(format!("{}: {}", key, val));
-                    }
-                }
-                if let Some(user) = &basic_auth_user {
-                    let pass = basic_auth_pass.as_deref().unwrap_or("");
-                    cmd_parts.push("-u".to_string());
-                    cmd_parts.push(format!("{}:{}", user, pass));
-                }
-                if let Some(token) = &bearer_token {
+                _ => return Err("requests_send() expects a RequestBuilder or tuple".to_string()),
+            };
+            let mut cmd_parts = Vec::new();
+            cmd_parts.push("curl".to_string());
+            cmd_parts.push("-s".to_string());
+            cmd_parts.push("-i".to_string());
+            cmd_parts.push("-X".to_string());
+            cmd_parts.push(method.clone());
+            if let Some(t) = timeout_val {
+                cmd_parts.push("--connect-timeout".to_string());
+                cmd_parts.push(t.to_string());
+            }
+            if verify_val == Some(false) {
+                cmd_parts.push("-k".to_string());
+            }
+            for (k, v) in &headers_val {
+                if let (Value::String(key), Value::String(val)) = (k, v) {
                     cmd_parts.push("-H".to_string());
-                    cmd_parts.push(format!("Authorization: Bearer {}", token));
+                    cmd_parts.push(format!("{}: {}", key, val));
                 }
-                let mut param_url = url.clone();
-                let mut first = true;
-                for chunk in params_val.chunks(2) {
-                    if let (Value::String(pk), Value::String(pv)) = (&chunk[0], &chunk.get(1).unwrap_or(&chunk[0])) {
-                        let separator = if first { "?" } else { "&" };
-                        param_url = format!("{}{}{}={}", param_url, separator, pk, pv);
-                        first = false;
-                    }
-                }
-                if let Some(body) = &body_val {
-                    if body.starts_with('{') || body.starts_with('[') {
-                        cmd_parts.push("-H".to_string());
-                        cmd_parts.push("Content-Type: application/json".to_string());
-                    }
-                    cmd_parts.push("-d".to_string());
-                    cmd_parts.push(body.clone());
-                }
-                cmd_parts.push(param_url);
-                let shell_cmd = cmd_parts.join(" ");
-                match std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(&shell_cmd)
-                    .output()
+            }
+            if let Some(user) = &basic_auth_user {
+                let pass = basic_auth_pass.as_deref().unwrap_or("");
+                cmd_parts.push("-u".to_string());
+                cmd_parts.push(format!("{}:{}", user, pass));
+            }
+            if let Some(token) = &bearer_token {
+                cmd_parts.push("-H".to_string());
+                cmd_parts.push(format!("Authorization: Bearer {}", token));
+            }
+            let mut param_url = url.clone();
+            let mut first = true;
+            for chunk in params_val.chunks(2) {
+                if let (Value::String(pk), Value::String(pv)) =
+                    (&chunk[0], &chunk.get(1).unwrap_or(&chunk[0]))
                 {
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                        let mut resp_headers = HashMap::new();
-                        let mut status_code: i64 = 0;
-                        let mut body_text = String::new();
-                        let mut lines = stdout.lines();
-                        let mut header_section_ended = false;
-                        let mut current_line = String::new();
-                        for line in lines.by_ref() {
-                            if header_section_ended {
-                                body_text.push_str(line);
-                                body_text.push('\n');
-                            } else if line.is_empty() {
-                                header_section_ended = true;
-                            } else if let Some(code) = line.strip_prefix("HTTP/") {
-                                if let Some(pos) = code.find(' ') {
-                                    status_code = code[..pos].trim().parse().unwrap_or(0);
-                                }
-                            } else if let Some(pos) = line.find(':') {
-                                let key = line[..pos].trim().to_string();
-                                let val = line[pos+1..].trim().to_string();
-                                resp_headers.insert(key, val);
+                    let separator = if first { "?" } else { "&" };
+                    param_url = format!("{}{}{}={}", param_url, separator, pk, pv);
+                    first = false;
+                }
+            }
+            if let Some(body) = &body_val {
+                if body.starts_with('{') || body.starts_with('[') {
+                    cmd_parts.push("-H".to_string());
+                    cmd_parts.push("Content-Type: application/json".to_string());
+                }
+                cmd_parts.push("-d".to_string());
+                cmd_parts.push(body.clone());
+            }
+            cmd_parts.push(param_url);
+            let shell_cmd = cmd_parts.join(" ");
+            match std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&shell_cmd)
+                .output()
+            {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    let mut resp_headers = HashMap::new();
+                    let mut status_code: i64 = 0;
+                    let mut body_text = String::new();
+                    let mut lines = stdout.lines();
+                    let mut header_section_ended = false;
+                    let mut current_line = String::new();
+                    for line in lines.by_ref() {
+                        if header_section_ended {
+                            body_text.push_str(line);
+                            body_text.push('\n');
+                        } else if line.is_empty() {
+                            header_section_ended = true;
+                        } else if let Some(code) = line.strip_prefix("HTTP/") {
+                            if let Some(pos) = code.find(' ') {
+                                status_code = code[..pos].trim().parse().unwrap_or(0);
                             }
-                        }
-                        if body_text.ends_with('\n') {
-                            body_text.pop();
-                        }
-                        let mut fields = Vec::new();
-                        fields.push(("status_code".to_string(), Value::Int(status_code)));
-                        fields.push(("url".to_string(), Value::String(url)));
-                        fields.push(("headers".to_string(), Value::Map(resp_headers.into_iter().map(|(k,v)| (Value::String(k), Value::String(v))).collect())));
-                        fields.push(("body".to_string(), Value::String(body_text)));
-                        Ok(Value::Struct { name: "Response".to_string(), fields })
-                    }
-                    Err(e) => {
-                        let mut fields = Vec::new();
-                        fields.push(("variant".to_string(), Value::String("RequestError".to_string())));
-                        fields.push(("message".to_string(), Value::String(format!("Request failed: {}", e))));
-                        Ok(Value::Struct { name: "RequestError".to_string(), fields })
-                    }
-                }
-            }
-            "requests_response_status" => {
-                if args.len() != 1 { return Err("requests_response_status() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let code = fields.iter().find(|(k, _)| k == "status_code")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(0);
-                        Ok(Value::Int(code))
-                    }
-                    _ => Err("requests_response_status() expects Response struct".to_string()),
-                }
-            }
-            "requests_response_headers" => {
-                if args.len() != 1 { return Err("requests_response_headers() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let headers = fields.iter().find(|(k, _)| k == "headers")
-                            .cloned()
-                            .map(|(_, v)| v)
-                            .unwrap_or(Value::Map(HashMap::new()));
-                        Ok(headers)
-                    }
-                    _ => Err("requests_response_headers() expects Response struct".to_string()),
-                }
-            }
-            "requests_response_url" => {
-                if args.len() != 1 { return Err("requests_response_url() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let url = fields.iter().find(|(k, _)| k == "url")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        Ok(Value::String(url))
-                    }
-                    _ => Err("requests_response_url() expects Response struct".to_string()),
-                }
-            }
-            "requests_response_text" => {
-                if args.len() != 1 { return Err("requests_response_text() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        Ok(Value::String(body))
-                    }
-                    _ => Err("requests_response_text() expects Response struct".to_string()),
-                }
-            }
-            "requests_response_bytes" => {
-                if args.len() != 1 { return Err("requests_response_bytes() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.as_bytes().to_vec()), _ => None })
-                            .unwrap_or_default();
-                        Ok(Value::Option(Some(Box::new(Value::Array(body.into_iter().map(|b| Value::Int(b as i64)).collect())))))
-                    }
-                    _ => Err("requests_response_bytes() expects Response struct".to_string()),
-                }
-            }
-            "requests_response_json" => {
-                if args.len() != 1 { return Err("requests_response_json() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        match json_parse_str(&body) {
-                            Ok(json_val) => Ok(Value::Option(Some(Box::new(Value::Json(json_val))))),
-                            Err(_) => Ok(Value::Option(None)),
+                        } else if let Some(pos) = line.find(':') {
+                            let key = line[..pos].trim().to_string();
+                            let val = line[pos + 1..].trim().to_string();
+                            resp_headers.insert(key, val);
                         }
                     }
-                    _ => Err("requests_response_json() expects Response struct".to_string()),
-                }
-            }
-            "requests_response_content_length" => {
-                if args.len() != 1 { return Err("requests_response_content_length() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.len() as i64), _ => None })
-                            .unwrap_or(-1);
-                        Ok(Value::Int(body))
+                    if body_text.ends_with('\n') {
+                        body_text.pop();
                     }
-                    _ => Err("requests_response_content_length() expects Response struct".to_string()),
+                    let mut fields = Vec::new();
+                    fields.push(("status_code".to_string(), Value::Int(status_code)));
+                    fields.push(("url".to_string(), Value::String(url)));
+                    fields.push((
+                        "headers".to_string(),
+                        Value::Map(
+                            resp_headers
+                                .into_iter()
+                                .map(|(k, v)| (Value::String(k), Value::String(v)))
+                                .collect(),
+                        ),
+                    ));
+                    fields.push(("body".to_string(), Value::String(body_text)));
+                    Ok(Value::Struct {
+                        name: "Response".to_string(),
+                        fields,
+                    })
+                }
+                Err(e) => {
+                    let mut fields = Vec::new();
+                    fields.push((
+                        "variant".to_string(),
+                        Value::String("RequestError".to_string()),
+                    ));
+                    fields.push((
+                        "message".to_string(),
+                        Value::String(format!("Request failed: {}", e)),
+                    ));
+                    Ok(Value::Struct {
+                        name: "RequestError".to_string(),
+                        fields,
+                    })
                 }
             }
-            "requests_response_is_success" => {
-                if args.len() != 1 { return Err("requests_response_is_success() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let code = fields.iter().find(|(k, _)| k == "status_code")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(0);
-                        Ok(Value::Bool(code >= 200 && code < 300))
-                    }
-                    _ => Err("requests_response_is_success() expects Response struct".to_string()),
+        }
+        "requests_response_status" => {
+            if args.len() != 1 {
+                return Err("requests_response_status() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let code = fields
+                        .iter()
+                        .find(|(k, _)| k == "status_code")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    Ok(Value::Int(code))
                 }
+                _ => Err("requests_response_status() expects Response struct".to_string()),
             }
-            "requests_response_is_client_error" => {
-                if args.len() != 1 { return Err("requests_response_is_client_error() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let code = fields.iter().find(|(k, _)| k == "status_code")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(0);
-                        Ok(Value::Bool(code >= 400 && code < 500))
-                    }
-                    _ => Err("requests_response_is_client_error() expects Response struct".to_string()),
+        }
+        "requests_response_headers" => {
+            if args.len() != 1 {
+                return Err("requests_response_headers() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let headers = fields
+                        .iter()
+                        .find(|(k, _)| k == "headers")
+                        .cloned()
+                        .map(|(_, v)| v)
+                        .unwrap_or(Value::Map(HashMap::new()));
+                    Ok(headers)
                 }
+                _ => Err("requests_response_headers() expects Response struct".to_string()),
             }
-            "requests_response_is_server_error" => {
-                if args.len() != 1 { return Err("requests_response_is_server_error() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let code = fields.iter().find(|(k, _)| k == "status_code")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(0);
-                        Ok(Value::Bool(code >= 500 && code < 600))
-                    }
-                    _ => Err("requests_response_is_server_error() expects Response struct".to_string()),
+        }
+        "requests_response_url" => {
+            if args.len() != 1 {
+                return Err("requests_response_url() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let url = fields
+                        .iter()
+                        .find(|(k, _)| k == "url")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Ok(Value::String(url))
                 }
+                _ => Err("requests_response_url() expects Response struct".to_string()),
             }
-            "requests_response_error_for_status" => {
-                if args.len() != 1 { return Err("requests_response_error_for_status() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let code = fields.iter().find(|(k, _)| k == "status_code")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i), _ => None })
-                            .unwrap_or(0);
-                        if code >= 200 && code < 300 {
-                            Ok(resp)
-                        } else {
-                            let mut err_fields = Vec::new();
-                            err_fields.push(("variant".to_string(), Value::String("RequestError".to_string())));
-                            err_fields.push(("message".to_string(), Value::String(format!("HTTP error: {}", code))));
-                            Ok(Value::Struct { name: "RequestError".to_string(), fields: err_fields })
-                        }
-                    }
-                    _ => Err("requests_response_error_for_status() expects Response struct".to_string()),
+        }
+        "requests_response_text" => {
+            if args.len() != 1 {
+                return Err("requests_response_text() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Ok(Value::String(body))
                 }
+                _ => Err("requests_response_text() expects Response struct".to_string()),
             }
-            "requests_status_code_code" => {
-                if args.len() != 1 { return Err("requests_status_code_code() takes exactly 1 argument".to_string()); }
-                let code = eval_expr(&args[0], env, defs)?;
-                match code { Value::Int(c) => Ok(Value::Int(c)), _ => Ok(code) }
+        }
+        "requests_response_bytes" => {
+            if args.len() != 1 {
+                return Err("requests_response_bytes() takes exactly 1 argument".to_string());
             }
-            "requests_status_code_is_success" => {
-                if args.len() != 1 { return Err("requests_status_code_is_success() takes exactly 1 argument".to_string()); }
-                let code = eval_expr(&args[0], env, defs)?;
-                match code { Value::Int(c) => Ok(Value::Bool(c >= 200 && c < 300)), _ => Ok(Value::Bool(false)) }
-            }
-            "requests_status_code_is_client_error" => {
-                if args.len() != 1 { return Err("requests_status_code_is_client_error() takes exactly 1 argument".to_string()); }
-                let code = eval_expr(&args[0], env, defs)?;
-                match code { Value::Int(c) => Ok(Value::Bool(c >= 400 && c < 500)), _ => Ok(Value::Bool(false)) }
-            }
-            "requests_status_code_is_server_error" => {
-                if args.len() != 1 { return Err("requests_status_code_is_server_error() takes exactly 1 argument".to_string()); }
-                let code = eval_expr(&args[0], env, defs)?;
-                match code { Value::Int(c) => Ok(Value::Bool(c >= 500 && c < 600)), _ => Ok(Value::Bool(false)) }
-            }
-            "requests_status_code_is_redirect" => {
-                if args.len() != 1 { return Err("requests_status_code_is_redirect() takes exactly 1 argument".to_string()); }
-                let code = eval_expr(&args[0], env, defs)?;
-                match code { Value::Int(c) => Ok(Value::Bool(c >= 300 && c < 400)), _ => Ok(Value::Bool(false)) }
-            }
-            "requests_header_map_new" => {
-                if !args.is_empty() { return Err("requests_header_map_new() takes no arguments".to_string()); }
-                Ok(Value::Map(HashMap::new()))
-            }
-            "requests_header_map_insert" | "requests_header_map_append" => {
-                if args.len() != 3 { return Err(format!("{}() takes exactly 3 arguments", func)); }
-                let map_val = eval_expr(&args[0], env, defs)?;
-                let key = eval_expr(&args[1], env, defs)?;
-                let value = eval_expr(&args[2], env, defs)?;
-                match (map_val, key, value) {
-                    (Value::Map(mut m), Value::String(k), Value::String(v)) => {
-                        m.insert(Value::String(k), Value::String(v));
-                        Ok(Value::Map(m))
-                    }
-                    _ => Err(format!("{}() expects (Map, str, str)", func)),
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.as_bytes().to_vec()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Ok(Value::Option(Some(Box::new(Value::Array(
+                        body.into_iter().map(|b| Value::Int(b as i64)).collect(),
+                    )))))
                 }
+                _ => Err("requests_response_bytes() expects Response struct".to_string()),
             }
-            "requests_header_map_remove" => {
-                if args.len() != 3 { return Err("requests_header_map_remove() takes exactly 3 arguments".to_string()); }
-                let map_val = eval_expr(&args[0], env, defs)?;
-                let key = eval_expr(&args[1], env, defs)?;
-                let _value = eval_expr(&args[2], env, defs)?;
-                match (map_val, key) {
-                    (Value::Map(mut m), Value::String(k)) => {
-                        m.remove(&Value::String(k));
-                        Ok(Value::Map(m))
-                    }
-                    _ => Err("requests_header_map_remove() expects (Map, str, _)".to_string()),
-                }
+        }
+        "requests_response_json" => {
+            if args.len() != 1 {
+                return Err("requests_response_json() takes exactly 1 argument".to_string());
             }
-            "requests_header_map_get" => {
-                if args.len() != 2 { return Err("requests_header_map_get() takes exactly 2 arguments".to_string()); }
-                let map_val = eval_expr(&args[0], env, defs)?;
-                let key = eval_expr(&args[1], env, defs)?;
-                match (map_val, key) {
-                    (Value::Map(m), Value::String(k)) => {
-                        let val = m.get(&Value::String(k)).cloned();
-                        Ok(Value::Option(val.map(Box::new)))
-                    }
-                    _ => Err("requests_header_map_get() expects (Map, str)".to_string()),
-                }
-            }
-            "requests_header_map_contains" => {
-                if args.len() != 2 { return Err("requests_header_map_contains() takes exactly 2 arguments".to_string()); }
-                let map_val = eval_expr(&args[0], env, defs)?;
-                let key = eval_expr(&args[1], env, defs)?;
-                match (map_val, key) {
-                    (Value::Map(m), Value::String(k)) => {
-                        Ok(Value::Bool(m.contains_key(&Value::String(k))))
-                    }
-                    _ => Err("requests_header_map_contains() expects (Map, str)".to_string()),
-                }
-            }
-            "requests_multipart_new" => {
-                if !args.is_empty() { return Err("requests_multipart_new() takes no arguments".to_string()); }
-                Ok(Value::Array(vec![]))
-            }
-            "requests_multipart_text" => {
-                if args.len() != 3 { return Err("requests_multipart_text() takes exactly 3 arguments".to_string()); }
-                let multipart = eval_expr(&args[0], env, defs)?;
-                let name = eval_expr(&args[1], env, defs)?;
-                let value = eval_expr(&args[2], env, defs)?;
-                match (multipart, name, value) {
-                    (Value::Array(mut arr), Value::String(n), Value::String(v)) => {
-                        arr.push(Value::Tuple(vec![Value::String(n), Value::String(v), Value::String("text".to_string())]));
-                        Ok(Value::Array(arr))
-                    }
-                    _ => Err("requests_multipart_text() expects (Array, str, str)".to_string()),
-                }
-            }
-            "requests_multipart_file" => {
-                if args.len() != 3 { return Err("requests_multipart_file() takes exactly 3 arguments".to_string()); }
-                let multipart = eval_expr(&args[0], env, defs)?;
-                let name = eval_expr(&args[1], env, defs)?;
-                let file_path = eval_expr(&args[2], env, defs)?;
-                match (multipart, name, file_path) {
-                    (Value::Array(mut arr), Value::String(n), Value::String(f)) => {
-                        arr.push(Value::Tuple(vec![Value::String(n), Value::String(f), Value::String("file".to_string())]));
-                        Ok(Value::Array(arr))
-                    }
-                    _ => Err("requests_multipart_file() expects (Array, str, str)".to_string()),
-                }
-            }
-            "requests_multipart_file_with_metadata" => {
-                if args.len() != 5 { return Err("requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string()); }
-                let multipart = eval_expr(&args[0], env, defs)?;
-                let name = eval_expr(&args[1], env, defs)?;
-                let file_path = eval_expr(&args[2], env, defs)?;
-                let filename = eval_expr(&args[3], env, defs)?;
-                let content_type = eval_expr(&args[4], env, defs)?;
-                match (multipart, name, file_path, filename, content_type) {
-                    (Value::Array(mut arr), Value::String(n), Value::String(f), Value::String(fn_), Value::String(ct)) => {
-                        arr.push(Value::Tuple(vec![Value::String(n), Value::String(f), Value::String("file".to_string()), Value::String(fn_), Value::String(ct)]));
-                        Ok(Value::Array(arr))
-                    }
-                    _ => Err("requests_multipart_file_with_metadata() expects (Array, str, str, str, str)".to_string()),
-                }
-            }
-            "requests_tls_config_new" => {
-                if !args.is_empty() { return Err("requests_tls_config_new() takes no arguments".to_string()); }
-                let mut fields = Vec::new();
-                fields.push(("ca_cert_path".to_string(), Value::Option(None)));
-                fields.push(("client_cert_path".to_string(), Value::Option(None)));
-                fields.push(("client_key_path".to_string(), Value::Option(None)));
-                fields.push(("accept_invalid_certs".to_string(), Value::Bool(false)));
-                fields.push(("accept_invalid_hostnames".to_string(), Value::Bool(false)));
-                Ok(Value::Struct { name: "TlsConfig".to_string(), fields })
-            }
-            "requests_tls_config_add_ca_cert" => {
-                if args.len() != 2 { return Err("requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string()); }
-                let config = eval_expr(&args[0], env, defs)?;
-                let path = eval_expr(&args[1], env, defs)?;
-                match (config, path) {
-                    (Value::Struct { mut fields, name }, Value::String(p)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "ca_cert_path") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(p))));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_tls_config_add_ca_cert() expects (Struct, str)".to_string()),
-                }
-            }
-            "requests_tls_config_add_client_cert" => {
-                if args.len() != 3 { return Err("requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string()); }
-                let config = eval_expr(&args[0], env, defs)?;
-                let cert = eval_expr(&args[1], env, defs)?;
-                let key = eval_expr(&args[2], env, defs)?;
-                match (config, cert, key) {
-                    (Value::Struct { mut fields, name }, Value::String(c), Value::String(k)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "client_cert_path") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(c))));
-                        }
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "client_key_path") {
-                            fields[pos].1 = Value::Option(Some(Box::new(Value::String(k))));
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_tls_config_add_client_cert() expects (Struct, str, str)".to_string()),
-                }
-            }
-            "requests_tls_config_danger_accept_invalid_certs" => {
-                if args.len() != 1 { return Err("requests_tls_config_danger_accept_invalid_certs() takes exactly 1 argument".to_string()); }
-                let config = eval_expr(&args[0], env, defs)?;
-                match config {
-                    Value::Struct { mut fields, name } => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "accept_invalid_certs") {
-                            fields[pos].1 = Value::Bool(true);
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_tls_config_danger_accept_invalid_certs() expects Struct".to_string()),
-                }
-            }
-            "requests_tls_config_danger_accept_invalid_hostnames" => {
-                if args.len() != 1 { return Err("requests_tls_config_danger_accept_invalid_hostnames() takes exactly 1 argument".to_string()); }
-                let config = eval_expr(&args[0], env, defs)?;
-                match config {
-                    Value::Struct { mut fields, name } => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "accept_invalid_hostnames") {
-                            fields[pos].1 = Value::Bool(true);
-                        }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_tls_config_danger_accept_invalid_hostnames() expects Struct".to_string()),
-                }
-            }
-            "requests_cookie_jar_new" => {
-                if !args.is_empty() { return Err("requests_cookie_jar_new() takes no arguments".to_string()); }
-                Ok(Value::Array(vec![]))
-            }
-            "requests_cookie_jar_add" => {
-                if args.len() != 2 { return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string()); }
-                let jar = eval_expr(&args[0], env, defs)?;
-                let cookie = eval_expr(&args[1], env, defs)?;
-                match (jar, cookie) {
-                    (Value::Array(mut arr), Value::String(c)) => {
-                        arr.push(Value::String(c));
-                        Ok(Value::Array(arr))
-                    }
-                    _ => Err("requests_cookie_jar_add() expects (Array, str)".to_string()),
-                }
-            }
-            "requests_cookie_parse" => {
-                if args.len() != 1 { return Err("requests_cookie_parse() takes exactly 1 argument".to_string()); }
-                let cookie_str = eval_expr(&args[0], env, defs)?;
-                match cookie_str {
-                    Value::String(s) => Ok(Value::String(s)),
-                    _ => Err("requests_cookie_parse() expects str".to_string()),
-                }
-            }
-            "requests_response_copy_to" => {
-                if args.len() != 2 { return Err("requests_response_copy_to() takes exactly 2 arguments".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                let path = eval_expr(&args[1], env, defs)?;
-                match (resp, path) {
-                    (Value::Struct { fields, .. }, Value::String(p)) => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        match std::fs::write(&p, &body) {
-                            Ok(()) => Ok(Value::Int(body.len() as i64)),
-                            Err(_e) => Ok(Value::Int(-1)),
-                        }
-                    }
-                    _ => Err("requests_response_copy_to() expects (Response, str)".to_string()),
-                }
-            }
-            "requests_response_chunks" => {
-                if args.len() != 2 { return Err("requests_response_chunks() takes exactly 2 arguments".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                let chunk_size = eval_expr(&args[1], env, defs)?;
-                match (resp, chunk_size) {
-                    (Value::Struct { fields, .. }, Value::Int(size)) => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        let mut chunks = Vec::new();
-                        let bytes = body.as_bytes();
-                        let mut pos = 0;
-                        while pos < bytes.len() {
-                            let end = std::cmp::min(pos + size as usize, bytes.len());
-                            let chunk = &bytes[pos..end];
-                            chunks.push(Value::Array(chunk.iter().map(|b| Value::Int(*b as i64)).collect()));
-                            pos = end;
-                        }
-                        Ok(Value::Option(Some(Box::new(Value::Array(chunks)))))
-                    }
-                    _ => Err("requests_response_chunks() expects (Response, int)".to_string()),
-                }
-            }
-            "requests_response_stream" => {
-                if args.len() != 1 { return Err("requests_response_stream() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let body = fields.iter().find(|(k, _)| k == "body")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        let mut stream_fields = Vec::new();
-                        stream_fields.push(("data".to_string(), Value::String(body)));
-                        stream_fields.push(("pos".to_string(), Value::Int(0)));
-                        Ok(Value::Struct { name: "Stream".to_string(), fields: stream_fields })
-                    }
-                    _ => Err("requests_response_stream() expects Response struct".to_string()),
-                }
-            }
-            "requests_stream_read" => {
-                if args.len() != 2 { return Err("requests_stream_read() takes exactly 2 arguments".to_string()); }
-                let stream = eval_expr(&args[0], env, defs)?;
-                let size = eval_expr(&args[1], env, defs)?;
-                match (stream, size) {
-                    (Value::Struct { mut fields, name }, Value::Int(s)) => {
-                        let data = fields.iter().find(|(k, _)| k == "data")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.clone()), _ => None })
-                            .unwrap_or_default();
-                        let pos = fields.iter().find(|(k, _)| k == "pos")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i as usize), _ => None })
-                            .unwrap_or(0);
-                        if pos >= data.len() {
-                            Ok(Value::Option(None))
-                        } else {
-                            let end = std::cmp::min(pos + s as usize, data.len());
-                            let chunk = data[pos..end].to_string();
-                            // Update pos
-                            if let Some(p) = fields.iter_mut().find(|(k, _)| k == "pos") {
-                                p.1 = Value::Int(end as i64);
-                            }
-                            Ok(Value::Option(Some(Box::new(Value::String(chunk)))))
-                        }
-                    }
-                    _ => Err("requests_stream_read() expects (Stream, int)".to_string()),
-                }
-            }
-            "requests_stream_has_more" => {
-                if args.len() != 1 { return Err("requests_stream_has_more() takes exactly 1 argument".to_string()); }
-                let stream = eval_expr(&args[0], env, defs)?;
-                match stream {
-                    Value::Struct { fields, .. } => {
-                        let data_len = fields.iter().find(|(k, _)| k == "data")
-                            .and_then(|(_, v)| match v { Value::String(s) => Some(s.len()), _ => None })
-                            .unwrap_or(0);
-                        let pos = fields.iter().find(|(k, _)| k == "pos")
-                            .and_then(|(_, v)| match v { Value::Int(i) => Some(*i as usize), _ => None })
-                            .unwrap_or(0);
-                        Ok(Value::Bool(pos < data_len))
-                    }
-                    _ => Err("requests_stream_has_more() expects Stream".to_string()),
-                }
-            }
-            "requests_client_free" | "requests_request_builder_free" | "requests_response_free"
-            | "requests_header_map_free" | "requests_multipart_free"
-            | "requests_tls_config_free" | "requests_cookie_jar_free" | "requests_stream_free" => {
-                if args.len() != 1 { return Err(format!("{}() takes exactly 1 argument", func)); }
-                let _ = eval_expr(&args[0], env, defs)?;
-                Ok(Value::Option(None))
-            }
-            "requests_session_new" => {
-                if !args.is_empty() { return Err("requests_session_new() takes no arguments".to_string()); }
-                let mut fields = Vec::new();
-                fields.push(("type".to_string(), Value::String("Session".to_string())));
-                fields.push(("timeout".to_string(), Value::Int(30)));
-                fields.push(("redirect_limit".to_string(), Value::Int(10)));
-                fields.push(("verify".to_string(), Value::Bool(true)));
-                fields.push(("headers".to_string(), Value::Map(HashMap::new())));
-                fields.push(("cookies".to_string(), Value::Array(vec![])));
-                Ok(Value::Struct { name: "Session".to_string(), fields })
-            }
-            "requests_session_request" => {
-                if args.len() != 3 { return Err("requests_session_request() takes exactly 3 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let method = eval_expr(&args[1], env, defs)?;
-                let url = eval_expr(&args[2], env, defs)?;
-                let method_str = match method { Value::String(s) => s, _ => return Err("requests_session_request() expects string method".to_string()) };
-                let url_str = match url { Value::String(s) => s, _ => return Err("requests_session_request() expects string url".to_string()) };
-                let mut headers = HashMap::new();
-                let mut timeout = 30i64;
-                let mut verify = true;
-                if let Value::Struct { fields, .. } = &session {
-                    for (k, v) in fields {
-                        if k == "timeout" { if let Value::Int(t) = v { timeout = *t; } }
-                        if k == "verify" { if let Value::Bool(b) = v { verify = *b; } }
-                        if k == "headers" { if let Value::Map(m) = v { headers = m.clone(); } }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    match json_parse_str(&body) {
+                        Ok(json_val) => Ok(Value::Option(Some(Box::new(Value::Json(json_val))))),
+                        Err(_) => Ok(Value::Option(None)),
                     }
                 }
-                let mut rb_fields = Vec::new();
-                rb_fields.push(("method".to_string(), Value::String(method_str)));
-                rb_fields.push(("url".to_string(), Value::String(url_str)));
-                rb_fields.push(("headers".to_string(), Value::Map(headers)));
-                rb_fields.push(("body".to_string(), Value::Option(None)));
-                rb_fields.push(("timeout".to_string(), Value::Int(timeout)));
-                rb_fields.push(("verify".to_string(), Value::Bool(verify)));
-                rb_fields.push(("params".to_string(), Value::Array(vec![])));
-                Ok(Value::Struct { name: "RequestBuilder".to_string(), fields: rb_fields })
+                _ => Err("requests_response_json() expects Response struct".to_string()),
             }
-            "requests_session_free" => {
-                if args.len() != 1 { return Err("requests_session_free() takes exactly 1 argument".to_string()); }
-                let _ = eval_expr(&args[0], env, defs)?;
-                Ok(Value::Option(None))
+        }
+        "requests_response_content_length" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_response_content_length() takes exactly 1 argument".to_string(),
+                );
             }
-            "requests_request_builder_set_headers" => {
-                if args.len() != 2 { return Err("requests_request_builder_set_headers() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let hdrs = eval_expr(&args[1], env, defs)?;
-                match (builder, hdrs) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
-                            if let Value::Map(mut m) = fields[pos].1.clone() {
-                                let mut i = 0;
-                                while i + 1 < arr.len() {
-                                    if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
-                                        m.insert(Value::String(k.clone()), Value::String(v.clone()));
-                                    }
-                                    i += 2;
-                                }
-                                fields[pos].1 = Value::Map(m);
-                            }
-                        }
-                        Ok(Value::Struct { name, fields })
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.len() as i64),
+                            _ => None,
+                        })
+                        .unwrap_or(-1);
+                    Ok(Value::Int(body))
+                }
+                _ => Err("requests_response_content_length() expects Response struct".to_string()),
+            }
+        }
+        "requests_response_is_success" => {
+            if args.len() != 1 {
+                return Err("requests_response_is_success() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let code = fields
+                        .iter()
+                        .find(|(k, _)| k == "status_code")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    Ok(Value::Bool(code >= 200 && code < 300))
+                }
+                _ => Err("requests_response_is_success() expects Response struct".to_string()),
+            }
+        }
+        "requests_response_is_client_error" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_response_is_client_error() takes exactly 1 argument".to_string(),
+                );
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let code = fields
+                        .iter()
+                        .find(|(k, _)| k == "status_code")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    Ok(Value::Bool(code >= 400 && code < 500))
+                }
+                _ => Err("requests_response_is_client_error() expects Response struct".to_string()),
+            }
+        }
+        "requests_response_is_server_error" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_response_is_server_error() takes exactly 1 argument".to_string(),
+                );
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let code = fields
+                        .iter()
+                        .find(|(k, _)| k == "status_code")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    Ok(Value::Bool(code >= 500 && code < 600))
+                }
+                _ => Err("requests_response_is_server_error() expects Response struct".to_string()),
+            }
+        }
+        "requests_response_error_for_status" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_response_error_for_status() takes exactly 1 argument".to_string(),
+                );
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let code = fields
+                        .iter()
+                        .find(|(k, _)| k == "status_code")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    if code >= 200 && code < 300 {
+                        Ok(resp)
+                    } else {
+                        let mut err_fields = Vec::new();
+                        err_fields.push((
+                            "variant".to_string(),
+                            Value::String("RequestError".to_string()),
+                        ));
+                        err_fields.push((
+                            "message".to_string(),
+                            Value::String(format!("HTTP error: {}", code)),
+                        ));
+                        Ok(Value::Struct {
+                            name: "RequestError".to_string(),
+                            fields: err_fields,
+                        })
                     }
-                    _ => Err("requests_request_builder_set_headers() expects (RequestBuilder, list)".to_string()),
+                }
+                _ => {
+                    Err("requests_response_error_for_status() expects Response struct".to_string())
                 }
             }
-            "requests_request_builder_verify" => {
-                if args.len() != 2 { return Err("requests_request_builder_verify() takes exactly 2 arguments".to_string()); }
-                let builder = eval_expr(&args[0], env, defs)?;
-                let verify = eval_expr(&args[1], env, defs)?;
-                match (builder, verify) {
-                    (Value::Struct { mut fields, name }, Value::Bool(v)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "verify") {
-                            fields[pos].1 = Value::Bool(v);
-                        } else {
-                            fields.push(("verify".to_string(), Value::Bool(v)));
-                        }
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_status_code_code" => {
+            if args.len() != 1 {
+                return Err("requests_status_code_code() takes exactly 1 argument".to_string());
+            }
+            let code = eval_expr(&args[0], env, defs)?;
+            match code {
+                Value::Int(c) => Ok(Value::Int(c)),
+                _ => Ok(code),
+            }
+        }
+        "requests_status_code_is_success" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_status_code_is_success() takes exactly 1 argument".to_string()
+                );
+            }
+            let code = eval_expr(&args[0], env, defs)?;
+            match code {
+                Value::Int(c) => Ok(Value::Bool(c >= 200 && c < 300)),
+                _ => Ok(Value::Bool(false)),
+            }
+        }
+        "requests_status_code_is_client_error" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_status_code_is_client_error() takes exactly 1 argument".to_string(),
+                );
+            }
+            let code = eval_expr(&args[0], env, defs)?;
+            match code {
+                Value::Int(c) => Ok(Value::Bool(c >= 400 && c < 500)),
+                _ => Ok(Value::Bool(false)),
+            }
+        }
+        "requests_status_code_is_server_error" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_status_code_is_server_error() takes exactly 1 argument".to_string(),
+                );
+            }
+            let code = eval_expr(&args[0], env, defs)?;
+            match code {
+                Value::Int(c) => Ok(Value::Bool(c >= 500 && c < 600)),
+                _ => Ok(Value::Bool(false)),
+            }
+        }
+        "requests_status_code_is_redirect" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_status_code_is_redirect() takes exactly 1 argument".to_string(),
+                );
+            }
+            let code = eval_expr(&args[0], env, defs)?;
+            match code {
+                Value::Int(c) => Ok(Value::Bool(c >= 300 && c < 400)),
+                _ => Ok(Value::Bool(false)),
+            }
+        }
+        "requests_header_map_new" => {
+            if !args.is_empty() {
+                return Err("requests_header_map_new() takes no arguments".to_string());
+            }
+            Ok(Value::Map(HashMap::new()))
+        }
+        "requests_header_map_insert" | "requests_header_map_append" => {
+            if args.len() != 3 {
+                return Err(format!("{}() takes exactly 3 arguments", func));
+            }
+            let map_val = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            let value = eval_expr(&args[2], env, defs)?;
+            match (map_val, key, value) {
+                (Value::Map(mut m), Value::String(k), Value::String(v)) => {
+                    m.insert(Value::String(k), Value::String(v));
+                    Ok(Value::Map(m))
+                }
+                _ => Err(format!("{}() expects (Map, str, str)", func)),
+            }
+        }
+        "requests_header_map_remove" => {
+            if args.len() != 3 {
+                return Err("requests_header_map_remove() takes exactly 3 arguments".to_string());
+            }
+            let map_val = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            let _value = eval_expr(&args[2], env, defs)?;
+            match (map_val, key) {
+                (Value::Map(mut m), Value::String(k)) => {
+                    m.remove(&Value::String(k));
+                    Ok(Value::Map(m))
+                }
+                _ => Err("requests_header_map_remove() expects (Map, str, _)".to_string()),
+            }
+        }
+        "requests_header_map_get" => {
+            if args.len() != 2 {
+                return Err("requests_header_map_get() takes exactly 2 arguments".to_string());
+            }
+            let map_val = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            match (map_val, key) {
+                (Value::Map(m), Value::String(k)) => {
+                    let val = m.get(&Value::String(k)).cloned();
+                    Ok(Value::Option(val.map(Box::new)))
+                }
+                _ => Err("requests_header_map_get() expects (Map, str)".to_string()),
+            }
+        }
+        "requests_header_map_contains" => {
+            if args.len() != 2 {
+                return Err("requests_header_map_contains() takes exactly 2 arguments".to_string());
+            }
+            let map_val = eval_expr(&args[0], env, defs)?;
+            let key = eval_expr(&args[1], env, defs)?;
+            match (map_val, key) {
+                (Value::Map(m), Value::String(k)) => {
+                    Ok(Value::Bool(m.contains_key(&Value::String(k))))
+                }
+                _ => Err("requests_header_map_contains() expects (Map, str)".to_string()),
+            }
+        }
+        "requests_multipart_new" => {
+            if !args.is_empty() {
+                return Err("requests_multipart_new() takes no arguments".to_string());
+            }
+            Ok(Value::Array(vec![]))
+        }
+        "requests_multipart_text" => {
+            if args.len() != 3 {
+                return Err("requests_multipart_text() takes exactly 3 arguments".to_string());
+            }
+            let multipart = eval_expr(&args[0], env, defs)?;
+            let name = eval_expr(&args[1], env, defs)?;
+            let value = eval_expr(&args[2], env, defs)?;
+            match (multipart, name, value) {
+                (Value::Array(mut arr), Value::String(n), Value::String(v)) => {
+                    arr.push(Value::Tuple(vec![
+                        Value::String(n),
+                        Value::String(v),
+                        Value::String("text".to_string()),
+                    ]));
+                    Ok(Value::Array(arr))
+                }
+                _ => Err("requests_multipart_text() expects (Array, str, str)".to_string()),
+            }
+        }
+        "requests_multipart_file" => {
+            if args.len() != 3 {
+                return Err("requests_multipart_file() takes exactly 3 arguments".to_string());
+            }
+            let multipart = eval_expr(&args[0], env, defs)?;
+            let name = eval_expr(&args[1], env, defs)?;
+            let file_path = eval_expr(&args[2], env, defs)?;
+            match (multipart, name, file_path) {
+                (Value::Array(mut arr), Value::String(n), Value::String(f)) => {
+                    arr.push(Value::Tuple(vec![
+                        Value::String(n),
+                        Value::String(f),
+                        Value::String("file".to_string()),
+                    ]));
+                    Ok(Value::Array(arr))
+                }
+                _ => Err("requests_multipart_file() expects (Array, str, str)".to_string()),
+            }
+        }
+        "requests_multipart_file_with_metadata" => {
+            if args.len() != 5 {
+                return Err(
+                    "requests_multipart_file_with_metadata() takes exactly 5 arguments".to_string(),
+                );
+            }
+            let multipart = eval_expr(&args[0], env, defs)?;
+            let name = eval_expr(&args[1], env, defs)?;
+            let file_path = eval_expr(&args[2], env, defs)?;
+            let filename = eval_expr(&args[3], env, defs)?;
+            let content_type = eval_expr(&args[4], env, defs)?;
+            match (multipart, name, file_path, filename, content_type) {
+                (
+                    Value::Array(mut arr),
+                    Value::String(n),
+                    Value::String(f),
+                    Value::String(fn_),
+                    Value::String(ct),
+                ) => {
+                    arr.push(Value::Tuple(vec![
+                        Value::String(n),
+                        Value::String(f),
+                        Value::String("file".to_string()),
+                        Value::String(fn_),
+                        Value::String(ct),
+                    ]));
+                    Ok(Value::Array(arr))
+                }
+                _ => Err(
+                    "requests_multipart_file_with_metadata() expects (Array, str, str, str, str)"
+                        .to_string(),
+                ),
+            }
+        }
+        "requests_tls_config_new" => {
+            if !args.is_empty() {
+                return Err("requests_tls_config_new() takes no arguments".to_string());
+            }
+            let mut fields = Vec::new();
+            fields.push(("ca_cert_path".to_string(), Value::Option(None)));
+            fields.push(("client_cert_path".to_string(), Value::Option(None)));
+            fields.push(("client_key_path".to_string(), Value::Option(None)));
+            fields.push(("accept_invalid_certs".to_string(), Value::Bool(false)));
+            fields.push(("accept_invalid_hostnames".to_string(), Value::Bool(false)));
+            Ok(Value::Struct {
+                name: "TlsConfig".to_string(),
+                fields,
+            })
+        }
+        "requests_tls_config_add_ca_cert" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_tls_config_add_ca_cert() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let config = eval_expr(&args[0], env, defs)?;
+            let path = eval_expr(&args[1], env, defs)?;
+            match (config, path) {
+                (Value::Struct { mut fields, name }, Value::String(p)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "ca_cert_path") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::String(p))));
                     }
-                    _ => Err("requests_request_builder_verify() expects (RequestBuilder, bool)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err("requests_tls_config_add_ca_cert() expects (Struct, str)".to_string()),
             }
-            "requests_response_headers_list" => {
-                if args.len() != 1 { return Err("requests_response_headers_list() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let headers = fields.iter().find(|(k, _)| k == "headers")
-                            .and_then(|(_, v)| match v { Value::Map(m) => Some(m.clone()), _ => None })
-                            .unwrap_or_default();
-                        let mut list = Vec::new();
-                        for (k, v) in &headers {
-                            list.push(k.clone());
-                            list.push(v.clone());
-                        }
-                        Ok(Value::Array(list))
+        }
+        "requests_tls_config_add_client_cert" => {
+            if args.len() != 3 {
+                return Err(
+                    "requests_tls_config_add_client_cert() takes exactly 3 arguments".to_string(),
+                );
+            }
+            let config = eval_expr(&args[0], env, defs)?;
+            let cert = eval_expr(&args[1], env, defs)?;
+            let key = eval_expr(&args[2], env, defs)?;
+            match (config, cert, key) {
+                (Value::Struct { mut fields, name }, Value::String(c), Value::String(k)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "client_cert_path") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::String(c))));
                     }
-                    _ => Err("requests_response_headers_list() expects Response struct".to_string()),
-                }
-            }
-            // Cookie jar operations (interpreter mode)
-            "requests_cookie_jar_add_parsed" => {
-                if args.len() != 2 { return Err("requests_cookie_jar_add_parsed() takes exactly 2 arguments".to_string()); }
-                let jar = eval_expr(&args[0], env, defs)?;
-                let cookie = eval_expr(&args[1], env, defs)?;
-                match (jar, cookie) {
-                    (Value::Array(mut arr), c) => {
-                        arr.push(c);
-                        Ok(Value::Array(arr))
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "client_key_path") {
+                        fields[pos].1 = Value::Option(Some(Box::new(Value::String(k))));
                     }
-                    _ => Err("requests_cookie_jar_add_parsed() expects (Array, value)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_tls_config_add_client_cert() expects (Struct, str, str)".to_string(),
+                ),
             }
-            "requests_cookie_jar_update_from_response" => {
-                if args.len() != 3 { return Err("requests_cookie_jar_update_from_response() takes exactly 3 arguments".to_string()); }
-                let _jar = eval_expr(&args[0], env, defs)?;
-                let _resp_headers = eval_expr(&args[1], env, defs)?;
-                let _url = eval_expr(&args[2], env, defs)?;
-                // In interpreter mode, cookie handling is done at the Lime level
-                Ok(Value::Option(None))
+        }
+        "requests_tls_config_danger_accept_invalid_certs" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_tls_config_danger_accept_invalid_certs() takes exactly 1 argument"
+                        .to_string(),
+                );
             }
-            "requests_cookie_jar_get_cookie_header" => {
-                if args.len() != 2 { return Err("requests_cookie_jar_get_cookie_header() takes exactly 2 arguments".to_string()); }
-                let jar = eval_expr(&args[0], env, defs)?;
-                let _url = eval_expr(&args[1], env, defs)?;
-                match &jar {
-                    Value::Array(arr) => {
-                        // Build cookie header from array of alternating name, value strings
-                        let mut parts = Vec::new();
-                        let mut i = 0;
-                        while i + 1 < arr.len() {
-                            if let (Value::String(name), Value::String(val)) = (&arr[i], &arr[i+1]) {
-                                parts.push(format!("{}={}", name, val));
-                            }
-                            i += 2;
-                        }
-                        if parts.is_empty() {
-                            Ok(Value::Option(None))
-                        } else {
-                            Ok(Value::Option(Some(Box::new(Value::String(parts.join("; "))))))
-                        }
+            let config = eval_expr(&args[0], env, defs)?;
+            match config {
+                Value::Struct { mut fields, name } => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "accept_invalid_certs")
+                    {
+                        fields[pos].1 = Value::Bool(true);
                     }
-                    _ => Ok(Value::Option(None)),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_tls_config_danger_accept_invalid_certs() expects Struct".to_string(),
+                ),
             }
-            "requests_cookie_jar_get_all" => {
-                if args.len() != 1 { return Err("requests_cookie_jar_get_all() takes exactly 1 argument".to_string()); }
-                let jar = eval_expr(&args[0], env, defs)?;
-                match jar {
-                    Value::Array(arr) => Ok(Value::Array(arr)),
-                    _ => Ok(Value::Array(vec![])),
+        }
+        "requests_tls_config_danger_accept_invalid_hostnames" => {
+            if args.len() != 1 {
+                return Err("requests_tls_config_danger_accept_invalid_hostnames() takes exactly 1 argument".to_string());
+            }
+            let config = eval_expr(&args[0], env, defs)?;
+            match config {
+                Value::Struct { mut fields, name } => {
+                    if let Some(pos) = fields
+                        .iter()
+                        .position(|(f, _)| f == "accept_invalid_hostnames")
+                    {
+                        fields[pos].1 = Value::Bool(true);
+                    }
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_tls_config_danger_accept_invalid_hostnames() expects Struct"
+                        .to_string(),
+                ),
             }
-            "requests_cookie_jar_get" => {
-                if args.len() != 2 { return Err("requests_cookie_jar_get() takes exactly 2 arguments".to_string()); }
-                let jar = eval_expr(&args[0], env, defs)?;
-                let name = eval_expr(&args[1], env, defs)?;
-                match (&jar, &name) {
-                    (Value::Array(arr), Value::String(n)) => {
-                        let mut i = 0;
-                        while i + 1 < arr.len() {
-                            if let Value::String(k) = &arr[i] {
-                                if k == n {
-                                    return Ok(Some(arr[i+1].clone()));
-                                }
-                            }
-                            i += 2;
-                        }
+        }
+        "requests_cookie_jar_new" => {
+            if !args.is_empty() {
+                return Err("requests_cookie_jar_new() takes no arguments".to_string());
+            }
+            Ok(Value::Array(vec![]))
+        }
+        "requests_cookie_jar_add" => {
+            if args.len() != 2 {
+                return Err("requests_cookie_jar_add() takes exactly 2 arguments".to_string());
+            }
+            let jar = eval_expr(&args[0], env, defs)?;
+            let cookie = eval_expr(&args[1], env, defs)?;
+            match (jar, cookie) {
+                (Value::Array(mut arr), Value::String(c)) => {
+                    arr.push(Value::String(c));
+                    Ok(Value::Array(arr))
+                }
+                _ => Err("requests_cookie_jar_add() expects (Array, str)".to_string()),
+            }
+        }
+        "requests_cookie_parse" => {
+            if args.len() != 1 {
+                return Err("requests_cookie_parse() takes exactly 1 argument".to_string());
+            }
+            let cookie_str = eval_expr(&args[0], env, defs)?;
+            match cookie_str {
+                Value::String(s) => Ok(Value::String(s)),
+                _ => Err("requests_cookie_parse() expects str".to_string()),
+            }
+        }
+        "requests_response_copy_to" => {
+            if args.len() != 2 {
+                return Err("requests_response_copy_to() takes exactly 2 arguments".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            let path = eval_expr(&args[1], env, defs)?;
+            match (resp, path) {
+                (Value::Struct { fields, .. }, Value::String(p)) => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    match std::fs::write(&p, &body) {
+                        Ok(()) => Ok(Value::Int(body.len() as i64)),
+                        Err(_e) => Ok(Value::Int(-1)),
+                    }
+                }
+                _ => Err("requests_response_copy_to() expects (Response, str)".to_string()),
+            }
+        }
+        "requests_response_chunks" => {
+            if args.len() != 2 {
+                return Err("requests_response_chunks() takes exactly 2 arguments".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            let chunk_size = eval_expr(&args[1], env, defs)?;
+            match (resp, chunk_size) {
+                (Value::Struct { fields, .. }, Value::Int(size)) => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut chunks = Vec::new();
+                    let bytes = body.as_bytes();
+                    let mut pos = 0;
+                    while pos < bytes.len() {
+                        let end = std::cmp::min(pos + size as usize, bytes.len());
+                        let chunk = &bytes[pos..end];
+                        chunks.push(Value::Array(
+                            chunk.iter().map(|b| Value::Int(*b as i64)).collect(),
+                        ));
+                        pos = end;
+                    }
+                    Ok(Value::Option(Some(Box::new(Value::Array(chunks)))))
+                }
+                _ => Err("requests_response_chunks() expects (Response, int)".to_string()),
+            }
+        }
+        "requests_response_stream" => {
+            if args.len() != 1 {
+                return Err("requests_response_stream() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let body = fields
+                        .iter()
+                        .find(|(k, _)| k == "body")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut stream_fields = Vec::new();
+                    stream_fields.push(("data".to_string(), Value::String(body)));
+                    stream_fields.push(("pos".to_string(), Value::Int(0)));
+                    Ok(Value::Struct {
+                        name: "Stream".to_string(),
+                        fields: stream_fields,
+                    })
+                }
+                _ => Err("requests_response_stream() expects Response struct".to_string()),
+            }
+        }
+        "requests_stream_read" => {
+            if args.len() != 2 {
+                return Err("requests_stream_read() takes exactly 2 arguments".to_string());
+            }
+            let stream = eval_expr(&args[0], env, defs)?;
+            let size = eval_expr(&args[1], env, defs)?;
+            match (stream, size) {
+                (Value::Struct { mut fields, name }, Value::Int(s)) => {
+                    let data = fields
+                        .iter()
+                        .find(|(k, _)| k == "data")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let pos = fields
+                        .iter()
+                        .find(|(k, _)| k == "pos")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i as usize),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    if pos >= data.len() {
                         Ok(Value::Option(None))
+                    } else {
+                        let end = std::cmp::min(pos + s as usize, data.len());
+                        let chunk = data[pos..end].to_string();
+                        // Update pos
+                        if let Some(p) = fields.iter_mut().find(|(k, _)| k == "pos") {
+                            p.1 = Value::Int(end as i64);
+                        }
+                        Ok(Value::Option(Some(Box::new(Value::String(chunk)))))
                     }
-                    _ => Ok(Value::Option(None)),
+                }
+                _ => Err("requests_stream_read() expects (Stream, int)".to_string()),
+            }
+        }
+        "requests_stream_has_more" => {
+            if args.len() != 1 {
+                return Err("requests_stream_has_more() takes exactly 1 argument".to_string());
+            }
+            let stream = eval_expr(&args[0], env, defs)?;
+            match stream {
+                Value::Struct { fields, .. } => {
+                    let data_len = fields
+                        .iter()
+                        .find(|(k, _)| k == "data")
+                        .and_then(|(_, v)| match v {
+                            Value::String(s) => Some(s.len()),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    let pos = fields
+                        .iter()
+                        .find(|(k, _)| k == "pos")
+                        .and_then(|(_, v)| match v {
+                            Value::Int(i) => Some(*i as usize),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    Ok(Value::Bool(pos < data_len))
+                }
+                _ => Err("requests_stream_has_more() expects Stream".to_string()),
+            }
+        }
+        "requests_client_free"
+        | "requests_request_builder_free"
+        | "requests_response_free"
+        | "requests_header_map_free"
+        | "requests_multipart_free"
+        | "requests_tls_config_free"
+        | "requests_cookie_jar_free"
+        | "requests_stream_free" => {
+            if args.len() != 1 {
+                return Err(format!("{}() takes exactly 1 argument", func));
+            }
+            let _ = eval_expr(&args[0], env, defs)?;
+            Ok(Value::Option(None))
+        }
+        "requests_session_new" => {
+            if !args.is_empty() {
+                return Err("requests_session_new() takes no arguments".to_string());
+            }
+            let mut fields = Vec::new();
+            fields.push(("type".to_string(), Value::String("Session".to_string())));
+            fields.push(("timeout".to_string(), Value::Int(30)));
+            fields.push(("redirect_limit".to_string(), Value::Int(10)));
+            fields.push(("verify".to_string(), Value::Bool(true)));
+            fields.push(("headers".to_string(), Value::Map(HashMap::new())));
+            fields.push(("cookies".to_string(), Value::Array(vec![])));
+            Ok(Value::Struct {
+                name: "Session".to_string(),
+                fields,
+            })
+        }
+        "requests_session_request" => {
+            if args.len() != 3 {
+                return Err("requests_session_request() takes exactly 3 arguments".to_string());
+            }
+            let session = eval_expr(&args[0], env, defs)?;
+            let method = eval_expr(&args[1], env, defs)?;
+            let url = eval_expr(&args[2], env, defs)?;
+            let method_str = match method {
+                Value::String(s) => s,
+                _ => return Err("requests_session_request() expects string method".to_string()),
+            };
+            let url_str = match url {
+                Value::String(s) => s,
+                _ => return Err("requests_session_request() expects string url".to_string()),
+            };
+            let mut headers = HashMap::new();
+            let mut timeout = 30i64;
+            let mut verify = true;
+            if let Value::Struct { fields, .. } = &session {
+                for (k, v) in fields {
+                    if k == "timeout" {
+                        if let Value::Int(t) = v {
+                            timeout = *t;
+                        }
+                    }
+                    if k == "verify" {
+                        if let Value::Bool(b) = v {
+                            verify = *b;
+                        }
+                    }
+                    if k == "headers" {
+                        if let Value::Map(m) = v {
+                            headers = m.clone();
+                        }
+                    }
                 }
             }
-            // Session setters (interpreter mode)
-            "requests_session_set_default_headers" => {
-                if args.len() != 2 { return Err("requests_session_set_default_headers() takes exactly 2 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let hdrs = eval_expr(&args[1], env, defs)?;
-                match (session, hdrs) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        // Merge headers into session
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "default_headers") {
-                            if let Value::Map(mut m) = fields[pos].1.clone() {
-                                let mut i = 0;
-                                while i + 1 < arr.len() {
-                                    if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
-                                        m.insert(Value::String(k.clone()), Value::String(v.clone()));
-                                    }
-                                    i += 2;
-                                }
-                                fields[pos].1 = Value::Map(m);
-                            }
-                        } else {
-                            let mut m = HashMap::new();
+            let mut rb_fields = Vec::new();
+            rb_fields.push(("method".to_string(), Value::String(method_str)));
+            rb_fields.push(("url".to_string(), Value::String(url_str)));
+            rb_fields.push(("headers".to_string(), Value::Map(headers)));
+            rb_fields.push(("body".to_string(), Value::Option(None)));
+            rb_fields.push(("timeout".to_string(), Value::Int(timeout)));
+            rb_fields.push(("verify".to_string(), Value::Bool(verify)));
+            rb_fields.push(("params".to_string(), Value::Array(vec![])));
+            Ok(Value::Struct {
+                name: "RequestBuilder".to_string(),
+                fields: rb_fields,
+            })
+        }
+        "requests_session_free" => {
+            if args.len() != 1 {
+                return Err("requests_session_free() takes exactly 1 argument".to_string());
+            }
+            let _ = eval_expr(&args[0], env, defs)?;
+            Ok(Value::Option(None))
+        }
+        "requests_request_builder_set_headers" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_set_headers() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let hdrs = eval_expr(&args[1], env, defs)?;
+            match (builder, hdrs) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "headers") {
+                        if let Value::Map(mut m) = fields[pos].1.clone() {
                             let mut i = 0;
                             while i + 1 < arr.len() {
-                                if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i+1]) {
+                                if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i + 1])
+                                {
                                     m.insert(Value::String(k.clone()), Value::String(v.clone()));
                                 }
                                 i += 2;
                             }
-                            fields.push(("default_headers".to_string(), Value::Map(m)));
+                            fields[pos].1 = Value::Map(m);
                         }
-                        Ok(Value::Struct { name, fields })
                     }
-                    _ => Err("requests_session_set_default_headers() expects (Session, list)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_request_builder_set_headers() expects (RequestBuilder, list)"
+                        .to_string(),
+                ),
             }
-            "requests_session_set_default_params" => {
-                if args.len() != 2 { return Err("requests_session_set_default_params() takes exactly 2 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let params = eval_expr(&args[1], env, defs)?;
-                match (session, params) {
-                    (Value::Struct { mut fields, name }, Value::Array(arr)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "default_params") {
-                            fields[pos].1 = Value::Array(arr);
-                        } else {
-                            fields.push(("default_params".to_string(), Value::Array(arr)));
+        }
+        "requests_request_builder_verify" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_request_builder_verify() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let builder = eval_expr(&args[0], env, defs)?;
+            let verify = eval_expr(&args[1], env, defs)?;
+            match (builder, verify) {
+                (Value::Struct { mut fields, name }, Value::Bool(v)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "verify") {
+                        fields[pos].1 = Value::Bool(v);
+                    } else {
+                        fields.push(("verify".to_string(), Value::Bool(v)));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(
+                    "requests_request_builder_verify() expects (RequestBuilder, bool)".to_string(),
+                ),
+            }
+        }
+        "requests_response_headers_list" => {
+            if args.len() != 1 {
+                return Err("requests_response_headers_list() takes exactly 1 argument".to_string());
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let headers = fields
+                        .iter()
+                        .find(|(k, _)| k == "headers")
+                        .and_then(|(_, v)| match v {
+                            Value::Map(m) => Some(m.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut list = Vec::new();
+                    for (k, v) in &headers {
+                        list.push(k.clone());
+                        list.push(v.clone());
+                    }
+                    Ok(Value::Array(list))
+                }
+                _ => Err("requests_response_headers_list() expects Response struct".to_string()),
+            }
+        }
+        // Cookie jar operations (interpreter mode)
+        "requests_cookie_jar_add_parsed" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_cookie_jar_add_parsed() takes exactly 2 arguments".to_string()
+                );
+            }
+            let jar = eval_expr(&args[0], env, defs)?;
+            let cookie = eval_expr(&args[1], env, defs)?;
+            match (jar, cookie) {
+                (Value::Array(mut arr), c) => {
+                    arr.push(c);
+                    Ok(Value::Array(arr))
+                }
+                _ => Err("requests_cookie_jar_add_parsed() expects (Array, value)".to_string()),
+            }
+        }
+        "requests_cookie_jar_update_from_response" => {
+            if args.len() != 3 {
+                return Err(
+                    "requests_cookie_jar_update_from_response() takes exactly 3 arguments"
+                        .to_string(),
+                );
+            }
+            let _jar = eval_expr(&args[0], env, defs)?;
+            let _resp_headers = eval_expr(&args[1], env, defs)?;
+            let _url = eval_expr(&args[2], env, defs)?;
+            // In interpreter mode, cookie handling is done at the Lime level
+            Ok(Value::Option(None))
+        }
+        "requests_cookie_jar_get_cookie_header" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_cookie_jar_get_cookie_header() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let jar = eval_expr(&args[0], env, defs)?;
+            let _url = eval_expr(&args[1], env, defs)?;
+            match &jar {
+                Value::Array(arr) => {
+                    // Build cookie header from array of alternating name, value strings
+                    let mut parts = Vec::new();
+                    let mut i = 0;
+                    while i + 1 < arr.len() {
+                        if let (Value::String(name), Value::String(val)) = (&arr[i], &arr[i + 1]) {
+                            parts.push(format!("{}={}", name, val));
                         }
-                        Ok(Value::Struct { name, fields })
+                        i += 2;
                     }
-                    _ => Err("requests_session_set_default_params() expects (Session, list)".to_string()),
+                    if parts.is_empty() {
+                        Ok(Value::Option(None))
+                    } else {
+                        Ok(Value::Option(Some(Box::new(Value::String(
+                            parts.join("; "),
+                        )))))
+                    }
                 }
+                _ => Ok(Value::Option(None)),
             }
-            "requests_session_set_timeout" => {
-                if args.len() != 2 { return Err("requests_session_set_timeout() takes exactly 2 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let timeout = eval_expr(&args[1], env, defs)?;
-                match (session, timeout) {
-                    (Value::Struct { mut fields, name }, Value::Int(t)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "timeout") {
-                            fields[pos].1 = Value::Int(t);
-                        } else {
-                            fields.push(("timeout".to_string(), Value::Int(t)));
+        }
+        "requests_cookie_jar_get_all" => {
+            if args.len() != 1 {
+                return Err("requests_cookie_jar_get_all() takes exactly 1 argument".to_string());
+            }
+            let jar = eval_expr(&args[0], env, defs)?;
+            match jar {
+                Value::Array(arr) => Ok(Value::Array(arr)),
+                _ => Ok(Value::Array(vec![])),
+            }
+        }
+        "requests_cookie_jar_get" => {
+            if args.len() != 2 {
+                return Err("requests_cookie_jar_get() takes exactly 2 arguments".to_string());
+            }
+            let jar = eval_expr(&args[0], env, defs)?;
+            let name = eval_expr(&args[1], env, defs)?;
+            match (&jar, &name) {
+                (Value::Array(arr), Value::String(n)) => {
+                    let mut i = 0;
+                    while i + 1 < arr.len() {
+                        if let Value::String(k) = &arr[i] {
+                            if k == n {
+                                return Ok(Some(arr[i + 1].clone()));
+                            }
                         }
-                        Ok(Value::Struct { name, fields })
+                        i += 2;
                     }
-                    _ => Err("requests_session_set_timeout() expects (Session, int)".to_string()),
+                    Ok(Value::Option(None))
                 }
+                _ => Ok(Value::Option(None)),
             }
-            "requests_session_set_verify" => {
-                if args.len() != 2 { return Err("requests_session_set_verify() takes exactly 2 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let verify = eval_expr(&args[1], env, defs)?;
-                match (session, verify) {
-                    (Value::Struct { mut fields, name }, Value::Bool(v)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "verify") {
-                            fields[pos].1 = Value::Bool(v);
-                        } else {
-                            fields.push(("verify".to_string(), Value::Bool(v)));
+        }
+        // Session setters (interpreter mode)
+        "requests_session_set_default_headers" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_session_set_default_headers() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let session = eval_expr(&args[0], env, defs)?;
+            let hdrs = eval_expr(&args[1], env, defs)?;
+            match (session, hdrs) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    // Merge headers into session
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "default_headers") {
+                        if let Value::Map(mut m) = fields[pos].1.clone() {
+                            let mut i = 0;
+                            while i + 1 < arr.len() {
+                                if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i + 1])
+                                {
+                                    m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                                }
+                                i += 2;
+                            }
+                            fields[pos].1 = Value::Map(m);
                         }
-                        Ok(Value::Struct { name, fields })
-                    }
-                    _ => Err("requests_session_set_verify() expects (Session, bool)".to_string()),
-                }
-            }
-            "requests_session_set_redirect_limit" => {
-                if args.len() != 2 { return Err("requests_session_set_redirect_limit() takes exactly 2 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let limit = eval_expr(&args[1], env, defs)?;
-                match (session, limit) {
-                    (Value::Struct { mut fields, name }, Value::Int(l)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "redirect_limit") {
-                            fields[pos].1 = Value::Int(l);
-                        } else {
-                            fields.push(("redirect_limit".to_string(), Value::Int(l)));
+                    } else {
+                        let mut m = HashMap::new();
+                        let mut i = 0;
+                        while i + 1 < arr.len() {
+                            if let (Value::String(k), Value::String(v)) = (&arr[i], &arr[i + 1]) {
+                                m.insert(Value::String(k.clone()), Value::String(v.clone()));
+                            }
+                            i += 2;
                         }
-                        Ok(Value::Struct { name, fields })
+                        fields.push(("default_headers".to_string(), Value::Map(m)));
                     }
-                    _ => Err("requests_session_set_redirect_limit() expects (Session, int)".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err(
+                    "requests_session_set_default_headers() expects (Session, list)".to_string(),
+                ),
             }
-            "requests_session_set_disable_redirects" => {
-                if args.len() != 2 { return Err("requests_session_set_disable_redirects() takes exactly 2 arguments".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                let disable = eval_expr(&args[1], env, defs)?;
-                match (session, disable) {
-                    (Value::Struct { mut fields, name }, Value::Bool(d)) => {
-                        if let Some(pos) = fields.iter().position(|(f, _)| f == "disable_redirects") {
-                            fields[pos].1 = Value::Bool(d);
-                        } else {
-                            fields.push(("disable_redirects".to_string(), Value::Bool(d)));
-                        }
-                        Ok(Value::Struct { name, fields })
+        }
+        "requests_session_set_default_params" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_session_set_default_params() takes exactly 2 arguments".to_string(),
+                );
+            }
+            let session = eval_expr(&args[0], env, defs)?;
+            let params = eval_expr(&args[1], env, defs)?;
+            match (session, params) {
+                (Value::Struct { mut fields, name }, Value::Array(arr)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "default_params") {
+                        fields[pos].1 = Value::Array(arr);
+                    } else {
+                        fields.push(("default_params".to_string(), Value::Array(arr)));
                     }
-                    _ => Err("requests_session_set_disable_redirects() expects (Session, bool)".to_string()),
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => {
+                    Err("requests_session_set_default_params() expects (Session, list)".to_string())
                 }
             }
-            "requests_session_cookies" => {
-                if args.len() != 1 { return Err("requests_session_cookies() takes exactly 1 argument".to_string()); }
-                let session = eval_expr(&args[0], env, defs)?;
-                match &session {
-                    Value::Struct { fields, .. } => {
-                        let cookies = fields.iter().find(|(k, _)| k == "cookies")
-                            .and_then(|(_, v)| match v { Value::Array(a) => Some(a.clone()), _ => None })
-                            .unwrap_or_default();
-                        Ok(Value::Array(cookies))
+        }
+        "requests_session_set_timeout" => {
+            if args.len() != 2 {
+                return Err("requests_session_set_timeout() takes exactly 2 arguments".to_string());
+            }
+            let session = eval_expr(&args[0], env, defs)?;
+            let timeout = eval_expr(&args[1], env, defs)?;
+            match (session, timeout) {
+                (Value::Struct { mut fields, name }, Value::Int(t)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "timeout") {
+                        fields[pos].1 = Value::Int(t);
+                    } else {
+                        fields.push(("timeout".to_string(), Value::Int(t)));
                     }
-                    _ => Err("requests_session_cookies() expects Session struct".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err("requests_session_set_timeout() expects (Session, int)".to_string()),
             }
-            // Redirect history (interpreter mode)
-            "requests_redirect_history_new" => {
-                if !args.is_empty() { return Err("requests_redirect_history_new() takes no arguments".to_string()); }
-                Ok(Value::Array(vec![]))
+        }
+        "requests_session_set_verify" => {
+            if args.len() != 2 {
+                return Err("requests_session_set_verify() takes exactly 2 arguments".to_string());
             }
-            "requests_redirect_history_add" => {
-                if args.len() != 4 { return Err("requests_redirect_history_add() takes exactly 4 arguments".to_string()); }
-                let history = eval_expr(&args[0], env, defs)?;
-                let status_code = eval_expr(&args[1], env, defs)?;
-                let url = eval_expr(&args[2], env, defs)?;
-                let method = eval_expr(&args[3], env, defs)?;
-                match history {
-                    Value::Array(mut arr) => {
-                        arr.push(Value::Array(vec![status_code, url, method]));
-                        Ok(Value::Array(arr))
+            let session = eval_expr(&args[0], env, defs)?;
+            let verify = eval_expr(&args[1], env, defs)?;
+            match (session, verify) {
+                (Value::Struct { mut fields, name }, Value::Bool(v)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "verify") {
+                        fields[pos].1 = Value::Bool(v);
+                    } else {
+                        fields.push(("verify".to_string(), Value::Bool(v)));
                     }
-                    _ => Err("requests_redirect_history_add() expects Array as first argument".to_string()),
+                    Ok(Value::Struct { name, fields })
                 }
+                _ => Err("requests_session_set_verify() expects (Session, bool)".to_string()),
             }
-            "requests_redirect_history_list" => {
-                if args.len() != 1 { return Err("requests_redirect_history_list() takes exactly 1 argument".to_string()); }
-                let history = eval_expr(&args[0], env, defs)?;
-                match history {
-                    Value::Array(arr) => Ok(Value::Array(arr)),
-                    _ => Ok(Value::Array(vec![])),
-                }
+        }
+        "requests_session_set_redirect_limit" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_session_set_redirect_limit() takes exactly 2 arguments".to_string(),
+                );
             }
-            "requests_redirect_history_free" => {
-                if args.len() != 1 { return Err("requests_redirect_history_free() takes exactly 1 argument".to_string()); }
-                let _ = eval_expr(&args[0], env, defs)?;
-                Ok(Value::Option(None))
-            }
-            "requests_response_redirect_history" => {
-                if args.len() != 1 { return Err("requests_response_redirect_history() takes exactly 1 argument".to_string()); }
-                let resp = eval_expr(&args[0], env, defs)?;
-                match &resp {
-                    Value::Struct { fields, .. } => {
-                        let history = fields.iter().find(|(k, _)| k == "redirect_history")
-                            .and_then(|(_, v)| match v { Value::Array(a) => Some(a.clone()), _ => None })
-                            .unwrap_or_default();
-                        Ok(Value::Array(history))
+            let session = eval_expr(&args[0], env, defs)?;
+            let limit = eval_expr(&args[1], env, defs)?;
+            match (session, limit) {
+                (Value::Struct { mut fields, name }, Value::Int(l)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "redirect_limit") {
+                        fields[pos].1 = Value::Int(l);
+                    } else {
+                        fields.push(("redirect_limit".to_string(), Value::Int(l)));
                     }
-                    _ => Err("requests_response_redirect_history() expects Response struct".to_string()),
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => {
+                    Err("requests_session_set_redirect_limit() expects (Session, int)".to_string())
                 }
             }
-            _ => return Ok(None),
+        }
+        "requests_session_set_disable_redirects" => {
+            if args.len() != 2 {
+                return Err(
+                    "requests_session_set_disable_redirects() takes exactly 2 arguments"
+                        .to_string(),
+                );
+            }
+            let session = eval_expr(&args[0], env, defs)?;
+            let disable = eval_expr(&args[1], env, defs)?;
+            match (session, disable) {
+                (Value::Struct { mut fields, name }, Value::Bool(d)) => {
+                    if let Some(pos) = fields.iter().position(|(f, _)| f == "disable_redirects") {
+                        fields[pos].1 = Value::Bool(d);
+                    } else {
+                        fields.push(("disable_redirects".to_string(), Value::Bool(d)));
+                    }
+                    Ok(Value::Struct { name, fields })
+                }
+                _ => Err(
+                    "requests_session_set_disable_redirects() expects (Session, bool)".to_string(),
+                ),
+            }
+        }
+        "requests_session_cookies" => {
+            if args.len() != 1 {
+                return Err("requests_session_cookies() takes exactly 1 argument".to_string());
+            }
+            let session = eval_expr(&args[0], env, defs)?;
+            match &session {
+                Value::Struct { fields, .. } => {
+                    let cookies = fields
+                        .iter()
+                        .find(|(k, _)| k == "cookies")
+                        .and_then(|(_, v)| match v {
+                            Value::Array(a) => Some(a.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Ok(Value::Array(cookies))
+                }
+                _ => Err("requests_session_cookies() expects Session struct".to_string()),
+            }
+        }
+        // Redirect history (interpreter mode)
+        "requests_redirect_history_new" => {
+            if !args.is_empty() {
+                return Err("requests_redirect_history_new() takes no arguments".to_string());
+            }
+            Ok(Value::Array(vec![]))
+        }
+        "requests_redirect_history_add" => {
+            if args.len() != 4 {
+                return Err("requests_redirect_history_add() takes exactly 4 arguments".to_string());
+            }
+            let history = eval_expr(&args[0], env, defs)?;
+            let status_code = eval_expr(&args[1], env, defs)?;
+            let url = eval_expr(&args[2], env, defs)?;
+            let method = eval_expr(&args[3], env, defs)?;
+            match history {
+                Value::Array(mut arr) => {
+                    arr.push(Value::Array(vec![status_code, url, method]));
+                    Ok(Value::Array(arr))
+                }
+                _ => Err(
+                    "requests_redirect_history_add() expects Array as first argument".to_string(),
+                ),
+            }
+        }
+        "requests_redirect_history_list" => {
+            if args.len() != 1 {
+                return Err("requests_redirect_history_list() takes exactly 1 argument".to_string());
+            }
+            let history = eval_expr(&args[0], env, defs)?;
+            match history {
+                Value::Array(arr) => Ok(Value::Array(arr)),
+                _ => Ok(Value::Array(vec![])),
+            }
+        }
+        "requests_redirect_history_free" => {
+            if args.len() != 1 {
+                return Err("requests_redirect_history_free() takes exactly 1 argument".to_string());
+            }
+            let _ = eval_expr(&args[0], env, defs)?;
+            Ok(Value::Option(None))
+        }
+        "requests_response_redirect_history" => {
+            if args.len() != 1 {
+                return Err(
+                    "requests_response_redirect_history() takes exactly 1 argument".to_string(),
+                );
+            }
+            let resp = eval_expr(&args[0], env, defs)?;
+            match &resp {
+                Value::Struct { fields, .. } => {
+                    let history = fields
+                        .iter()
+                        .find(|(k, _)| k == "redirect_history")
+                        .and_then(|(_, v)| match v {
+                            Value::Array(a) => Some(a.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    Ok(Value::Array(history))
+                }
+                _ => {
+                    Err("requests_response_redirect_history() expects Response struct".to_string())
+                }
+            }
+        }
+        _ => return Ok(None),
     };
     result.map(Some)
 }
@@ -13626,11 +16225,30 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 Ok(v.clone())
             } else if defs.functions.contains_key(name) {
                 Ok(Value::FuncRef(name.clone()))
+            } else if defs.state_variants.contains_key(name) {
+                // Iteration 33 P2: a BARE payload-less enum variant (`Red`) is
+                // itself a value — the zero-argument constructor applied.
+                // Payload variants still require their arguments.
+                match defs.variant_fields.get(name) {
+                    Some(fields) if fields.is_empty() => Ok(Value::State {
+                        name: name.clone(),
+                        values: Vec::new(),
+                    }),
+                    _ => Err(format!(
+                        "Undefined variable: {} (enum variant '{}' has payload fields — construct it with arguments)",
+                        name, name
+                    )),
+                }
             } else {
                 Err(format!("Undefined variable: {}", name))
             }
         }
-        Expr::BinOp { left, op, right, resolved_operator } => {
+        Expr::BinOp {
+            left,
+            op,
+            right,
+            resolved_operator,
+        } => {
             let l = eval_expr(left, env, defs)?;
             let r = eval_expr(right, env, defs)?;
             // 鬮ｫ證ｦ・ｽ・｣髮手ｶ｣・ｽ・ｺ髮九ｇ迴ｾ遶擾ｽｩ髮句調蝮ｩ繝ｻ・ｮ隲､諛ｶ・ｽ・ｭ隰ｦ・ｰ繝ｻ・ｿ繝ｻ・ｽE驍ｵ・ｺ繝ｻ・ｿ驛｢・ｧ陞ｳ螟ｲ・ｽ・ｦ闕ｵ譏ｶﾂ・ｻ髯橸ｽｳ雋・ｽｯ繝ｻ・｡鬲・ｼ夲ｽｽ・ｼ郢晢ｽｻuntime 驍ｵ・ｺ繝ｻ・ｧ驍ｵ・ｺ繝ｻ・ｮ髯懷雀邇・・・､隲帙・・ｽ・ｴ繝ｻ・｢驍ｵ・ｺ繝ｻ・ｯ鬮ｯ・ｦ陟暮ｯ会ｽｽ蜀暦ｽｸ・ｺ繝ｻ・ｪ驍ｵ・ｺ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE
@@ -13713,23 +16331,35 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                             };
                             Ok(result)
                         }
-                        (Value::String(a), Value::String(b)) => {
-                            match op.as_str() {
-                                "+" => Ok(Value::String(format!("{}{}", a, b))),
-                                "==" => Ok(Value::Bool(a == b)),
-                                "!=" => Ok(Value::Bool(a != b)),
-                                _ => Err(format!("Invalid operation on strings: {}", op)),
-                            }
-                        }
-                        (Value::Bool(a), Value::Bool(b)) => {
-                            match op.as_str() {
-                                "and" => Ok(Value::Bool(*a && *b)),
-                                "or" => Ok(Value::Bool(*a || *b)),
-                                "==" => Ok(Value::Bool(a == b)),
-                                "!=" => Ok(Value::Bool(a != b)),
-                                _ => Err(format!("Invalid operation on bools: {}", op)),
-                            }
-                        }
+                        (Value::String(a), Value::String(b)) => match op.as_str() {
+                            "+" => Ok(Value::String(format!("{}{}", a, b))),
+                            "==" => Ok(Value::Bool(a == b)),
+                            "!=" => Ok(Value::Bool(a != b)),
+                            _ => Err(format!("Invalid operation on strings: {}", op)),
+                        },
+                        (Value::Bool(a), Value::Bool(b)) => match op.as_str() {
+                            "and" => Ok(Value::Bool(*a && *b)),
+                            "or" => Ok(Value::Bool(*a || *b)),
+                            "==" => Ok(Value::Bool(a == b)),
+                            "!=" => Ok(Value::Bool(a != b)),
+                            _ => Err(format!("Invalid operation on bools: {}", op)),
+                        },
+                        // Iteration 34 PH5: enum equality — compare by
+                        // variant name + payload values.
+                        (
+                            Value::State {
+                                name: an,
+                                values: av,
+                            },
+                            Value::State {
+                                name: bn,
+                                values: bv,
+                            },
+                        ) => match op.as_str() {
+                            "==" => Ok(Value::Bool(an == bn && av == bv)),
+                            "!=" => Ok(Value::Bool(an != bn || av != bv)),
+                            _ => Err(format!("Invalid operation on enum values: {}", op)),
+                        },
                         _ => Err("Type mismatch in binary operation".to_string()),
                     }
                 }
@@ -13844,1987 +16474,2348 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         _ => Err("float() cannot convert this value".to_string()),
                     }
                 }
-        "str" => {
-            if args.len() != 1 {
-                return Err("str() takes exactly 1 argument".to_string());
-            }
-            let val = eval_expr(&args[0], env, defs)?;
-            Ok(Value::String(val.to_string()))
-        }
-        // Option 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｳ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓溘・荳ｻ・ｸ・ｷ繝ｻ・ｹ繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ: Some(x) -> Option(Some(x)), None -> Option(None)
-        "Some" => {
-            if args.len() != 1 {
-                return Err("Some() takes exactly 1 argument".to_string());
-            }
-            let val = eval_expr(&args[0], env, defs)?;
-            Ok(Value::Option(Some(Box::new(val))))
-        }
-        "None" => {
-            if args.len() != 0 {
-                return Err("None() takes no arguments".to_string());
-            }
-            Ok(Value::Option(None))
-        }
-        // ===== Option builtins =====
-        "option_some" => {
-            if args.len() != 1 { return Err("option_some() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            Ok(Value::Option(Some(Box::new(val))))
-        }
-        "option_none" => {
-            if !args.is_empty() { return Err("option_none() takes no arguments".to_string()); }
-            Ok(Value::Option(None))
-        }
-        "option_is_some" => {
-            if args.len() != 1 { return Err("option_is_some() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            match val {
-                Value::Option(Some(_)) => Ok(Value::Bool(true)),
-                Value::Option(None) => Ok(Value::Bool(false)),
-                _ => Err("option_is_some() expects an Option value".to_string()),
-            }
-        }
-        "option_is_none" => {
-            if args.len() != 1 { return Err("option_is_none() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            match val {
-                Value::Option(None) => Ok(Value::Bool(true)),
-                Value::Option(Some(_)) => Ok(Value::Bool(false)),
-                _ => Err("option_is_none() expects an Option value".to_string()),
-            }
-        }
-        "option_extract" => {
-            if args.len() != 1 { return Err("option_extract() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            match val {
-                Value::Option(Some(inner)) => Ok(*inner),
-                Value::Option(None) => Err("option_extract() called on None".to_string()),
-                _ => Err("option_extract() expects an Option value".to_string()),
-            }
-        }
-        "option_extract_or" => {
-            if args.len() != 2 { return Err("option_extract_or() takes exactly 2 arguments".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let default = eval_expr(&args[1], env, defs)?;
-            match val {
-                Value::Option(Some(inner)) => Ok(*inner),
-                Value::Option(None) => Ok(default),
-                _ => Err("option_extract_or() expects an Option value".to_string()),
-            }
-        }
-        "option_map" => {
-            if args.len() != 2 { return Err("option_map() takes exactly 2 arguments".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let fn_val = eval_expr(&args[1], env, defs)?;
-            match val {
-                Value::Option(Some(inner)) => {
-                    match fn_val {
-                        Value::FuncRef(fname) => {
-                            let call_args = vec![*inner];
-                            crate::call_function(&fname, call_args, defs)
-                        }
-                        _ => Err("option_map() expects a function as second argument".to_string()),
+                "str" => {
+                    if args.len() != 1 {
+                        return Err("str() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::String(val.to_string()))
+                }
+                // Option 鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｽ繝ｻ・ｳ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴主・讓溘・荳ｻ・ｸ・ｷ繝ｻ・ｹ繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ: Some(x) -> Option(Some(x)), None -> Option(None)
+                "Some" => {
+                    if args.len() != 1 {
+                        return Err("Some() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Option(Some(Box::new(val))))
+                }
+                "None" => {
+                    if args.len() != 0 {
+                        return Err("None() takes no arguments".to_string());
+                    }
+                    Ok(Value::Option(None))
+                }
+                // ===== Option builtins =====
+                "option_some" => {
+                    if args.len() != 1 {
+                        return Err("option_some() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Option(Some(Box::new(val))))
+                }
+                "option_none" => {
+                    if !args.is_empty() {
+                        return Err("option_none() takes no arguments".to_string());
+                    }
+                    Ok(Value::Option(None))
+                }
+                "option_is_some" => {
+                    if args.len() != 1 {
+                        return Err("option_is_some() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    match val {
+                        Value::Option(Some(_)) => Ok(Value::Bool(true)),
+                        Value::Option(None) => Ok(Value::Bool(false)),
+                        _ => Err("option_is_some() expects an Option value".to_string()),
                     }
                 }
-                Value::Option(None) => Ok(Value::Option(None)),
-                _ => Err("option_map() expects an Option value".to_string()),
-            }
-        }
-        "option_and" => {
-            if args.len() != 2 { return Err("option_and() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            match a {
-                Value::Option(Some(_)) => eval_expr(&args[1], env, defs),
-                Value::Option(None) => Ok(Value::Option(None)),
-                _ => Err("option_and() expects an Option value as first argument".to_string()),
-            }
-        }
-        "option_or" => {
-            if args.len() != 2 { return Err("option_or() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            match a {
-                v @ Value::Option(Some(_)) => Ok(v),
-                Value::Option(None) => eval_expr(&args[1], env, defs),
-                _ => Err("option_or() expects an Option value as first argument".to_string()),
-            }
-        }
-        "option_equals" => {
-            if args.len() != 2 { return Err("option_equals() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            match (&a, &b) {
-                (Value::Option(None), Value::Option(None)) => Ok(Value::Bool(true)),
-                (Value::Option(Some(_)), Value::Option(None))
-                | (Value::Option(None), Value::Option(Some(_))) => Ok(Value::Bool(false)),
-                (Value::Option(Some(ae)), Value::Option(Some(be))) => {
-                    Ok(Value::Bool(ae.compare(&be) == std::cmp::Ordering::Equal))
+                "option_is_none" => {
+                    if args.len() != 1 {
+                        return Err("option_is_none() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    match val {
+                        Value::Option(None) => Ok(Value::Bool(true)),
+                        Value::Option(Some(_)) => Ok(Value::Bool(false)),
+                        _ => Err("option_is_none() expects an Option value".to_string()),
+                    }
                 }
-                _ => Err("option_equals() expects two Option values".to_string()),
-            }
-        }
-        // ===== Result builtins =====
-        "result_success" => {
-            if args.len() != 1 { return Err("result_success() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            Ok(Value::State { name: "Success".to_string(), values: vec![val] })
-        }
-        "result_error" => {
-            if args.len() != 1 { return Err("result_error() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            Ok(Value::State { name: "Error".to_string(), values: vec![val] })
-        }
-        "result_is_success" => {
-            if args.len() != 1 { return Err("result_is_success() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            match &val {
-                Value::State { name, .. } if name == "Success" => Ok(Value::Bool(true)),
-                Value::State { name, .. } if name == "Error" => Ok(Value::Bool(false)),
-                _ => Err("result_is_success() expects a Result value".to_string()),
-            }
-        }
-        "result_is_error" => {
-            if args.len() != 1 { return Err("result_is_error() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            match &val {
-                Value::State { name, .. } if name == "Error" => Ok(Value::Bool(true)),
-                Value::State { name, .. } if name == "Success" => Ok(Value::Bool(false)),
-                _ => Err("result_is_error() expects a Result value".to_string()),
-            }
-        }
-        "result_extract" => {
-            if args.len() != 1 { return Err("result_extract() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            match val {
-                Value::State { name, values } if name == "Success" => {
-                    Ok(values.into_iter().next().unwrap_or(Value::Bool(false)))
+                "option_extract" => {
+                    if args.len() != 1 {
+                        return Err("option_extract() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    match val {
+                        Value::Option(Some(inner)) => Ok(*inner),
+                        Value::Option(None) => Err("option_extract() called on None".to_string()),
+                        _ => Err("option_extract() expects an Option value".to_string()),
+                    }
                 }
-                Value::State { name, values } if name == "Error" => {
-                    let err_val = values.into_iter().next().unwrap_or(Value::Bool(false));
-                    Err(format!("result_extract() called on Error: {}", err_val.to_string()))
+                "option_extract_or" => {
+                    if args.len() != 2 {
+                        return Err("option_extract_or() takes exactly 2 arguments".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let default = eval_expr(&args[1], env, defs)?;
+                    match val {
+                        Value::Option(Some(inner)) => Ok(*inner),
+                        Value::Option(None) => Ok(default),
+                        _ => Err("option_extract_or() expects an Option value".to_string()),
+                    }
                 }
-                _ => Err("result_extract() expects a Result value".to_string()),
-            }
-        }
-        "result_extract_or" => {
-            if args.len() != 2 { return Err("result_extract_or() takes exactly 2 arguments".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let default = eval_expr(&args[1], env, defs)?;
-            match val {
-                Value::State { name, values } if name == "Success" => {
-                    Ok(values.into_iter().next().unwrap_or(default))
-                }
-                Value::State { name, .. } if name == "Error" => Ok(default),
-                _ => Err("result_extract_or() expects a Result value".to_string()),
-            }
-        }
-        "result_map" => {
-            if args.len() != 2 { return Err("result_map() takes exactly 2 arguments".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let fn_val = eval_expr(&args[1], env, defs)?;
-            match val {
-                Value::State { ref name, .. } if name == "Success" => {
-                    if let Value::State { values, .. } = val {
-                        let inner = values.into_iter().next().unwrap_or(Value::Bool(false));
-                        match fn_val {
-                            Value::FuncRef(fname) => {
-                                let mapped = crate::call_function(&fname, vec![inner], defs)?;
-                                Ok(Value::State { name: "Success".to_string(), values: vec![mapped] })
+                "option_map" => {
+                    if args.len() != 2 {
+                        return Err("option_map() takes exactly 2 arguments".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let fn_val = eval_expr(&args[1], env, defs)?;
+                    match val {
+                        Value::Option(Some(inner)) => {
+                            match fn_val {
+                                Value::FuncRef(fname) => {
+                                    let call_args = vec![*inner];
+                                    crate::call_function(&fname, call_args, defs)
+                                }
+                                _ => Err("option_map() expects a function as second argument"
+                                    .to_string()),
                             }
-                            _ => Err("result_map() expects a function as second argument".to_string()),
                         }
-                    } else {
-                        unreachable!()
+                        Value::Option(None) => Ok(Value::Option(None)),
+                        _ => Err("option_map() expects an Option value".to_string()),
                     }
                 }
-                Value::State { .. } => Ok(val),
-                _ => Err("result_map() expects a Result value".to_string()),
-            }
-        }
-        "result_and" => {
-            if args.len() != 2 { return Err("result_and() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            match &a {
-                Value::State { name, .. } if name == "Success" => eval_expr(&args[1], env, defs),
-                Value::State { name, .. } if name == "Error" => Ok(a),
-                _ => Err("result_and() expects a Result value as first argument".to_string()),
-            }
-        }
-        "result_or" => {
-            if args.len() != 2 { return Err("result_or() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            match &a {
-                Value::State { name, .. } if name == "Success" => Ok(a),
-                Value::State { name, .. } if name == "Error" => eval_expr(&args[1], env, defs),
-                _ => Err("result_or() expects a Result value as first argument".to_string()),
-            }
-        }
-        "result_equals" => {
-            if args.len() != 2 { return Err("result_equals() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            match (&a, &b) {
-                (Value::State { name: na, values: va }, Value::State { name: nb, values: vb }) => {
-                    if na != nb { return Ok(Value::Bool(false)); }
-                    if va.len() != vb.len() { return Ok(Value::Bool(false)); }
-                    for (ae, be) in va.iter().zip(vb.iter()) {
-                        if ae.compare(&be) != std::cmp::Ordering::Equal {
-                            return Ok(Value::Bool(false));
+                "option_and" => {
+                    if args.len() != 2 {
+                        return Err("option_and() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    match a {
+                        Value::Option(Some(_)) => eval_expr(&args[1], env, defs),
+                        Value::Option(None) => Ok(Value::Option(None)),
+                        _ => {
+                            Err("option_and() expects an Option value as first argument"
+                                .to_string())
                         }
                     }
+                }
+                "option_or" => {
+                    if args.len() != 2 {
+                        return Err("option_or() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    match a {
+                        v @ Value::Option(Some(_)) => Ok(v),
+                        Value::Option(None) => eval_expr(&args[1], env, defs),
+                        _ => {
+                            Err("option_or() expects an Option value as first argument".to_string())
+                        }
+                    }
+                }
+                "option_equals" => {
+                    if args.len() != 2 {
+                        return Err("option_equals() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    match (&a, &b) {
+                        (Value::Option(None), Value::Option(None)) => Ok(Value::Bool(true)),
+                        (Value::Option(Some(_)), Value::Option(None))
+                        | (Value::Option(None), Value::Option(Some(_))) => Ok(Value::Bool(false)),
+                        (Value::Option(Some(ae)), Value::Option(Some(be))) => {
+                            Ok(Value::Bool(ae.compare(&be) == std::cmp::Ordering::Equal))
+                        }
+                        _ => Err("option_equals() expects two Option values".to_string()),
+                    }
+                }
+                // ===== Result builtins =====
+                "result_success" => {
+                    if args.len() != 1 {
+                        return Err("result_success() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::State {
+                        name: "Success".to_string(),
+                        values: vec![val],
+                    })
+                }
+                "result_error" => {
+                    if args.len() != 1 {
+                        return Err("result_error() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::State {
+                        name: "Error".to_string(),
+                        values: vec![val],
+                    })
+                }
+                "result_is_success" => {
+                    if args.len() != 1 {
+                        return Err("result_is_success() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    match &val {
+                        Value::State { name, .. } if name == "Success" => Ok(Value::Bool(true)),
+                        Value::State { name, .. } if name == "Error" => Ok(Value::Bool(false)),
+                        _ => Err("result_is_success() expects a Result value".to_string()),
+                    }
+                }
+                "result_is_error" => {
+                    if args.len() != 1 {
+                        return Err("result_is_error() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    match &val {
+                        Value::State { name, .. } if name == "Error" => Ok(Value::Bool(true)),
+                        Value::State { name, .. } if name == "Success" => Ok(Value::Bool(false)),
+                        _ => Err("result_is_error() expects a Result value".to_string()),
+                    }
+                }
+                "result_extract" => {
+                    if args.len() != 1 {
+                        return Err("result_extract() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    match val {
+                        Value::State { name, values } if name == "Success" => {
+                            Ok(values.into_iter().next().unwrap_or(Value::Bool(false)))
+                        }
+                        Value::State { name, values } if name == "Error" => {
+                            let err_val = values.into_iter().next().unwrap_or(Value::Bool(false));
+                            Err(format!(
+                                "result_extract() called on Error: {}",
+                                err_val.to_string()
+                            ))
+                        }
+                        _ => Err("result_extract() expects a Result value".to_string()),
+                    }
+                }
+                "result_extract_or" => {
+                    if args.len() != 2 {
+                        return Err("result_extract_or() takes exactly 2 arguments".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let default = eval_expr(&args[1], env, defs)?;
+                    match val {
+                        Value::State { name, values } if name == "Success" => {
+                            Ok(values.into_iter().next().unwrap_or(default))
+                        }
+                        Value::State { name, .. } if name == "Error" => Ok(default),
+                        _ => Err("result_extract_or() expects a Result value".to_string()),
+                    }
+                }
+                "result_map" => {
+                    if args.len() != 2 {
+                        return Err("result_map() takes exactly 2 arguments".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let fn_val = eval_expr(&args[1], env, defs)?;
+                    match val {
+                        Value::State { ref name, .. } if name == "Success" => {
+                            if let Value::State { values, .. } = val {
+                                let inner = values.into_iter().next().unwrap_or(Value::Bool(false));
+                                match fn_val {
+                                    Value::FuncRef(fname) => {
+                                        let mapped =
+                                            crate::call_function(&fname, vec![inner], defs)?;
+                                        Ok(Value::State {
+                                            name: "Success".to_string(),
+                                            values: vec![mapped],
+                                        })
+                                    }
+                                    _ => Err("result_map() expects a function as second argument"
+                                        .to_string()),
+                                }
+                            } else {
+                                unreachable!()
+                            }
+                        }
+                        Value::State { .. } => Ok(val),
+                        _ => Err("result_map() expects a Result value".to_string()),
+                    }
+                }
+                "result_and" => {
+                    if args.len() != 2 {
+                        return Err("result_and() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    match &a {
+                        Value::State { name, .. } if name == "Success" => {
+                            eval_expr(&args[1], env, defs)
+                        }
+                        Value::State { name, .. } if name == "Error" => Ok(a),
+                        _ => {
+                            Err("result_and() expects a Result value as first argument".to_string())
+                        }
+                    }
+                }
+                "result_or" => {
+                    if args.len() != 2 {
+                        return Err("result_or() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    match &a {
+                        Value::State { name, .. } if name == "Success" => Ok(a),
+                        Value::State { name, .. } if name == "Error" => {
+                            eval_expr(&args[1], env, defs)
+                        }
+                        _ => {
+                            Err("result_or() expects a Result value as first argument".to_string())
+                        }
+                    }
+                }
+                "result_equals" => {
+                    if args.len() != 2 {
+                        return Err("result_equals() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    match (&a, &b) {
+                        (
+                            Value::State {
+                                name: na,
+                                values: va,
+                            },
+                            Value::State {
+                                name: nb,
+                                values: vb,
+                            },
+                        ) => {
+                            if na != nb {
+                                return Ok(Value::Bool(false));
+                            }
+                            if va.len() != vb.len() {
+                                return Ok(Value::Bool(false));
+                            }
+                            for (ae, be) in va.iter().zip(vb.iter()) {
+                                if ae.compare(&be) != std::cmp::Ordering::Equal {
+                                    return Ok(Value::Bool(false));
+                                }
+                            }
+                            Ok(Value::Bool(true))
+                        }
+                        _ => Err("result_equals() expects two Result values".to_string()),
+                    }
+                }
+                // ===== Path operations (Phase C-1.8) =====
+                // Cross-platform path helpers: always use '/' as separator,
+                // handle both '/' and '\' as separators, treat any path starting
+                // with '/' or 'X:' as absolute. This ensures interpreter, codegen
+                // (C runtime), and tests produce consistent results on all platforms.
+                "path_join" => {
+                    if args.len() != 2 {
+                        return Err("path_join() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    let sa = match a {
+                        Value::String(s) => path_normalize_slashes(&s),
+                        _ => return Err("path_join() expects string arguments".to_string()),
+                    };
+                    let sb = match b {
+                        Value::String(s) => path_normalize_slashes(&s),
+                        _ => return Err("path_join() expects string arguments".to_string()),
+                    };
+                    if path_is_abs_str(&sb) {
+                        return Ok(Value::String(sb));
+                    }
+                    let sb_trimmed = sb.trim_start_matches('/');
+                    if sb_trimmed.is_empty() {
+                        return Ok(Value::String(sa));
+                    }
+                    let result = if sa.ends_with('/') {
+                        format!("{}{}", sa, sb_trimmed)
+                    } else {
+                        format!("{}/{}", sa, sb_trimmed)
+                    };
+                    Ok(Value::String(result))
+                }
+                "path_basename" => {
+                    if args.len() != 1 {
+                        return Err("path_basename() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_basename() expects a string".to_string()),
+                    };
+                    let s = s.trim_end_matches('/');
+                    if s.is_empty() {
+                        return Ok(Value::String(String::new()));
+                    }
+                    match s.rfind('/') {
+                        Some(pos) => Ok(Value::String(s[pos + 1..].to_string())),
+                        None => Ok(Value::String(s.to_string())),
+                    }
+                }
+                "path_dirname" => {
+                    if args.len() != 1 {
+                        return Err("path_dirname() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_dirname() expects a string".to_string()),
+                    };
+                    let s = s.trim_end_matches('/');
+                    if s.is_empty() {
+                        return Ok(Value::String(".".to_string()));
+                    }
+                    if path_is_abs_str(s) && !s[1..].contains('/') {
+                        return Ok(Value::String("/".to_string()));
+                    }
+                    match s.rfind('/') {
+                        Some(0) => Ok(Value::String("/".to_string())),
+                        Some(pos) => Ok(Value::String(s[..pos].to_string())),
+                        None => Ok(Value::String(".".to_string())),
+                    }
+                }
+                "path_filename" => {
+                    if args.len() != 1 {
+                        return Err("path_filename() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_filename() expects a string".to_string()),
+                    };
+                    let base = {
+                        let trimmed = s.trim_end_matches('/');
+                        match trimmed.rfind('/') {
+                            Some(pos) => &trimmed[pos + 1..],
+                            None => trimmed,
+                        }
+                    };
+                    match base.rfind('.') {
+                        Some(0) => Ok(Value::String(base.to_string())),
+                        Some(pos) if pos > 0 => Ok(Value::String(base[..pos].to_string())),
+                        _ => Ok(Value::String(base.to_string())),
+                    }
+                }
+                "path_extension" => {
+                    if args.len() != 1 {
+                        return Err("path_extension() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_extension() expects a string".to_string()),
+                    };
+                    let base = {
+                        let trimmed = s.trim_end_matches('/');
+                        match trimmed.rfind('/') {
+                            Some(pos) => &trimmed[pos + 1..],
+                            None => trimmed,
+                        }
+                    };
+                    match base.rfind('.') {
+                        Some(0) if base.len() == 1 => Ok(Value::String(String::new())),
+                        Some(pos) if pos > 0 => Ok(Value::String(base[pos..].to_string())),
+                        _ => Ok(Value::String(String::new())),
+                    }
+                }
+                "path_is_absolute" => {
+                    if args.len() != 1 {
+                        return Err("path_is_absolute() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_is_absolute() expects a string".to_string()),
+                    };
+                    Ok(Value::Bool(path_is_abs_str(&s)))
+                }
+                "path_normalize" => {
+                    if args.len() != 1 {
+                        return Err("path_normalize() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_normalize() expects a string".to_string()),
+                    };
+                    let is_abs = path_is_abs_str(&s);
+                    let parts: Vec<&str> = s.split('/').collect();
+                    let mut stack: Vec<&str> = Vec::new();
+                    for part in &parts {
+                        if *part == "." || part.is_empty() {
+                            continue;
+                        }
+                        if *part == ".." {
+                            stack.pop();
+                            continue;
+                        }
+                        stack.push(part);
+                    }
+                    if stack.is_empty() {
+                        return Ok(Value::String(if is_abs {
+                            "/".to_string()
+                        } else {
+                            ".".to_string()
+                        }));
+                    }
+                    let mut result = String::new();
+                    if is_abs {
+                        result.push('/');
+                    }
+                    result.push_str(&stack.join("/"));
+                    Ok(Value::String(result))
+                }
+                "path_equals" => {
+                    if args.len() != 2 {
+                        return Err("path_equals() takes exactly 2 arguments".to_string());
+                    }
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    let sa = match a {
+                        Value::String(s) => s,
+                        _ => return Err("path_equals() expects string arguments".to_string()),
+                    };
+                    let sb = match b {
+                        Value::String(s) => s,
+                        _ => return Err("path_equals() expects string arguments".to_string()),
+                    };
+                    Ok(Value::Bool(
+                        path_normalize_impl(&sa) == path_normalize_impl(&sb),
+                    ))
+                }
+                "path_parent" => {
+                    if args.len() != 1 {
+                        return Err("path_parent() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => path_normalize_slashes(&ss),
+                        _ => return Err("path_parent() expects a string".to_string()),
+                    };
+                    let trimmed = s.trim_end_matches('/');
+                    if trimmed.is_empty() {
+                        // Root path "/" or empty string: parent of root is root itself
+                        if s.starts_with('/') {
+                            return Ok(Value::String("/".to_string()));
+                        }
+                        return Ok(Value::String(String::new()));
+                    }
+                    if path_is_abs_str(trimmed) && !trimmed[1..].contains('/') {
+                        return Ok(Value::String(String::new()));
+                    }
+                    match trimmed.rfind('/') {
+                        Some(0) => Ok(Value::String("/".to_string())),
+                        Some(pos) => Ok(Value::String(trimmed[..pos].to_string())),
+                        None => Ok(Value::String(String::new())),
+                    }
+                }
+                // ===== OS operations (Phase C-1.9) =====
+                "os_name" => {
+                    if !args.is_empty() {
+                        return Err("os_name() takes no arguments".to_string());
+                    }
+                    let name = if cfg!(target_os = "windows") {
+                        "windows"
+                    } else if cfg!(target_os = "macos") {
+                        "macos"
+                    } else if cfg!(target_os = "linux") {
+                        "linux"
+                    } else if cfg!(target_os = "freebsd") {
+                        "freebsd"
+                    } else if cfg!(target_os = "unix") {
+                        "unix"
+                    } else {
+                        "unknown"
+                    };
+                    Ok(Value::String(name.to_string()))
+                }
+                "os_arch" => {
+                    if !args.is_empty() {
+                        return Err("os_arch() takes no arguments".to_string());
+                    }
+                    let arch = if cfg!(target_arch = "x86_64") {
+                        "x86_64"
+                    } else if cfg!(target_arch = "aarch64") {
+                        "aarch64"
+                    } else if cfg!(target_arch = "x86") {
+                        "x86"
+                    } else if cfg!(target_arch = "arm") {
+                        "arm"
+                    } else {
+                        "unknown"
+                    };
+                    Ok(Value::String(arch.to_string()))
+                }
+                "os_platform" => {
+                    if !args.is_empty() {
+                        return Err("os_platform() takes no arguments".to_string());
+                    }
+                    let platform = if cfg!(target_os = "windows") {
+                        "windows"
+                    } else if cfg!(target_os = "macos") {
+                        "darwin"
+                    } else if cfg!(target_os = "linux") {
+                        "linux"
+                    } else {
+                        "unknown"
+                    };
+                    Ok(Value::String(platform.to_string()))
+                }
+                "os_hostname" => {
+                    if !args.is_empty() {
+                        return Err("os_hostname() takes no arguments".to_string());
+                    }
+                    Ok(Value::String(String::new()))
+                }
+                "os_cwd" => {
+                    if !args.is_empty() {
+                        return Err("os_cwd() takes no arguments".to_string());
+                    }
+                    match std::env::current_dir() {
+                        Ok(p) => Ok(Value::String(p.to_string_lossy().into_owned())),
+                        Err(_) => Ok(Value::String(String::new())),
+                    }
+                }
+                "os_set_cwd" => {
+                    if args.len() != 1 {
+                        return Err("os_set_cwd() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let s = match val {
+                        Value::String(ss) => ss,
+                        _ => return Err("os_set_cwd() expects a string".to_string()),
+                    };
+                    match std::env::set_current_dir(&s) {
+                        Ok(()) => Ok(Value::Bool(true)),
+                        Err(_) => Ok(Value::Bool(false)),
+                    }
+                }
+                // ===== ENV operations (Phase C-1.9) =====
+                "env_get" => {
+                    if args.len() != 1 {
+                        return Err("env_get() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let key = match val {
+                        Value::String(s) => s,
+                        _ => return Err("env_get() expects a string key".to_string()),
+                    };
+                    match std::env::var(&key) {
+                        Ok(v) => Ok(Value::Option(Some(Box::new(Value::String(v))))),
+                        Err(_) => Ok(Value::Option(None)),
+                    }
+                }
+                "env_has" => {
+                    if args.len() != 1 {
+                        return Err("env_has() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let key = match val {
+                        Value::String(s) => s,
+                        _ => return Err("env_has() expects a string key".to_string()),
+                    };
+                    Ok(Value::Bool(std::env::var(&key).is_ok()))
+                }
+                "env_set" => {
+                    if args.len() != 2 {
+                        return Err("env_set() takes exactly 2 arguments".to_string());
+                    }
+                    let key_val = eval_expr(&args[0], env, defs)?;
+                    let val_val = eval_expr(&args[1], env, defs)?;
+                    let key = match key_val {
+                        Value::String(s) => s,
+                        _ => return Err("env_set() expects string key".to_string()),
+                    };
+                    let value = match val_val {
+                        Value::String(s) => s,
+                        _ => return Err("env_set() expects string value".to_string()),
+                    };
+                    // SAFETY: set_var is unsafe in Rust 2024 edition; we accept the
+                    // data-race risk in this single-threaded interpreter.
+                    #[allow(unused_unsafe)]
+                    unsafe {
+                        std::env::set_var(&key, &value)
+                    };
                     Ok(Value::Bool(true))
                 }
-                _ => Err("result_equals() expects two Result values".to_string()),
-            }
-        }
-        // ===== Path operations (Phase C-1.8) =====
-        // Cross-platform path helpers: always use '/' as separator,
-        // handle both '/' and '\' as separators, treat any path starting
-        // with '/' or 'X:' as absolute. This ensures interpreter, codegen
-        // (C runtime), and tests produce consistent results on all platforms.
-
-        "path_join" => {
-            if args.len() != 2 { return Err("path_join() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            let sa = match a { Value::String(s) => path_normalize_slashes(&s), _ => return Err("path_join() expects string arguments".to_string()) };
-            let sb = match b { Value::String(s) => path_normalize_slashes(&s), _ => return Err("path_join() expects string arguments".to_string()) };
-            if path_is_abs_str(&sb) {
-                return Ok(Value::String(sb));
-            }
-            let sb_trimmed = sb.trim_start_matches('/');
-            if sb_trimmed.is_empty() {
-                return Ok(Value::String(sa));
-            }
-            let result = if sa.ends_with('/') {
-                format!("{}{}", sa, sb_trimmed)
-            } else {
-                format!("{}/{}", sa, sb_trimmed)
-            };
-            Ok(Value::String(result))
-        }
-        "path_basename" => {
-            if args.len() != 1 { return Err("path_basename() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_basename() expects a string".to_string()) };
-            let s = s.trim_end_matches('/');
-            if s.is_empty() { return Ok(Value::String(String::new())); }
-            match s.rfind('/') {
-                Some(pos) => Ok(Value::String(s[pos + 1..].to_string())),
-                None => Ok(Value::String(s.to_string())),
-            }
-        }
-        "path_dirname" => {
-            if args.len() != 1 { return Err("path_dirname() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_dirname() expects a string".to_string()) };
-            let s = s.trim_end_matches('/');
-            if s.is_empty() { return Ok(Value::String(".".to_string())); }
-            if path_is_abs_str(s) && !s[1..].contains('/') {
-                return Ok(Value::String("/".to_string()));
-            }
-            match s.rfind('/') {
-                Some(0) => Ok(Value::String("/".to_string())),
-                Some(pos) => Ok(Value::String(s[..pos].to_string())),
-                None => Ok(Value::String(".".to_string())),
-            }
-        }
-        "path_filename" => {
-            if args.len() != 1 { return Err("path_filename() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_filename() expects a string".to_string()) };
-            let base = {
-                let trimmed = s.trim_end_matches('/');
-                match trimmed.rfind('/') {
-                    Some(pos) => &trimmed[pos + 1..],
-                    None => trimmed,
+                "env_remove" => {
+                    if args.len() != 1 {
+                        return Err("env_remove() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let key = match val {
+                        Value::String(s) => s,
+                        _ => return Err("env_remove() expects a string key".to_string()),
+                    };
+                    #[allow(unused_unsafe)]
+                    unsafe {
+                        std::env::remove_var(&key)
+                    };
+                    Ok(Value::Bool(true))
                 }
-            };
-            match base.rfind('.') {
-                Some(0) => Ok(Value::String(base.to_string())),
-                Some(pos) if pos > 0 => Ok(Value::String(base[..pos].to_string())),
-                _ => Ok(Value::String(base.to_string())),
-            }
-        }
-        "path_extension" => {
-            if args.len() != 1 { return Err("path_extension() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_extension() expects a string".to_string()) };
-            let base = {
-                let trimmed = s.trim_end_matches('/');
-                match trimmed.rfind('/') {
-                    Some(pos) => &trimmed[pos + 1..],
-                    None => trimmed,
+                "env_all" => {
+                    if !args.is_empty() {
+                        return Err("env_all() takes no arguments".to_string());
+                    }
+                    let mut map = std::collections::HashMap::new();
+                    for (key, value) in std::env::vars() {
+                        map.insert(Value::String(key), Value::String(value));
+                    }
+                    Ok(Value::Map(map))
                 }
-            };
-            match base.rfind('.') {
-                Some(0) if base.len() == 1 => Ok(Value::String(String::new())),
-                Some(pos) if pos > 0 => Ok(Value::String(base[pos..].to_string())),
-                _ => Ok(Value::String(String::new())),
-            }
-        }
-        "path_is_absolute" => {
-            if args.len() != 1 { return Err("path_is_absolute() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_is_absolute() expects a string".to_string()) };
-            Ok(Value::Bool(path_is_abs_str(&s)))
-        }
-        "path_normalize" => {
-            if args.len() != 1 { return Err("path_normalize() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_normalize() expects a string".to_string()) };
-            let is_abs = path_is_abs_str(&s);
-            let parts: Vec<&str> = s.split('/').collect();
-            let mut stack: Vec<&str> = Vec::new();
-            for part in &parts {
-                if *part == "." || part.is_empty() { continue; }
-                if *part == ".." { stack.pop(); continue; }
-                stack.push(part);
-            }
-            if stack.is_empty() {
-                return Ok(Value::String(if is_abs { "/".to_string() } else { ".".to_string() }));
-            }
-            let mut result = String::new();
-            if is_abs { result.push('/'); }
-            result.push_str(&stack.join("/"));
-            Ok(Value::String(result))
-        }
-        "path_equals" => {
-            if args.len() != 2 { return Err("path_equals() takes exactly 2 arguments".to_string()); }
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            let sa = match a { Value::String(s) => s, _ => return Err("path_equals() expects string arguments".to_string()) };
-            let sb = match b { Value::String(s) => s, _ => return Err("path_equals() expects string arguments".to_string()) };
-            Ok(Value::Bool(path_normalize_impl(&sa) == path_normalize_impl(&sb)))
-        }
-        "path_parent" => {
-            if args.len() != 1 { return Err("path_parent() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => path_normalize_slashes(&ss), _ => return Err("path_parent() expects a string".to_string()) };
-            let trimmed = s.trim_end_matches('/');
-            if trimmed.is_empty() {
-                // Root path "/" or empty string: parent of root is root itself
-                if s.starts_with('/') { return Ok(Value::String("/".to_string())); }
-                return Ok(Value::String(String::new()));
-            }
-            if path_is_abs_str(trimmed) && !trimmed[1..].contains('/') {
-                return Ok(Value::String(String::new()));
-            }
-            match trimmed.rfind('/') {
-                Some(0) => Ok(Value::String("/".to_string())),
-                Some(pos) => Ok(Value::String(trimmed[..pos].to_string())),
-                None => Ok(Value::String(String::new())),
-            }
-        }
-        // ===== OS operations (Phase C-1.9) =====
-        "os_name" => {
-            if !args.is_empty() { return Err("os_name() takes no arguments".to_string()); }
-            let name = if cfg!(target_os = "windows") { "windows" }
-                else if cfg!(target_os = "macos") { "macos" }
-                else if cfg!(target_os = "linux") { "linux" }
-                else if cfg!(target_os = "freebsd") { "freebsd" }
-                else if cfg!(target_os = "unix") { "unix" }
-                else { "unknown" };
-            Ok(Value::String(name.to_string()))
-        }
-        "os_arch" => {
-            if !args.is_empty() { return Err("os_arch() takes no arguments".to_string()); }
-            let arch = if cfg!(target_arch = "x86_64") { "x86_64" }
-                else if cfg!(target_arch = "aarch64") { "aarch64" }
-                else if cfg!(target_arch = "x86") { "x86" }
-                else if cfg!(target_arch = "arm") { "arm" }
-                else { "unknown" };
-            Ok(Value::String(arch.to_string()))
-        }
-        "os_platform" => {
-            if !args.is_empty() { return Err("os_platform() takes no arguments".to_string()); }
-            let platform = if cfg!(target_os = "windows") { "windows" }
-                else if cfg!(target_os = "macos") { "darwin" }
-                else if cfg!(target_os = "linux") { "linux" }
-                else { "unknown" };
-            Ok(Value::String(platform.to_string()))
-        }
-        "os_hostname" => {
-            if !args.is_empty() { return Err("os_hostname() takes no arguments".to_string()); }
-            Ok(Value::String(String::new()))
-        }
-        "os_cwd" => {
-            if !args.is_empty() { return Err("os_cwd() takes no arguments".to_string()); }
-            match std::env::current_dir() {
-                Ok(p) => Ok(Value::String(p.to_string_lossy().into_owned())),
-                Err(_) => Ok(Value::String(String::new())),
-            }
-        }
-        "os_set_cwd" => {
-            if args.len() != 1 { return Err("os_set_cwd() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let s = match val { Value::String(ss) => ss, _ => return Err("os_set_cwd() expects a string".to_string()) };
-            match std::env::set_current_dir(&s) {
-                Ok(()) => Ok(Value::Bool(true)),
-                Err(_) => Ok(Value::Bool(false)),
-            }
-        }
-        // ===== ENV operations (Phase C-1.9) =====
-        "env_get" => {
-            if args.len() != 1 { return Err("env_get() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let key = match val { Value::String(s) => s, _ => return Err("env_get() expects a string key".to_string()) };
-            match std::env::var(&key) {
-                Ok(v) => Ok(Value::Option(Some(Box::new(Value::String(v))))),
-                Err(_) => Ok(Value::Option(None)),
-            }
-        }
-        "env_has" => {
-            if args.len() != 1 { return Err("env_has() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let key = match val { Value::String(s) => s, _ => return Err("env_has() expects a string key".to_string()) };
-            Ok(Value::Bool(std::env::var(&key).is_ok()))
-        }
-        "env_set" => {
-            if args.len() != 2 { return Err("env_set() takes exactly 2 arguments".to_string()); }
-            let key_val = eval_expr(&args[0], env, defs)?;
-            let val_val = eval_expr(&args[1], env, defs)?;
-            let key = match key_val { Value::String(s) => s, _ => return Err("env_set() expects string key".to_string()) };
-            let value = match val_val { Value::String(s) => s, _ => return Err("env_set() expects string value".to_string()) };
-            // SAFETY: set_var is unsafe in Rust 2024 edition; we accept the
-            // data-race risk in this single-threaded interpreter.
-            #[allow(unused_unsafe)]
-            unsafe { std::env::set_var(&key, &value) };
-            Ok(Value::Bool(true))
-        }
-        "env_remove" => {
-            if args.len() != 1 { return Err("env_remove() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let key = match val { Value::String(s) => s, _ => return Err("env_remove() expects a string key".to_string()) };
-            #[allow(unused_unsafe)]
-            unsafe { std::env::remove_var(&key) };
-            Ok(Value::Bool(true))
-        }
-        "env_all" => {
-            if !args.is_empty() { return Err("env_all() takes no arguments".to_string()); }
-            let mut map = std::collections::HashMap::new();
-            for (key, value) in std::env::vars() {
-                map.insert(Value::String(key), Value::String(value));
-            }
-            Ok(Value::Map(map))
-        }
-        // ===== Regex operations (Phase C-1.10) =====
-        "regex_compile" => {
-            if args.len() != 1 { return Err("regex_compile() takes exactly 1 argument".to_string()); }
-            let val = eval_expr(&args[0], env, defs)?;
-            let pat = match val { Value::String(s) => s, _ => return Err("regex_compile() expects a string pattern".to_string()) };
-            match regex::Regex::new(&pat) {
-                Ok(_re) => {
-                    Ok(Value::Option(Some(Box::new(Value::String(pat)))))
-                }
-                Err(_) => Ok(Value::Option(None)),
-            }
-        }
-        "regex_is_match" => {
-            if args.len() != 2 { return Err("regex_is_match() takes exactly 2 arguments".to_string()); }
-            let pat_val = eval_expr(&args[0], env, defs)?;
-            let text_val = eval_expr(&args[1], env, defs)?;
-            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_is_match() expects string pattern".to_string()) };
-            let text = match text_val { Value::String(s) => s, _ => return Err("regex_is_match() expects string text".to_string()) };
-            match regex::Regex::new(&pat) {
-                Ok(re) => Ok(Value::Bool(re.is_match(&text))),
-                Err(_) => Ok(Value::Bool(false)),
-            }
-        }
-        "regex_match" | "regex_find" => {
-            if args.len() != 2 { return Err(format!("{}() takes exactly 2 arguments", func)); }
-            let pat_val = eval_expr(&args[0], env, defs)?;
-            let text_val = eval_expr(&args[1], env, defs)?;
-            let pat = match pat_val { Value::String(s) => s, _ => return Err(format!("{}() expects string pattern", func)) };
-            let text = match text_val { Value::String(s) => s, _ => return Err(format!("{}() expects string text", func)) };
-            match regex::Regex::new(&pat) {
-                Ok(re) => {
-                    match re.find(&text) {
-                        Some(m) => Ok(Value::Option(Some(Box::new(Value::String(m.as_str().to_string()))))),
-                        None => Ok(Value::Option(None)),
+                // ===== Regex operations (Phase C-1.10) =====
+                "regex_compile" => {
+                    if args.len() != 1 {
+                        return Err("regex_compile() takes exactly 1 argument".to_string());
+                    }
+                    let val = eval_expr(&args[0], env, defs)?;
+                    let pat = match val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_compile() expects a string pattern".to_string()),
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(_re) => Ok(Value::Option(Some(Box::new(Value::String(pat))))),
+                        Err(_) => Ok(Value::Option(None)),
                     }
                 }
-                Err(_) => Ok(Value::Option(None)),
-            }
-        }
-        "regex_find_all" => {
-            if args.len() != 2 { return Err("regex_find_all() takes exactly 2 arguments".to_string()); }
-            let pat_val = eval_expr(&args[0], env, defs)?;
-            let text_val = eval_expr(&args[1], env, defs)?;
-            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_find_all() expects string pattern".to_string()) };
-            let text = match text_val { Value::String(s) => s, _ => return Err("regex_find_all() expects string text".to_string()) };
-            match regex::Regex::new(&pat) {
-                Ok(re) => {
-                    let results: Vec<Value> = re.find_iter(&text)
-                        .map(|m| Value::String(m.as_str().to_string()))
+                "regex_is_match" => {
+                    if args.len() != 2 {
+                        return Err("regex_is_match() takes exactly 2 arguments".to_string());
+                    }
+                    let pat_val = eval_expr(&args[0], env, defs)?;
+                    let text_val = eval_expr(&args[1], env, defs)?;
+                    let pat = match pat_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_is_match() expects string pattern".to_string()),
+                    };
+                    let text = match text_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_is_match() expects string text".to_string()),
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(re) => Ok(Value::Bool(re.is_match(&text))),
+                        Err(_) => Ok(Value::Bool(false)),
+                    }
+                }
+                "regex_match" | "regex_find" => {
+                    if args.len() != 2 {
+                        return Err(format!("{}() takes exactly 2 arguments", func));
+                    }
+                    let pat_val = eval_expr(&args[0], env, defs)?;
+                    let text_val = eval_expr(&args[1], env, defs)?;
+                    let pat = match pat_val {
+                        Value::String(s) => s,
+                        _ => return Err(format!("{}() expects string pattern", func)),
+                    };
+                    let text = match text_val {
+                        Value::String(s) => s,
+                        _ => return Err(format!("{}() expects string text", func)),
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(re) => match re.find(&text) {
+                            Some(m) => Ok(Value::Option(Some(Box::new(Value::String(
+                                m.as_str().to_string(),
+                            ))))),
+                            None => Ok(Value::Option(None)),
+                        },
+                        Err(_) => Ok(Value::Option(None)),
+                    }
+                }
+                "regex_find_all" => {
+                    if args.len() != 2 {
+                        return Err("regex_find_all() takes exactly 2 arguments".to_string());
+                    }
+                    let pat_val = eval_expr(&args[0], env, defs)?;
+                    let text_val = eval_expr(&args[1], env, defs)?;
+                    let pat = match pat_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_find_all() expects string pattern".to_string()),
+                    };
+                    let text = match text_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_find_all() expects string text".to_string()),
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(re) => {
+                            let results: Vec<Value> = re
+                                .find_iter(&text)
+                                .map(|m| Value::String(m.as_str().to_string()))
+                                .collect();
+                            Ok(Value::Array(results))
+                        }
+                        Err(_) => Ok(Value::Array(vec![])),
+                    }
+                }
+                "regex_replace" => {
+                    if args.len() != 3 {
+                        return Err("regex_replace() takes exactly 3 arguments".to_string());
+                    }
+                    let pat_val = eval_expr(&args[0], env, defs)?;
+                    let text_val = eval_expr(&args[1], env, defs)?;
+                    let repl_val = eval_expr(&args[2], env, defs)?;
+                    let pat = match pat_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_replace() expects string pattern".to_string()),
+                    };
+                    let text = match text_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_replace() expects string text".to_string()),
+                    };
+                    let replacement = match repl_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_replace() expects string replacement".to_string()),
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(re) => Ok(Value::String(re.replace(&text, &replacement).to_string())),
+                        Err(_) => Ok(Value::String(text)),
+                    }
+                }
+                "regex_replace_all" => {
+                    if args.len() != 3 {
+                        return Err("regex_replace_all() takes exactly 3 arguments".to_string());
+                    }
+                    let pat_val = eval_expr(&args[0], env, defs)?;
+                    let text_val = eval_expr(&args[1], env, defs)?;
+                    let repl_val = eval_expr(&args[2], env, defs)?;
+                    let pat = match pat_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_replace_all() expects string pattern".to_string()),
+                    };
+                    let text = match text_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_replace_all() expects string text".to_string()),
+                    };
+                    let replacement = match repl_val {
+                        Value::String(s) => s,
+                        _ => {
+                            return Err("regex_replace_all() expects string replacement".to_string());
+                        }
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(re) => Ok(Value::String(
+                            re.replace_all(&text, &replacement).to_string(),
+                        )),
+                        Err(_) => Ok(Value::String(text)),
+                    }
+                }
+                "regex_split" => {
+                    if args.len() != 2 {
+                        return Err("regex_split() takes exactly 2 arguments".to_string());
+                    }
+                    let pat_val = eval_expr(&args[0], env, defs)?;
+                    let text_val = eval_expr(&args[1], env, defs)?;
+                    let pat = match pat_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_split() expects string pattern".to_string()),
+                    };
+                    let text = match text_val {
+                        Value::String(s) => s,
+                        _ => return Err("regex_split() expects string text".to_string()),
+                    };
+                    match regex::Regex::new(&pat) {
+                        Ok(re) => {
+                            let results: Vec<Value> = re
+                                .split(&text)
+                                .map(|s| Value::String(s.to_string()))
+                                .collect();
+                            Ok(Value::Array(results))
+                        }
+                        Err(_) => {
+                            let results = vec![Value::String(text)];
+                            Ok(Value::Array(results))
+                        }
+                    }
+                }
+                // ===== Process operations (Phase C-1.11) =====
+                "process_spawn" => {
+                    if args.len() != 2 {
+                        return Err("process_spawn() takes exactly 2 arguments".to_string());
+                    }
+                    let cmd_val = eval_expr(&args[0], env, defs)?;
+                    let args_val = eval_expr(&args[1], env, defs)?;
+                    let command = match cmd_val {
+                        Value::String(s) => s,
+                        _ => return Err("process_spawn() expects string command".to_string()),
+                    };
+                    let arg_list = match args_val {
+                        Value::Array(a) => a,
+                        _ => return Err("process_spawn() expects list of strings".to_string()),
+                    };
+                    let arg_strings: Vec<String> = arg_list
+                        .iter()
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            _ => String::new(),
+                        })
                         .collect();
-                    Ok(Value::Array(results))
+                    match std::process::Command::new(&command)
+                        .args(&arg_strings)
+                        .spawn()
+                    {
+                        Ok(child) => Ok(Value::Int(child.id() as i64)),
+                        Err(_) => Ok(Value::Int(-1)),
+                    }
                 }
-                Err(_) => Ok(Value::Array(vec![])),
-            }
-        }
-        "regex_replace" => {
-            if args.len() != 3 { return Err("regex_replace() takes exactly 3 arguments".to_string()); }
-            let pat_val = eval_expr(&args[0], env, defs)?;
-            let text_val = eval_expr(&args[1], env, defs)?;
-            let repl_val = eval_expr(&args[2], env, defs)?;
-            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_replace() expects string pattern".to_string()) };
-            let text = match text_val { Value::String(s) => s, _ => return Err("regex_replace() expects string text".to_string()) };
-            let replacement = match repl_val { Value::String(s) => s, _ => return Err("regex_replace() expects string replacement".to_string()) };
-            match regex::Regex::new(&pat) {
-                Ok(re) => Ok(Value::String(re.replace(&text, &replacement).to_string())),
-                Err(_) => Ok(Value::String(text)),
-            }
-        }
-        "regex_replace_all" => {
-            if args.len() != 3 { return Err("regex_replace_all() takes exactly 3 arguments".to_string()); }
-            let pat_val = eval_expr(&args[0], env, defs)?;
-            let text_val = eval_expr(&args[1], env, defs)?;
-            let repl_val = eval_expr(&args[2], env, defs)?;
-            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_replace_all() expects string pattern".to_string()) };
-            let text = match text_val { Value::String(s) => s, _ => return Err("regex_replace_all() expects string text".to_string()) };
-            let replacement = match repl_val { Value::String(s) => s, _ => return Err("regex_replace_all() expects string replacement".to_string()) };
-            match regex::Regex::new(&pat) {
-                Ok(re) => Ok(Value::String(re.replace_all(&text, &replacement).to_string())),
-                Err(_) => Ok(Value::String(text)),
-            }
-        }
-        "regex_split" => {
-            if args.len() != 2 { return Err("regex_split() takes exactly 2 arguments".to_string()); }
-            let pat_val = eval_expr(&args[0], env, defs)?;
-            let text_val = eval_expr(&args[1], env, defs)?;
-            let pat = match pat_val { Value::String(s) => s, _ => return Err("regex_split() expects string pattern".to_string()) };
-            let text = match text_val { Value::String(s) => s, _ => return Err("regex_split() expects string text".to_string()) };
-            match regex::Regex::new(&pat) {
-                Ok(re) => {
-                    let results: Vec<Value> = re.split(&text)
-                        .map(|s| Value::String(s.to_string()))
+                "process_run" => {
+                    if args.len() != 2 {
+                        return Err("process_run() takes exactly 2 arguments".to_string());
+                    }
+                    let cmd_val = eval_expr(&args[0], env, defs)?;
+                    let args_val = eval_expr(&args[1], env, defs)?;
+                    let command = match cmd_val {
+                        Value::String(s) => s,
+                        _ => return Err("process_run() expects string command".to_string()),
+                    };
+                    let arg_list = match args_val {
+                        Value::Array(a) => a,
+                        _ => return Err("process_run() expects list of strings".to_string()),
+                    };
+                    let arg_strings: Vec<String> = arg_list
+                        .iter()
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            _ => String::new(),
+                        })
                         .collect();
-                    Ok(Value::Array(results))
+                    match std::process::Command::new(&command)
+                        .args(&arg_strings)
+                        .output()
+                    {
+                        Ok(output) => {
+                            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                            Ok(Value::String(stdout))
+                        }
+                        Err(_) => Ok(Value::String(String::new())),
+                    }
                 }
-                Err(_) => {
-                    let results = vec![Value::String(text)];
-                    Ok(Value::Array(results))
+                "process_output" => {
+                    if args.len() != 2 {
+                        return Err("process_output() takes exactly 2 arguments".to_string());
+                    }
+                    let cmd_val = eval_expr(&args[0], env, defs)?;
+                    let args_val = eval_expr(&args[1], env, defs)?;
+                    let command = match cmd_val {
+                        Value::String(s) => s,
+                        _ => return Err("process_output() expects string command".to_string()),
+                    };
+                    let arg_list = match args_val {
+                        Value::Array(a) => a,
+                        _ => return Err("process_output() expects list of strings".to_string()),
+                    };
+                    let arg_strings: Vec<String> = arg_list
+                        .iter()
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            _ => String::new(),
+                        })
+                        .collect();
+                    match std::process::Command::new(&command)
+                        .args(&arg_strings)
+                        .output()
+                    {
+                        Ok(output) => {
+                            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                            Ok(Value::String(stdout))
+                        }
+                        Err(_) => Ok(Value::String(String::new())),
+                    }
                 }
-            }
-        }
-        // ===== Process operations (Phase C-1.11) =====
-        "process_spawn" => {
-            if args.len() != 2 { return Err("process_spawn() takes exactly 2 arguments".to_string()); }
-            let cmd_val = eval_expr(&args[0], env, defs)?;
-            let args_val = eval_expr(&args[1], env, defs)?;
-            let command = match cmd_val { Value::String(s) => s, _ => return Err("process_spawn() expects string command".to_string()) };
-            let arg_list = match args_val { Value::Array(a) => a, _ => return Err("process_spawn() expects list of strings".to_string()) };
-            let arg_strings: Vec<String> = arg_list.iter().map(|v| match v { Value::String(s) => s.clone(), _ => String::new() }).collect();
-            match std::process::Command::new(&command).args(&arg_strings).spawn() {
-                Ok(child) => Ok(Value::Int(child.id() as i64)),
-                Err(_) => Ok(Value::Int(-1)),
-            }
-        }
-        "process_run" => {
-            if args.len() != 2 { return Err("process_run() takes exactly 2 arguments".to_string()); }
-            let cmd_val = eval_expr(&args[0], env, defs)?;
-            let args_val = eval_expr(&args[1], env, defs)?;
-            let command = match cmd_val { Value::String(s) => s, _ => return Err("process_run() expects string command".to_string()) };
-            let arg_list = match args_val { Value::Array(a) => a, _ => return Err("process_run() expects list of strings".to_string()) };
-            let arg_strings: Vec<String> = arg_list.iter().map(|v| match v { Value::String(s) => s.clone(), _ => String::new() }).collect();
-            match std::process::Command::new(&command).args(&arg_strings).output() {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    Ok(Value::String(stdout))
-                }
-                Err(_) => Ok(Value::String(String::new())),
-            }
-        }
-        "process_output" => {
-            if args.len() != 2 { return Err("process_output() takes exactly 2 arguments".to_string()); }
-            let cmd_val = eval_expr(&args[0], env, defs)?;
-            let args_val = eval_expr(&args[1], env, defs)?;
-            let command = match cmd_val { Value::String(s) => s, _ => return Err("process_output() expects string command".to_string()) };
-            let arg_list = match args_val { Value::Array(a) => a, _ => return Err("process_output() expects list of strings".to_string()) };
-            let arg_strings: Vec<String> = arg_list.iter().map(|v| match v { Value::String(s) => s.clone(), _ => String::new() }).collect();
-            match std::process::Command::new(&command).args(&arg_strings).output() {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    Ok(Value::String(stdout))
-                }
-                Err(_) => Ok(Value::String(String::new())),
-            }
-        }
-        "process_wait" => {
-            if args.len() != 1 { return Err("process_wait() takes exactly 1 argument".to_string()); }
-            let pid_val = eval_expr(&args[0], env, defs)?;
-            let pid = match pid_val { Value::Int(i) => i, _ => return Err("process_wait() expects int pid".to_string()) };
-            // In the interpreter, we cannot easily wait on a child by PID
-            // since we do not store Child handles. Return 0 for now.
-            Ok(Value::Int(0))
-        }
-        "process_kill" => {
-            if args.len() != 1 { return Err("process_kill() takes exactly 1 argument".to_string()); }
-            let pid_val = eval_expr(&args[0], env, defs)?;
-            let pid = match pid_val { Value::Int(i) => i, _ => return Err("process_kill() expects int pid".to_string()) };
-            // In the interpreter, we cannot easily kill a child by PID
-            // since we do not store Child handles. Return false for now.
-            Ok(Value::Bool(false))
-        }
-        "process_status" => {
-            if args.len() != 1 { return Err("process_status() takes exactly 1 argument".to_string()); }
-            let pid_val = eval_expr(&args[0], env, defs)?;
-            let _pid = match pid_val { Value::Int(i) => i, _ => return Err("process_status() expects int pid".to_string()) };
-            // In the interpreter, we cannot easily get status by PID
-            // since we do not store Child handles. Return unknown for now.
-            Ok(Value::String("unknown".to_string()))
-        }
-        "process_args" => {
-            if !args.is_empty() { return Err("process_args() takes no arguments".to_string()); }
-            // Return the command-line arguments passed to the Lime process
-            let mut result = Vec::new();
-            for arg in std::env::args().skip(1) {
-                result.push(Value::String(arg));
-            }
-            Ok(Value::Array(result))
-        }
-        // ===== Requests operations (Phase C-1.12) - delegated to eval_requests_builtin =====
-        _ if func.starts_with("requests_") => {
-            if let Some(val) = eval_requests_builtin(func, args, env, defs)? {
-                return Ok(val);
-            }
-            return Err(format!("Unknown requests function: {}", func));
-        }
-        // ===== Standard-library runtime builtins (Phase 7/10) =====
-        // List helpers (Lists are represented as Value::Array).
-        "push" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Array(mut arr) = list {
-                arr.push(item);
-                Ok(Value::Array(arr))
-            } else {
-                Err("push() expects a list as first argument".to_string())
-            }
-        }
-        "pop" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(mut arr) = list {
-                if let Some(v) = arr.pop() {
-                    Ok(v)
-                } else {
-                    Err("pop() on empty list".to_string())
-                }
-            } else {
-                Err("pop() expects a list".to_string())
-            }
-        }
-        "first" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = list {
-                arr.first().cloned().ok_or_else(|| "first() on empty list".to_string())
-            } else {
-                Err("first() expects a list".to_string())
-            }
-        }
-        "last" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = list {
-                arr.last().cloned().ok_or_else(|| "last() on empty list".to_string())
-            } else {
-                Err("last() expects a list".to_string())
-            }
-        }
-        "index_of" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Array(arr) = list {
-                let idx = arr.iter().position(|v| v == &item);
-                Ok(Value::Int(idx.map(|i| i as i64).unwrap_or(-1)))
-            } else {
-                Err("index_of() expects a list".to_string())
-            }
-        }
-        "contains_item" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Array(arr) = list {
-                Ok(Value::Bool(arr.iter().any(|v| v == &item)))
-            } else {
-                Err("contains_item() expects a list".to_string())
-            }
-        }
-        // String helpers.
-        "contains" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let sub = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (s, sub) {
-                Ok(Value::Bool(a.contains(&b)))
-            } else {
-                Err("contains() expects two strings".to_string())
-            }
-        }
-        "starts_with" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let p = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (s, p) {
-                Ok(Value::Bool(a.starts_with(&b)))
-            } else {
-                Err("starts_with() expects two strings".to_string())
-            }
-        }
-        "ends_with" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let p = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (s, p) {
-                Ok(Value::Bool(a.ends_with(&b)))
-            } else {
-                Err("ends_with() expects two strings".to_string())
-            }
-        }
-        "trim" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::String(a.trim().to_string()))
-            } else {
-                Err("trim() expects a string".to_string())
-            }
-        }
-        "replace" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let from = eval_expr(&args[1], env, defs)?;
-            let to = eval_expr(&args[2], env, defs)?;
-            if let (Value::String(a), Value::String(b), Value::String(c)) = (s, from, to) {
-                Ok(Value::String(a.replace(&b, &c)))
-            } else {
-                Err("replace() expects three strings".to_string())
-            }
-        }
-        "split" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let sep = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (s, sep) {
-                let parts: Vec<Value> = a
-                    .split(&b)
-                    .map(|p| Value::String(p.to_string()))
-                    .collect();
-                Ok(Value::Array(parts))
-            } else {
-                Err("split() expects two strings".to_string())
-            }
-        }
-        "slice" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let start = eval_expr(&args[1], env, defs)?;
-            let end = eval_expr(&args[2], env, defs)?;
-            if let (Value::String(a), Value::Int(s0), Value::Int(e0)) = (s, start, end) {
-                let chars: Vec<char> = a.chars().collect();
-                let s0 = s0.clamp(0, chars.len() as i64) as usize;
-                let e0 = e0.clamp(0, chars.len() as i64) as usize;
-                let e0 = e0.max(s0);
-                Ok(Value::String(chars[s0..e0].iter().collect()))
-            } else {
-                Err("slice() expects (string, int, int)".to_string())
-            }
-        }
-        "byte_len" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::Int(a.len() as i64))
-            } else {
-                Err("byte_len() expects a string".to_string())
-            }
-        }
-        // ===== Phase 12 Step 1: std library runtime builtins =====
-        // List: reverse (returns a new reversed list, non-mutating).
-        "reverse" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(mut arr) = list {
-                arr.reverse();
-                Ok(Value::Array(arr))
-            } else {
-                Err("reverse() expects a list".to_string())
-            }
-        }
-        // List: remove the element at `idx`, returning the new list.
-        "remove_at" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let idx = eval_expr(&args[1], env, defs)?;
-            if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
-                if i < 0 || (i as usize) >= arr.len() {
-                    return Err("remove_at() index out of bounds".to_string());
-                }
-                arr.remove(i as usize);
-                Ok(Value::Array(arr))
-            } else {
-                Err("remove_at() expects (list, int)".to_string())
-            }
-        }
-        "list_insert" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let idx = eval_expr(&args[1], env, defs)?;
-            let item = eval_expr(&args[2], env, defs)?;
-            if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
-                let idx = if i < 0 { 0 } else { i as usize };
-                let idx = idx.min(arr.len());
-                arr.insert(idx, item);
-                Ok(Value::Array(arr))
-            } else {
-                Err("list_insert() expects (list, int, T)".to_string())
-            }
-        }
-        "list_set" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let idx = eval_expr(&args[1], env, defs)?;
-            let item = eval_expr(&args[2], env, defs)?;
-            if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
-                if i >= 0 && (i as usize) < arr.len() {
-                    arr[i as usize] = item;
-                }
-                Ok(Value::Array(arr))
-            } else {
-                Err("list_set() expects (list, int, T)".to_string())
-            }
-        }
-        "list_get" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            let idx = eval_expr(&args[1], env, defs)?;
-            if let (Value::Array(arr), Value::Int(i)) = (list, idx) {
-                if i >= 0 && (i as usize) < arr.len() {
-                    Ok(arr[i as usize].clone())
-                } else {
+                "process_wait" => {
+                    if args.len() != 1 {
+                        return Err("process_wait() takes exactly 1 argument".to_string());
+                    }
+                    let pid_val = eval_expr(&args[0], env, defs)?;
+                    let pid = match pid_val {
+                        Value::Int(i) => i,
+                        _ => return Err("process_wait() expects int pid".to_string()),
+                    };
+                    // In the interpreter, we cannot easily wait on a child by PID
+                    // since we do not store Child handles. Return 0 for now.
                     Ok(Value::Int(0))
                 }
-            } else {
-                Err("list_get() expects (list, int)".to_string())
-            }
-        }
-        "list_clear" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(_) = list {
-                Ok(Value::Array(Vec::new()))
-            } else {
-                Err("list_clear() expects a list".to_string())
-            }
-        }
-        "list_sort" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = list {
-                let mut sorted = arr.clone();
-                sorted.sort_by(|a, b| a.compare(b));
-                Ok(Value::Array(sorted))
-            } else {
-                Err("list_sort() expects a list".to_string())
-            }
-        }
-        "list_clone" => {
-            let list = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = list {
-                Ok(Value::Array(arr.clone()))
-            } else {
-                Err("list_clone() expects a list".to_string())
-            }
-        }
-        "list_empty" => {
-            Ok(Value::Array(Vec::new()))
-        }
-        // Map builtins
-        "map_len" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            if let Value::Map(m) = &map {
-                Ok(Value::Int(m.len() as i64))
-            } else {
-                Err("map_len() expects a Map".to_string())
-            }
-        }
-        "map_is_empty" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            if let Value::Map(m) = &map {
-                Ok(Value::Bool(m.is_empty()))
-            } else {
-                Err("map_is_empty() expects a Map".to_string())
-            }
-        }
-        "map_insert" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            let key = eval_expr(&args[1], env, defs)?;
-            let val = eval_expr(&args[2], env, defs)?;
-            if let Value::Map(mut m) = map {
-                let mut new_map = m.clone();
-                new_map.insert(key, val);
-                Ok(Value::Map(new_map))
-            } else {
-                Err("map_insert() expects a Map".to_string())
-            }
-        }
-        "map_get" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            let key = eval_expr(&args[1], env, defs)?;
-            if let Value::Map(m) = &map {
-                Ok(m.get(&key).cloned().unwrap_or(Value::Int(0)))
-            } else {
-                Err("map_get() expects a Map".to_string())
-            }
-        }
-        "map_remove" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            let key = eval_expr(&args[1], env, defs)?;
-            if let Value::Map(mut m) = map {
-                m.remove(&key);
-                Ok(Value::Map(m))
-            } else {
-                Err("map_remove() expects a Map".to_string())
-            }
-        }
-        "map_contains_key" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            let key = eval_expr(&args[1], env, defs)?;
-            if let Value::Map(m) = &map {
-                Ok(Value::Bool(m.contains_key(&key)))
-            } else {
-                Err("map_contains_key() expects a Map".to_string())
-            }
-        }
-        "map_keys" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            if let Value::Map(m) = &map {
-                Ok(Value::Array(m.keys().cloned().collect()))
-            } else {
-                Err("map_keys() expects a Map".to_string())
-            }
-        }
-        "map_values" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            if let Value::Map(m) = &map {
-                Ok(Value::Array(m.values().cloned().collect()))
-            } else {
-                Err("map_values() expects a Map".to_string())
-            }
-        }
-        "map_clear" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            if let Value::Map(_) = map {
-                Ok(Value::Map(HashMap::new()))
-            } else {
-                Err("map_clear() expects a Map".to_string())
-            }
-        }
-        "map_clone" => {
-            let map = eval_expr(&args[0], env, defs)?;
-            if let Value::Map(m) = map {
-                Ok(Value::Map(m))
-            } else {
-                Err("map_clone() expects a Map".to_string())
-            }
-        }
-        "map_empty" => {
-            Ok(Value::Map(HashMap::new()))
-        }
-        // Set builtins
-        "set_len" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            if let Value::Set(s) = &set {
-                Ok(Value::Int(s.len() as i64))
-            } else {
-                Err("set_len() expects a Set".to_string())
-            }
-        }
-        "set_is_empty" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            if let Value::Set(s) = &set {
-                Ok(Value::Bool(s.is_empty()))
-            } else {
-                Err("set_is_empty() expects a Set".to_string())
-            }
-        }
-        "set_add" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Set(mut s) = set {
-                s.insert(item);
-                Ok(Value::Set(s))
-            } else {
-                Err("set_add() expects a Set".to_string())
-            }
-        }
-        "set_remove" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Set(mut s) = set {
-                s.remove(&item);
-                Ok(Value::Set(s))
-            } else {
-                Err("set_remove() expects a Set".to_string())
-            }
-        }
-        "set_contains" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Set(s) = &set {
-                Ok(Value::Bool(s.contains(&item)))
-            } else {
-                Err("set_contains() expects a Set".to_string())
-            }
-        }
-        "set_clear" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            if let Value::Set(_) = set {
-                Ok(Value::Set(HashSet::new()))
-            } else {
-                Err("set_clear() expects a Set".to_string())
-            }
-        }
-        "set_clone" => {
-            let set = eval_expr(&args[0], env, defs)?;
-            if let Value::Set(s) = set {
-                Ok(Value::Set(s))
-            } else {
-                Err("set_clone() expects a Set".to_string())
-            }
-        }
-        "set_empty" => {
-            Ok(Value::Set(HashSet::new()))
-       }
-        // Queue builtins (FIFO: push at back, pop from front)
-        "queue_push" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Array(mut arr) = queue {
-                arr.push(item);
-                Ok(Value::Array(arr))
-            } else {
-                Err("queue_push() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_pop" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(mut arr) = queue {
-                if arr.is_empty() {
-                    Err("queue_pop() on empty queue".to_string())
-                } else {
-                    Ok(arr.remove(0))
-                }
-            } else {
-                Err("queue_pop() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_front" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = queue {
-                if arr.is_empty() {
-                    Err("queue_front() on empty queue".to_string())
-                } else {
-                    Ok(arr[0].clone())
-                }
-            } else {
-                Err("queue_front() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_back" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = queue {
-                if arr.is_empty() {
-                    Err("queue_back() on empty queue".to_string())
-                } else {
-                    Ok(arr[arr.len() - 1].clone())
-                }
-            } else {
-                Err("queue_back() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_len" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = queue {
-                Ok(Value::Int(arr.len() as i64))
-            } else {
-                Err("queue_len() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_is_empty" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = queue {
-                Ok(Value::Bool(arr.is_empty()))
-            } else {
-                Err("queue_is_empty() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_clear" => {
-            let queue = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(_) = queue {
-                Ok(Value::Array(Vec::new()))
-            } else {
-                Err("queue_clear() expects a Queue (list)".to_string())
-            }
-        }
-        "queue_empty" => {
-            if args.len() != 0 {
-                return Err("queue_empty() takes no arguments".to_string());
-            }
-            Ok(Value::Array(Vec::new()))
-        }
-        // Stack builtins (LIFO: push at back, pop from back)
-        "stack_push" => {
-            let stack = eval_expr(&args[0], env, defs)?;
-            let item = eval_expr(&args[1], env, defs)?;
-            if let Value::Array(mut arr) = stack {
-                arr.push(item);
-                Ok(Value::Array(arr))
-            } else {
-                Err("stack_push() expects a Stack (list)".to_string())
-            }
-        }
-        "stack_pop" => {
-            let stack = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(mut arr) = stack {
-                if arr.is_empty() {
-                    Err("stack_pop() on empty stack".to_string())
-                } else {
-                    Ok(arr.pop().unwrap())
-                }
-            } else {
-                Err("stack_pop() expects a Stack (list)".to_string())
-            }
-        }
-        "stack_peek" => {
-            let stack = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = stack {
-                if arr.is_empty() {
-                    Err("stack_peek() on empty stack".to_string())
-                } else {
-                    Ok(arr[arr.len() - 1].clone())
-                }
-            } else {
-                Err("stack_peek() expects a Stack (list)".to_string())
-            }
-        }
-        "stack_len" => {
-            let stack = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = stack {
-                Ok(Value::Int(arr.len() as i64))
-            } else {
-                Err("stack_len() expects a Stack (list)".to_string())
-            }
-        }
-        "stack_is_empty" => {
-            let stack = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(arr) = stack {
-                Ok(Value::Bool(arr.is_empty()))
-            } else {
-                Err("stack_is_empty() expects a Stack (list)".to_string())
-            }
-        }
-        "stack_clear" => {
-            let stack = eval_expr(&args[0], env, defs)?;
-            if let Value::Array(_) = stack {
-                Ok(Value::Array(Vec::new()))
-            } else {
-                Err("stack_clear() expects a Stack (list)".to_string())
-            }
-        }
-        "stack_empty" => {
-            if args.len() != 0 {
-                return Err("stack_empty() takes no arguments".to_string());
-            }
-            Ok(Value::Array(Vec::new()))
-        }
-        // ===== JSON builtins =====
-        "json_parse" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(text) = s {
-                let jv = json_parse_str(&text)?;
-                Ok(Value::Json(jv))
-            } else {
-                Err("json_parse() expects a string".to_string())
-            }
-        }
-        "json_stringify" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            if let Value::Json(jv) = v {
-                Ok(Value::String(jv.display()))
-            } else {
-                Err("json_stringify() expects a Json value".to_string())
-            }
-        }
-        "json_get" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let k = eval_expr(&args[1], env, defs)?;
-            if let (Value::Json(jv), Value::String(key)) = (v, k) {
-                match &jv {
-                    JsonValue::Object(pairs) => {
-                        for (pk, pv) in pairs {
-                            if pk == &key {
-                                return Ok(Value::Option(Some(Box::new(Value::Json(pv.deep_clone())))));
-                            }
-                        }
-                        Ok(Value::Option(None))
+                "process_kill" => {
+                    if args.len() != 1 {
+                        return Err("process_kill() takes exactly 1 argument".to_string());
                     }
-                    _ => Ok(Value::Option(None)),
+                    let pid_val = eval_expr(&args[0], env, defs)?;
+                    let pid = match pid_val {
+                        Value::Int(i) => i,
+                        _ => return Err("process_kill() expects int pid".to_string()),
+                    };
+                    // In the interpreter, we cannot easily kill a child by PID
+                    // since we do not store Child handles. Return false for now.
+                    Ok(Value::Bool(false))
                 }
-            } else {
-                Err("json_get() expects (Json, string)".to_string())
-            }
-        }
-        "json_has" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let k = eval_expr(&args[1], env, defs)?;
-            if let (Value::Json(jv), Value::String(key)) = (v, k) {
-                match &jv {
-                    JsonValue::Object(pairs) => {
-                        Ok(Value::Bool(pairs.iter().any(|(pk, _)| pk == &key)))
+                "process_status" => {
+                    if args.len() != 1 {
+                        return Err("process_status() takes exactly 1 argument".to_string());
                     }
-                    _ => Ok(Value::Bool(false)),
+                    let pid_val = eval_expr(&args[0], env, defs)?;
+                    let _pid = match pid_val {
+                        Value::Int(i) => i,
+                        _ => return Err("process_status() expects int pid".to_string()),
+                    };
+                    // In the interpreter, we cannot easily get status by PID
+                    // since we do not store Child handles. Return unknown for now.
+                    Ok(Value::String("unknown".to_string()))
                 }
-            } else {
-                Err("json_has() expects (Json, string)".to_string())
-            }
-        }
-        "json_len" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            if let Value::Json(jv) = v {
-                let len = match &jv {
-                    JsonValue::Array(arr) => arr.len() as i64,
-                    JsonValue::Object(pairs) => pairs.len() as i64,
-                    JsonValue::String(s) => s.len() as i64,
-                    _ => return Err("json_len() expects an array, object, or string".to_string()),
-                };
-                Ok(Value::Int(len))
-            } else {
-                Err("json_len() expects a Json value".to_string())
-            }
-        }
-        "json_at" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let idx = eval_expr(&args[1], env, defs)?;
-            if let (Value::Json(jv), Value::Int(i)) = (v, idx) {
-                match &jv {
-                    JsonValue::Array(arr) => {
-                        if i >= 0 && (i as usize) < arr.len() {
-                            Ok(Value::Json(arr[i as usize].deep_clone()))
+                "process_args" => {
+                    if !args.is_empty() {
+                        return Err("process_args() takes no arguments".to_string());
+                    }
+                    // Return the command-line arguments passed to the Lime process
+                    let mut result = Vec::new();
+                    for arg in std::env::args().skip(1) {
+                        result.push(Value::String(arg));
+                    }
+                    Ok(Value::Array(result))
+                }
+                // ===== Requests operations (Phase C-1.12) - delegated to eval_requests_builtin =====
+                _ if func.starts_with("requests_") => {
+                    if let Some(val) = eval_requests_builtin(func, args, env, defs)? {
+                        return Ok(val);
+                    }
+                    return Err(format!("Unknown requests function: {}", func));
+                }
+                // ===== Standard-library runtime builtins (Phase 7/10) =====
+                // List helpers (Lists are represented as Value::Array).
+                "push" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Array(mut arr) = list {
+                        arr.push(item);
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("push() expects a list as first argument".to_string())
+                    }
+                }
+                "pop" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(mut arr) = list {
+                        if let Some(v) = arr.pop() {
+                            Ok(v)
                         } else {
-                            Err(format!("json_at(): index {} out of bounds (len {})", i, arr.len()))
+                            Err("pop() on empty list".to_string())
                         }
+                    } else {
+                        Err("pop() expects a list".to_string())
                     }
-                    _ => Err("json_at() expects a Json array".to_string()),
                 }
-            } else {
-                Err("json_at() expects (Json, int)".to_string())
-            }
-        }
-        "json_as_string" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let jv = match v {
-                Value::Json(jv) => jv,
-                Value::Option(Some(inner)) => match *inner {
-                    Value::Json(jv) => jv,
-                    _ => return Err("json_as_string() expects a Json or Option(Json) value".to_string()),
-                },
-                Value::Option(None) => return Ok(Value::String("".to_string())),
-                _ => return Err("json_as_string() expects a Json value".to_string()),
-            };
-            match &jv {
-                JsonValue::String(s) => Ok(Value::String(s.clone())),
-                JsonValue::Null => Ok(Value::String("".to_string())),
-                other => Ok(Value::String(other.display())),
-            }
-        }
-        "json_as_int" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let jv = match v {
-                Value::Json(jv) => jv,
-                Value::Option(Some(inner)) => match *inner {
-                    Value::Json(jv) => jv,
-                    _ => return Err("json_as_int() expects a Json or Option(Json) value".to_string()),
-                },
-                Value::Option(None) => return Ok(Value::Int(0)),
-                _ => return Err("json_as_int() expects a Json value".to_string()),
-            };
-            match &jv {
-                JsonValue::Int(i) => Ok(Value::Int(*i)),
-                JsonValue::Float(f) => Ok(Value::Int(*f as i64)),
-                JsonValue::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
-                JsonValue::Null => Ok(Value::Int(0)),
-                _ => Err("json_as_int(): cannot convert to int".to_string()),
-            }
-        }
-        "json_as_float" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let jv = match v {
-                Value::Json(jv) => jv,
-                Value::Option(Some(inner)) => match *inner {
-                    Value::Json(jv) => jv,
-                    _ => return Err("json_as_float() expects a Json or Option(Json) value".to_string()),
-                },
-                Value::Option(None) => return Ok(Value::Float(0.0)),
-                _ => return Err("json_as_float() expects a Json value".to_string()),
-            };
-            match &jv {
-                JsonValue::Float(f) => Ok(Value::Float(*f)),
-                JsonValue::Int(i) => Ok(Value::Float(*i as f64)),
-                JsonValue::Null => Ok(Value::Float(0.0)),
-                _ => Err("json_as_float(): cannot convert to float".to_string()),
-            }
-        }
-        "json_as_bool" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let jv = match v {
-                Value::Json(jv) => jv,
-                Value::Option(Some(inner)) => match *inner {
-                    Value::Json(jv) => jv,
-                    _ => return Err("json_as_bool() expects a Json or Option(Json) value".to_string()),
-                },
-                Value::Option(None) => return Ok(Value::Bool(false)),
-                _ => return Err("json_as_bool() expects a Json value".to_string()),
-            };
-            match &jv {
-                JsonValue::Bool(b) => Ok(Value::Bool(*b)),
-                JsonValue::Null => Ok(Value::Bool(false)),
-                JsonValue::Int(i) => Ok(Value::Bool(*i != 0)),
-                JsonValue::Float(f) => Ok(Value::Bool(*f != 0.0)),
-                JsonValue::String(s) => Ok(Value::Bool(!s.is_empty())),
-                JsonValue::Array(arr) => Ok(Value::Bool(!arr.is_empty())),
-                JsonValue::Object(pairs) => Ok(Value::Bool(!pairs.is_empty())),
-            }
-        }
-        "json_null" => {
-            Ok(Value::Json(JsonValue::Null))
-        }
-        "json_object" => {
-            Ok(Value::Json(JsonValue::Object(Vec::new())))
-        }
-        "json_array" => {
-            Ok(Value::Json(JsonValue::Array(Vec::new())))
-        }
-        "json_set" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let k = eval_expr(&args[1], env, defs)?;
-            let val = eval_expr(&args[2], env, defs)?;
-            if let (Value::Json(mut jv), Value::String(key), Value::Json(new_val)) = (v, k, val) {
-                match &mut jv {
-                    JsonValue::Object(pairs) => {
-                        pairs.retain(|(pk, _)| pk != &key);
-                        pairs.push((key, new_val));
-                        Ok(Value::Json(jv))
+                "first" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = list {
+                        arr.first()
+                            .cloned()
+                            .ok_or_else(|| "first() on empty list".to_string())
+                    } else {
+                        Err("first() expects a list".to_string())
                     }
-                    _ => Err("json_set() expects the first argument to be a Json object".to_string()),
                 }
-            } else {
-                Err("json_set() expects (Json, string, Json)".to_string())
-            }
-        }
-        "json_push" => {
-            let v = eval_expr(&args[0], env, defs)?;
-            let elem = eval_expr(&args[1], env, defs)?;
-            if let (Value::Json(mut jv), Value::Json(elem_jv)) = (v, elem) {
-                match &mut jv {
-                    JsonValue::Array(arr) => {
-                        arr.push(elem_jv);
-                        Ok(Value::Json(jv))
+                "last" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = list {
+                        arr.last()
+                            .cloned()
+                            .ok_or_else(|| "last() on empty list".to_string())
+                    } else {
+                        Err("last() expects a list".to_string())
                     }
-                    _ => Err("json_push() expects the first argument to be a Json array".to_string()),
                 }
-            } else {
-                Err("json_push() expects (Json, Json)".to_string())
-            }
-        }
-        // String: case helpers.
-        "to_upper" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::String(a.to_uppercase()))
-            } else {
-                Err("to_upper() expects a string".to_string())
-            }
-        }
-        "to_lower" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::String(a.to_lowercase()))
-            } else {
-                Err("to_lower() expects a string".to_string())
-            }
-        }
-        "repeat" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let n = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::Int(times)) = (s, n) {
-                let times = if times < 0 { 0 } else { times as usize };
-                Ok(Value::String(a.repeat(times)))
-            } else {
-                Err("repeat() expects (string, int)".to_string())
-            }
-        }
-        // std.time runtime builtins.
-        "time_now" => {
-            let secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(0.0);
-            Ok(Value::Float(secs))
-        }
-        "time_sleep" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(secs) = s {
-                if secs > 0.0 {
-                    std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+                "index_of" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Array(arr) = list {
+                        let idx = arr.iter().position(|v| v == &item);
+                        Ok(Value::Int(idx.map(|i| i as i64).unwrap_or(-1)))
+                    } else {
+                        Err("index_of() expects a list".to_string())
+                    }
                 }
-                Ok(Value::Bool(true))
-            } else {
-                Err("time_sleep() expects a float (seconds)".to_string())
-            }
-        }
-        // std.fs extensions (Phase 12 Step 1).
-        "fs_exists" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                Ok(Value::Bool(std::path::Path::new(&path).exists()))
-            } else {
-                Err("fs_exists() expects a string path".to_string())
-            }
-        }
-        "fs_size" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                match std::fs::metadata(&path) {
-                    Ok(m) => Ok(Value::Int(m.len() as i64)),
-                    Err(e) => Err(format!("fs_size('{}') failed: {}", path, e)),
+                "contains_item" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Array(arr) = list {
+                        Ok(Value::Bool(arr.iter().any(|v| v == &item)))
+                    } else {
+                        Err("contains_item() expects a list".to_string())
+                    }
                 }
-            } else {
-                Err("fs_size() expects a string path".to_string())
-            }
-        }
-        "fs_metadata" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                match std::fs::metadata(&path) {
-                    Ok(m) => Ok(Value::Struct {
-                        name: "FileMetadata".to_string(),
-                        fields: vec![
-                            ("size".to_string(), Value::Int(m.len() as i64)),
-                            ("is_dir".to_string(), Value::Bool(m.is_dir())),
-                            ("is_file".to_string(), Value::Bool(m.is_file())),
-                        ],
-                    }),
-                    Err(e) => Err(format!("fs_metadata('{}') failed: {}", path, e)),
+                // String helpers.
+                "contains" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let sub = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (s, sub) {
+                        Ok(Value::Bool(a.contains(&b)))
+                    } else {
+                        Err("contains() expects two strings".to_string())
+                    }
                 }
-            } else {
-                Err("fs_metadata() expects a string path".to_string())
-            }
-        }
-        "fs_list_dir" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                match std::fs::read_dir(&path) {
-                    Ok(rd) => {
-                        let mut out: Vec<Value> = Vec::new();
-                        for e in rd.flatten() {
-                            out.push(Value::String(
-                                e.path().to_string_lossy().to_string(),
-                            ));
+                "starts_with" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let p = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (s, p) {
+                        Ok(Value::Bool(a.starts_with(&b)))
+                    } else {
+                        Err("starts_with() expects two strings".to_string())
+                    }
+                }
+                "ends_with" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let p = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (s, p) {
+                        Ok(Value::Bool(a.ends_with(&b)))
+                    } else {
+                        Err("ends_with() expects two strings".to_string())
+                    }
+                }
+                "trim" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::String(a.trim().to_string()))
+                    } else {
+                        Err("trim() expects a string".to_string())
+                    }
+                }
+                "replace" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let from = eval_expr(&args[1], env, defs)?;
+                    let to = eval_expr(&args[2], env, defs)?;
+                    if let (Value::String(a), Value::String(b), Value::String(c)) = (s, from, to) {
+                        Ok(Value::String(a.replace(&b, &c)))
+                    } else {
+                        Err("replace() expects three strings".to_string())
+                    }
+                }
+                "split" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let sep = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (s, sep) {
+                        let parts: Vec<Value> =
+                            a.split(&b).map(|p| Value::String(p.to_string())).collect();
+                        Ok(Value::Array(parts))
+                    } else {
+                        Err("split() expects two strings".to_string())
+                    }
+                }
+                "slice" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let start = eval_expr(&args[1], env, defs)?;
+                    let end = eval_expr(&args[2], env, defs)?;
+                    if let (Value::String(a), Value::Int(s0), Value::Int(e0)) = (s, start, end) {
+                        let chars: Vec<char> = a.chars().collect();
+                        let s0 = s0.clamp(0, chars.len() as i64) as usize;
+                        let e0 = e0.clamp(0, chars.len() as i64) as usize;
+                        let e0 = e0.max(s0);
+                        Ok(Value::String(chars[s0..e0].iter().collect()))
+                    } else {
+                        Err("slice() expects (string, int, int)".to_string())
+                    }
+                }
+                "byte_len" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::Int(a.len() as i64))
+                    } else {
+                        Err("byte_len() expects a string".to_string())
+                    }
+                }
+                // ===== Phase 12 Step 1: std library runtime builtins =====
+                // List: reverse (returns a new reversed list, non-mutating).
+                "reverse" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(mut arr) = list {
+                        arr.reverse();
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("reverse() expects a list".to_string())
+                    }
+                }
+                // List: remove the element at `idx`, returning the new list.
+                "remove_at" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let idx = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
+                        if i < 0 || (i as usize) >= arr.len() {
+                            return Err("remove_at() index out of bounds".to_string());
                         }
-                        Ok(Value::Array(out))
+                        arr.remove(i as usize);
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("remove_at() expects (list, int)".to_string())
                     }
-                    Err(e) => Err(format!("fs_list_dir('{}') failed: {}", path, e)),
                 }
-            } else {
-                Err("fs_list_dir() expects a string path".to_string())
-            }
-        }
-        "fs_create_dir" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                std::fs::create_dir_all(&path)
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("fs_create_dir('{}') failed: {}", path, e))
-            } else {
-                Err("fs_create_dir() expects a string path".to_string())
-            }
-        }
-        "fs_copy" => {
-            let src = eval_expr(&args[0], env, defs)?;
-            let dst = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(s), Value::String(d)) = (src, dst) {
-                std::fs::copy(&s, &d)
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("fs_copy('{}', '{}') failed: {}", s, d, e))
-            } else {
-                Err("fs_copy() expects (string src, string dst)".to_string())
-            }
-        }
-        "fs_rename" => {
-            let src = eval_expr(&args[0], env, defs)?;
-            let dst = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(s), Value::String(d)) = (src, dst) {
-                std::fs::rename(&s, &d)
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("fs_rename('{}', '{}') failed: {}", s, d, e))
-            } else {
-                Err("fs_rename() expects (string src, string dst)".to_string())
-            }
-        }
-        "fs_is_file" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                Ok(Value::Bool(std::path::Path::new(&path).is_file()))
-            } else {
-                Err("fs_is_file() expects a string path".to_string())
-            }
-        }
-        "fs_is_dir" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                Ok(Value::Bool(std::path::Path::new(&path).is_dir()))
-            } else {
-                Err("fs_is_dir() expects a string path".to_string())
-            }
-        }
-        "fs_remove_dir" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                std::fs::remove_dir(&path)
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("fs_remove_dir('{}') failed: {}", path, e))
-            } else {
-                Err("fs_remove_dir() expects a string path".to_string())
-            }
-        }
-        "fs_read_lines" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                match std::fs::read_to_string(&path) {
-                    Ok(content) => {
-                        let lines: Vec<Value> = content
-                            .lines()
-                            .map(|l| Value::String(l.to_string()))
-                            .collect();
-                        Ok(Value::Array(lines))
+                "list_insert" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let idx = eval_expr(&args[1], env, defs)?;
+                    let item = eval_expr(&args[2], env, defs)?;
+                    if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
+                        let idx = if i < 0 { 0 } else { i as usize };
+                        let idx = idx.min(arr.len());
+                        arr.insert(idx, item);
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("list_insert() expects (list, int, T)".to_string())
                     }
-                    Err(e) => Err(format!("fs_read_lines('{}') failed: {}", path, e)),
                 }
-            } else {
-                Err("fs_read_lines() expects a string path".to_string())
-            }
-        }
-        "fs_write_lines" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            let lines_val = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(path), Value::Array(lines)) = (p, lines_val) {
-                let parts: Result<Vec<String>, _> = lines
-                    .iter()
-                    .map(|v| match v {
-                        Value::String(s) => Ok(s.clone()),
-                        _ => Err("fs_write_lines() line elements must be strings".to_string()),
-                    })
-                    .collect();
-                match parts {
-                    Ok(strs) => {
-                        let content = strs.join("\n");
-                        std::fs::write(&path, content)
+                "list_set" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let idx = eval_expr(&args[1], env, defs)?;
+                    let item = eval_expr(&args[2], env, defs)?;
+                    if let (Value::Array(mut arr), Value::Int(i)) = (list, idx) {
+                        if i >= 0 && (i as usize) < arr.len() {
+                            arr[i as usize] = item;
+                        }
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("list_set() expects (list, int, T)".to_string())
+                    }
+                }
+                "list_get" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    let idx = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Array(arr), Value::Int(i)) = (list, idx) {
+                        if i >= 0 && (i as usize) < arr.len() {
+                            Ok(arr[i as usize].clone())
+                        } else {
+                            Ok(Value::Int(0))
+                        }
+                    } else {
+                        Err("list_get() expects (list, int)".to_string())
+                    }
+                }
+                "list_clear" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(_) = list {
+                        Ok(Value::Array(Vec::new()))
+                    } else {
+                        Err("list_clear() expects a list".to_string())
+                    }
+                }
+                "list_sort" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = list {
+                        let mut sorted = arr.clone();
+                        sorted.sort_by(|a, b| a.compare(b));
+                        Ok(Value::Array(sorted))
+                    } else {
+                        Err("list_sort() expects a list".to_string())
+                    }
+                }
+                "list_clone" => {
+                    let list = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = list {
+                        Ok(Value::Array(arr.clone()))
+                    } else {
+                        Err("list_clone() expects a list".to_string())
+                    }
+                }
+                "list_empty" => Ok(Value::Array(Vec::new())),
+                // Map builtins
+                "map_len" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    if let Value::Map(m) = &map {
+                        Ok(Value::Int(m.len() as i64))
+                    } else {
+                        Err("map_len() expects a Map".to_string())
+                    }
+                }
+                "map_is_empty" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    if let Value::Map(m) = &map {
+                        Ok(Value::Bool(m.is_empty()))
+                    } else {
+                        Err("map_is_empty() expects a Map".to_string())
+                    }
+                }
+                "map_insert" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    let key = eval_expr(&args[1], env, defs)?;
+                    let val = eval_expr(&args[2], env, defs)?;
+                    if let Value::Map(mut m) = map {
+                        let mut new_map = m.clone();
+                        new_map.insert(key, val);
+                        Ok(Value::Map(new_map))
+                    } else {
+                        Err("map_insert() expects a Map".to_string())
+                    }
+                }
+                "map_get" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    let key = eval_expr(&args[1], env, defs)?;
+                    if let Value::Map(m) = &map {
+                        Ok(m.get(&key).cloned().unwrap_or(Value::Int(0)))
+                    } else {
+                        Err("map_get() expects a Map".to_string())
+                    }
+                }
+                "map_remove" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    let key = eval_expr(&args[1], env, defs)?;
+                    if let Value::Map(mut m) = map {
+                        m.remove(&key);
+                        Ok(Value::Map(m))
+                    } else {
+                        Err("map_remove() expects a Map".to_string())
+                    }
+                }
+                "map_contains_key" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    let key = eval_expr(&args[1], env, defs)?;
+                    if let Value::Map(m) = &map {
+                        Ok(Value::Bool(m.contains_key(&key)))
+                    } else {
+                        Err("map_contains_key() expects a Map".to_string())
+                    }
+                }
+                "map_keys" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    if let Value::Map(m) = &map {
+                        Ok(Value::Array(m.keys().cloned().collect()))
+                    } else {
+                        Err("map_keys() expects a Map".to_string())
+                    }
+                }
+                "map_values" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    if let Value::Map(m) = &map {
+                        Ok(Value::Array(m.values().cloned().collect()))
+                    } else {
+                        Err("map_values() expects a Map".to_string())
+                    }
+                }
+                "map_clear" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    if let Value::Map(_) = map {
+                        Ok(Value::Map(HashMap::new()))
+                    } else {
+                        Err("map_clear() expects a Map".to_string())
+                    }
+                }
+                "map_clone" => {
+                    let map = eval_expr(&args[0], env, defs)?;
+                    if let Value::Map(m) = map {
+                        Ok(Value::Map(m))
+                    } else {
+                        Err("map_clone() expects a Map".to_string())
+                    }
+                }
+                "map_empty" => Ok(Value::Map(HashMap::new())),
+                // Set builtins
+                "set_len" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    if let Value::Set(s) = &set {
+                        Ok(Value::Int(s.len() as i64))
+                    } else {
+                        Err("set_len() expects a Set".to_string())
+                    }
+                }
+                "set_is_empty" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    if let Value::Set(s) = &set {
+                        Ok(Value::Bool(s.is_empty()))
+                    } else {
+                        Err("set_is_empty() expects a Set".to_string())
+                    }
+                }
+                "set_add" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Set(mut s) = set {
+                        s.insert(item);
+                        Ok(Value::Set(s))
+                    } else {
+                        Err("set_add() expects a Set".to_string())
+                    }
+                }
+                "set_remove" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Set(mut s) = set {
+                        s.remove(&item);
+                        Ok(Value::Set(s))
+                    } else {
+                        Err("set_remove() expects a Set".to_string())
+                    }
+                }
+                "set_contains" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Set(s) = &set {
+                        Ok(Value::Bool(s.contains(&item)))
+                    } else {
+                        Err("set_contains() expects a Set".to_string())
+                    }
+                }
+                "set_clear" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    if let Value::Set(_) = set {
+                        Ok(Value::Set(HashSet::new()))
+                    } else {
+                        Err("set_clear() expects a Set".to_string())
+                    }
+                }
+                "set_clone" => {
+                    let set = eval_expr(&args[0], env, defs)?;
+                    if let Value::Set(s) = set {
+                        Ok(Value::Set(s))
+                    } else {
+                        Err("set_clone() expects a Set".to_string())
+                    }
+                }
+                "set_empty" => Ok(Value::Set(HashSet::new())),
+                // Queue builtins (FIFO: push at back, pop from front)
+                "queue_push" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Array(mut arr) = queue {
+                        arr.push(item);
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("queue_push() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_pop" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(mut arr) = queue {
+                        if arr.is_empty() {
+                            Err("queue_pop() on empty queue".to_string())
+                        } else {
+                            Ok(arr.remove(0))
+                        }
+                    } else {
+                        Err("queue_pop() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_front" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = queue {
+                        if arr.is_empty() {
+                            Err("queue_front() on empty queue".to_string())
+                        } else {
+                            Ok(arr[0].clone())
+                        }
+                    } else {
+                        Err("queue_front() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_back" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = queue {
+                        if arr.is_empty() {
+                            Err("queue_back() on empty queue".to_string())
+                        } else {
+                            Ok(arr[arr.len() - 1].clone())
+                        }
+                    } else {
+                        Err("queue_back() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_len" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = queue {
+                        Ok(Value::Int(arr.len() as i64))
+                    } else {
+                        Err("queue_len() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_is_empty" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = queue {
+                        Ok(Value::Bool(arr.is_empty()))
+                    } else {
+                        Err("queue_is_empty() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_clear" => {
+                    let queue = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(_) = queue {
+                        Ok(Value::Array(Vec::new()))
+                    } else {
+                        Err("queue_clear() expects a Queue (list)".to_string())
+                    }
+                }
+                "queue_empty" => {
+                    if args.len() != 0 {
+                        return Err("queue_empty() takes no arguments".to_string());
+                    }
+                    Ok(Value::Array(Vec::new()))
+                }
+                // Stack builtins (LIFO: push at back, pop from back)
+                "stack_push" => {
+                    let stack = eval_expr(&args[0], env, defs)?;
+                    let item = eval_expr(&args[1], env, defs)?;
+                    if let Value::Array(mut arr) = stack {
+                        arr.push(item);
+                        Ok(Value::Array(arr))
+                    } else {
+                        Err("stack_push() expects a Stack (list)".to_string())
+                    }
+                }
+                "stack_pop" => {
+                    let stack = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(mut arr) = stack {
+                        if arr.is_empty() {
+                            Err("stack_pop() on empty stack".to_string())
+                        } else {
+                            Ok(arr.pop().unwrap())
+                        }
+                    } else {
+                        Err("stack_pop() expects a Stack (list)".to_string())
+                    }
+                }
+                "stack_peek" => {
+                    let stack = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = stack {
+                        if arr.is_empty() {
+                            Err("stack_peek() on empty stack".to_string())
+                        } else {
+                            Ok(arr[arr.len() - 1].clone())
+                        }
+                    } else {
+                        Err("stack_peek() expects a Stack (list)".to_string())
+                    }
+                }
+                "stack_len" => {
+                    let stack = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = stack {
+                        Ok(Value::Int(arr.len() as i64))
+                    } else {
+                        Err("stack_len() expects a Stack (list)".to_string())
+                    }
+                }
+                "stack_is_empty" => {
+                    let stack = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(arr) = stack {
+                        Ok(Value::Bool(arr.is_empty()))
+                    } else {
+                        Err("stack_is_empty() expects a Stack (list)".to_string())
+                    }
+                }
+                "stack_clear" => {
+                    let stack = eval_expr(&args[0], env, defs)?;
+                    if let Value::Array(_) = stack {
+                        Ok(Value::Array(Vec::new()))
+                    } else {
+                        Err("stack_clear() expects a Stack (list)".to_string())
+                    }
+                }
+                "stack_empty" => {
+                    if args.len() != 0 {
+                        return Err("stack_empty() takes no arguments".to_string());
+                    }
+                    Ok(Value::Array(Vec::new()))
+                }
+                // ===== JSON builtins =====
+                "json_parse" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(text) = s {
+                        let jv = json_parse_str(&text)?;
+                        Ok(Value::Json(jv))
+                    } else {
+                        Err("json_parse() expects a string".to_string())
+                    }
+                }
+                "json_stringify" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    if let Value::Json(jv) = v {
+                        Ok(Value::String(jv.display()))
+                    } else {
+                        Err("json_stringify() expects a Json value".to_string())
+                    }
+                }
+                "json_get" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let k = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Json(jv), Value::String(key)) = (v, k) {
+                        match &jv {
+                            JsonValue::Object(pairs) => {
+                                for (pk, pv) in pairs {
+                                    if pk == &key {
+                                        return Ok(Value::Option(Some(Box::new(Value::Json(
+                                            pv.deep_clone(),
+                                        )))));
+                                    }
+                                }
+                                Ok(Value::Option(None))
+                            }
+                            _ => Ok(Value::Option(None)),
+                        }
+                    } else {
+                        Err("json_get() expects (Json, string)".to_string())
+                    }
+                }
+                "json_has" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let k = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Json(jv), Value::String(key)) = (v, k) {
+                        match &jv {
+                            JsonValue::Object(pairs) => {
+                                Ok(Value::Bool(pairs.iter().any(|(pk, _)| pk == &key)))
+                            }
+                            _ => Ok(Value::Bool(false)),
+                        }
+                    } else {
+                        Err("json_has() expects (Json, string)".to_string())
+                    }
+                }
+                "json_len" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    if let Value::Json(jv) = v {
+                        let len = match &jv {
+                            JsonValue::Array(arr) => arr.len() as i64,
+                            JsonValue::Object(pairs) => pairs.len() as i64,
+                            JsonValue::String(s) => s.len() as i64,
+                            _ => {
+                                return Err(
+                                    "json_len() expects an array, object, or string".to_string()
+                                );
+                            }
+                        };
+                        Ok(Value::Int(len))
+                    } else {
+                        Err("json_len() expects a Json value".to_string())
+                    }
+                }
+                "json_at" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let idx = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Json(jv), Value::Int(i)) = (v, idx) {
+                        match &jv {
+                            JsonValue::Array(arr) => {
+                                if i >= 0 && (i as usize) < arr.len() {
+                                    Ok(Value::Json(arr[i as usize].deep_clone()))
+                                } else {
+                                    Err(format!(
+                                        "json_at(): index {} out of bounds (len {})",
+                                        i,
+                                        arr.len()
+                                    ))
+                                }
+                            }
+                            _ => Err("json_at() expects a Json array".to_string()),
+                        }
+                    } else {
+                        Err("json_at() expects (Json, int)".to_string())
+                    }
+                }
+                "json_as_string" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let jv = match v {
+                        Value::Json(jv) => jv,
+                        Value::Option(Some(inner)) => match *inner {
+                            Value::Json(jv) => jv,
+                            _ => {
+                                return Err("json_as_string() expects a Json or Option(Json) value"
+                                    .to_string());
+                            }
+                        },
+                        Value::Option(None) => return Ok(Value::String("".to_string())),
+                        _ => return Err("json_as_string() expects a Json value".to_string()),
+                    };
+                    match &jv {
+                        JsonValue::String(s) => Ok(Value::String(s.clone())),
+                        JsonValue::Null => Ok(Value::String("".to_string())),
+                        other => Ok(Value::String(other.display())),
+                    }
+                }
+                "json_as_int" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let jv = match v {
+                        Value::Json(jv) => jv,
+                        Value::Option(Some(inner)) => match *inner {
+                            Value::Json(jv) => jv,
+                            _ => {
+                                return Err("json_as_int() expects a Json or Option(Json) value"
+                                    .to_string());
+                            }
+                        },
+                        Value::Option(None) => return Ok(Value::Int(0)),
+                        _ => return Err("json_as_int() expects a Json value".to_string()),
+                    };
+                    match &jv {
+                        JsonValue::Int(i) => Ok(Value::Int(*i)),
+                        JsonValue::Float(f) => Ok(Value::Int(*f as i64)),
+                        JsonValue::Bool(b) => Ok(Value::Int(if *b { 1 } else { 0 })),
+                        JsonValue::Null => Ok(Value::Int(0)),
+                        _ => Err("json_as_int(): cannot convert to int".to_string()),
+                    }
+                }
+                "json_as_float" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let jv = match v {
+                        Value::Json(jv) => jv,
+                        Value::Option(Some(inner)) => match *inner {
+                            Value::Json(jv) => jv,
+                            _ => {
+                                return Err("json_as_float() expects a Json or Option(Json) value"
+                                    .to_string());
+                            }
+                        },
+                        Value::Option(None) => return Ok(Value::Float(0.0)),
+                        _ => return Err("json_as_float() expects a Json value".to_string()),
+                    };
+                    match &jv {
+                        JsonValue::Float(f) => Ok(Value::Float(*f)),
+                        JsonValue::Int(i) => Ok(Value::Float(*i as f64)),
+                        JsonValue::Null => Ok(Value::Float(0.0)),
+                        _ => Err("json_as_float(): cannot convert to float".to_string()),
+                    }
+                }
+                "json_as_bool" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let jv = match v {
+                        Value::Json(jv) => jv,
+                        Value::Option(Some(inner)) => match *inner {
+                            Value::Json(jv) => jv,
+                            _ => {
+                                return Err("json_as_bool() expects a Json or Option(Json) value"
+                                    .to_string());
+                            }
+                        },
+                        Value::Option(None) => return Ok(Value::Bool(false)),
+                        _ => return Err("json_as_bool() expects a Json value".to_string()),
+                    };
+                    match &jv {
+                        JsonValue::Bool(b) => Ok(Value::Bool(*b)),
+                        JsonValue::Null => Ok(Value::Bool(false)),
+                        JsonValue::Int(i) => Ok(Value::Bool(*i != 0)),
+                        JsonValue::Float(f) => Ok(Value::Bool(*f != 0.0)),
+                        JsonValue::String(s) => Ok(Value::Bool(!s.is_empty())),
+                        JsonValue::Array(arr) => Ok(Value::Bool(!arr.is_empty())),
+                        JsonValue::Object(pairs) => Ok(Value::Bool(!pairs.is_empty())),
+                    }
+                }
+                "json_null" => Ok(Value::Json(JsonValue::Null)),
+                "json_object" => Ok(Value::Json(JsonValue::Object(Vec::new()))),
+                "json_array" => Ok(Value::Json(JsonValue::Array(Vec::new()))),
+                "json_set" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let k = eval_expr(&args[1], env, defs)?;
+                    let val = eval_expr(&args[2], env, defs)?;
+                    if let (Value::Json(mut jv), Value::String(key), Value::Json(new_val)) =
+                        (v, k, val)
+                    {
+                        match &mut jv {
+                            JsonValue::Object(pairs) => {
+                                pairs.retain(|(pk, _)| pk != &key);
+                                pairs.push((key, new_val));
+                                Ok(Value::Json(jv))
+                            }
+                            _ => Err("json_set() expects the first argument to be a Json object"
+                                .to_string()),
+                        }
+                    } else {
+                        Err("json_set() expects (Json, string, Json)".to_string())
+                    }
+                }
+                "json_push" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let elem = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Json(mut jv), Value::Json(elem_jv)) = (v, elem) {
+                        match &mut jv {
+                            JsonValue::Array(arr) => {
+                                arr.push(elem_jv);
+                                Ok(Value::Json(jv))
+                            }
+                            _ => Err("json_push() expects the first argument to be a Json array"
+                                .to_string()),
+                        }
+                    } else {
+                        Err("json_push() expects (Json, Json)".to_string())
+                    }
+                }
+                // String: case helpers.
+                "to_upper" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::String(a.to_uppercase()))
+                    } else {
+                        Err("to_upper() expects a string".to_string())
+                    }
+                }
+                "to_lower" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::String(a.to_lowercase()))
+                    } else {
+                        Err("to_lower() expects a string".to_string())
+                    }
+                }
+                "repeat" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let n = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::Int(times)) = (s, n) {
+                        let times = if times < 0 { 0 } else { times as usize };
+                        Ok(Value::String(a.repeat(times)))
+                    } else {
+                        Err("repeat() expects (string, int)".to_string())
+                    }
+                }
+                // std.time runtime builtins.
+                "time_now" => {
+                    let secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0);
+                    Ok(Value::Float(secs))
+                }
+                "time_sleep" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(secs) = s {
+                        if secs > 0.0 {
+                            std::thread::sleep(std::time::Duration::from_secs_f64(secs));
+                        }
+                        Ok(Value::Bool(true))
+                    } else {
+                        Err("time_sleep() expects a float (seconds)".to_string())
+                    }
+                }
+                // std.fs extensions (Phase 12 Step 1).
+                "fs_exists" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        Ok(Value::Bool(std::path::Path::new(&path).exists()))
+                    } else {
+                        Err("fs_exists() expects a string path".to_string())
+                    }
+                }
+                "fs_size" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        match std::fs::metadata(&path) {
+                            Ok(m) => Ok(Value::Int(m.len() as i64)),
+                            Err(e) => Err(format!("fs_size('{}') failed: {}", path, e)),
+                        }
+                    } else {
+                        Err("fs_size() expects a string path".to_string())
+                    }
+                }
+                "fs_metadata" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        match std::fs::metadata(&path) {
+                            Ok(m) => Ok(Value::Struct {
+                                name: "FileMetadata".to_string(),
+                                fields: vec![
+                                    ("size".to_string(), Value::Int(m.len() as i64)),
+                                    ("is_dir".to_string(), Value::Bool(m.is_dir())),
+                                    ("is_file".to_string(), Value::Bool(m.is_file())),
+                                ],
+                            }),
+                            Err(e) => Err(format!("fs_metadata('{}') failed: {}", path, e)),
+                        }
+                    } else {
+                        Err("fs_metadata() expects a string path".to_string())
+                    }
+                }
+                "fs_list_dir" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        match std::fs::read_dir(&path) {
+                            Ok(rd) => {
+                                let mut out: Vec<Value> = Vec::new();
+                                for e in rd.flatten() {
+                                    out.push(Value::String(e.path().to_string_lossy().to_string()));
+                                }
+                                Ok(Value::Array(out))
+                            }
+                            Err(e) => Err(format!("fs_list_dir('{}') failed: {}", path, e)),
+                        }
+                    } else {
+                        Err("fs_list_dir() expects a string path".to_string())
+                    }
+                }
+                "fs_create_dir" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        std::fs::create_dir_all(&path)
                             .map(|_| Value::Bool(true))
-                            .map_err(|e| format!("fs_write_lines('{}') failed: {}", path, e))
+                            .map_err(|e| format!("fs_create_dir('{}') failed: {}", path, e))
+                    } else {
+                        Err("fs_create_dir() expects a string path".to_string())
                     }
-                    Err(e) => Err(e),
                 }
-            } else {
-                Err("fs_write_lines() expects (string path, list lines)".to_string())
-            }
-        }
-        // Math helpers.
-        "abs" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.abs()))
-            } else {
-                Err("abs() expects a float".to_string())
-            }
-        }
-        "floor" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.floor()))
-            } else {
-                Err("floor() expects a float".to_string())
-            }
-        }
-        "ceil" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.ceil()))
-            } else {
-                Err("ceil() expects a float".to_string())
-            }
-        }
-        "round" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.round()))
-            } else {
-                Err("round() expects a float".to_string())
-            }
-        }
-        "min" => {
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            if let (Value::Float(x), Value::Float(y)) = (a, b) {
-                Ok(Value::Float(x.min(y)))
-            } else {
-                Err("min() expects two floats".to_string())
-            }
-        }
-        "max" => {
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            if let (Value::Float(x), Value::Float(y)) = (a, b) {
-                Ok(Value::Float(x.max(y)))
-            } else {
-                Err("max() expects two floats".to_string())
-            }
-        }
-        "clamp" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            let lo = eval_expr(&args[1], env, defs)?;
-            let hi = eval_expr(&args[2], env, defs)?;
-            if let (Value::Float(a), Value::Float(b), Value::Float(c)) = (x, lo, hi) {
-                Ok(Value::Float(a.max(b).min(c)))
-            } else {
-                Err("clamp() expects (float, float, float)".to_string())
-            }
-        }
-        "sqrt" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.sqrt()))
-            } else {
-                Err("sqrt() expects a float".to_string())
-            }
-        }
-        "pow" => {
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            if let (Value::Float(x), Value::Float(y)) = (a, b) {
-                Ok(Value::Float(x.powf(y)))
-            } else {
-                Err("pow() expects two floats".to_string())
-            }
-        }
-        "trunc" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.trunc()))
-            } else {
-                Err("trunc() expects a float".to_string())
-            }
-        }
-        "exp" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.exp()))
-            } else {
-                Err("exp() expects a float".to_string())
-            }
-        }
-        "log" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.ln()))
-            } else {
-                Err("log() expects a float".to_string())
-            }
-        }
-        "log10" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.log10()))
-            } else {
-                Err("log10() expects a float".to_string())
-            }
-        }
-        "sin" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.sin()))
-            } else {
-                Err("sin() expects a float".to_string())
-            }
-        }
-        "cos" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.cos()))
-            } else {
-                Err("cos() expects a float".to_string())
-            }
-        }
-        "tan" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.tan()))
-            } else {
-                Err("tan() expects a float".to_string())
-            }
-        }
-        "asin" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.asin()))
-            } else {
-                Err("asin() expects a float".to_string())
-            }
-        }
-        "acos" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.acos()))
-            } else {
-                Err("acos() expects a float".to_string())
-            }
-        }
-        "atan" => {
-            let x = eval_expr(&args[0], env, defs)?;
-            if let Value::Float(f) = x {
-                Ok(Value::Float(f.atan()))
-            } else {
-                Err("atan() expects a float".to_string())
-            }
-        }
-        "math_pi" => {
-            Ok(Value::Float(std::f64::consts::PI))
-        }
-        "math_e" => {
-            Ok(Value::Float(std::f64::consts::E))
-        }
-        // ===== std.io runtime builtin =====
-        "input" => {
-            use std::io::Write as _;
-            if let Some(p) = args.first() {
-                let prompt = eval_expr(p, env, defs)?;
-                print!("{}", prompt.to_string());
-                let _ = std::io::stdout().flush();
-            }
-            let mut line = String::new();
-            std::io::stdin()
-                .read_line(&mut line)
-                .map_err(|e| format!("input() failed: {}", e))?;
-            Ok(Value::String(line.trim_end_matches(['\n', '\r']).to_string()))
-        }
-        "eprint" => {
-            use std::io::Write as _;
-            for arg in args {
-                let val = eval_expr(arg, env, defs)?;
-                eprint!("{}", val.to_string());
-            }
-            let _ = std::io::stderr().flush();
-            Ok(Value::Int(0))
-        }
-        "eprintln" => {
-            use std::io::Write as _;
-            for arg in args {
-                let val = eval_expr(arg, env, defs)?;
-                eprintln!("{}", val.to_string());
-            }
-            let _ = std::io::stderr().flush();
-            Ok(Value::Int(0))
-        }
-        "io_read_line" => {
-            use std::io::Write as _;
-            let _ = std::io::stdout().flush();
-            let mut line = String::new();
-            std::io::stdin()
-                .read_line(&mut line)
-                .map_err(|e| format!("io_read_line() failed: {}", e))?;
-            Ok(Value::String(line.trim_end_matches(['\n', '\r']).to_string()))
-        }
-        "io_read_all" => {
-            use std::io::Read as _;
-            let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .map_err(|e| format!("io_read_all() failed: {}", e))?;
-            Ok(Value::String(buf))
-        }
-        "io_write_stdout" => {
-            use std::io::Write as _;
-            let v = eval_expr(&args[0], env, defs)?;
-            if let Value::String(s) = v {
-                let result = std::io::stdout().write_all(s.as_bytes());
-                Ok(Value::Bool(result.is_ok()))
-            } else {
-                Err("io_write_stdout() expects a string".to_string())
-            }
-        }
-        "io_write_stderr" => {
-            use std::io::Write as _;
-            let v = eval_expr(&args[0], env, defs)?;
-            if let Value::String(s) = v {
-                let result = std::io::stderr().write_all(s.as_bytes());
-                Ok(Value::Bool(result.is_ok()))
-            } else {
-                Err("io_write_stderr() expects a string".to_string())
-            }
-        }
-        // ===== std.fs runtime builtins (Phase 10 P3) =====
-        "read_file" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                fs::read_to_string(&path)
-                    .map(Value::String)
-                    .map_err(|e| format!("read_file('{}') failed: {}", path, e))
-            } else {
-                Err("read_file() expects a string path".to_string())
-            }
-        }
-        "write_file" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            let c = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(path), Value::String(content)) = (p, c) {
-                fs::write(&path, content)
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("write_file('{}') failed: {}", path, e))
-            } else {
-                Err("write_file() expects (string path, string content)".to_string())
-            }
-        }
-        "append_file" => {
-            use std::io::Write as _;
-            let p = eval_expr(&args[0], env, defs)?;
-            let c = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(path), Value::String(content)) = (p, c) {
-                let mut f = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path)
-                    .map_err(|e| format!("append_file('{}') failed: {}", path, e))?;
-                f.write_all(content.as_bytes())
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("append_file('{}') failed: {}", path, e))
-            } else {
-                Err("append_file() expects (string path, string content)".to_string())
-            }
-        }
-        "file_exists" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                Ok(Value::Bool(std::path::Path::new(&path).exists()))
-            } else {
-                Err("file_exists() expects a string path".to_string())
-            }
-        }
-        "remove_file" => {
-            let p = eval_expr(&args[0], env, defs)?;
-            if let Value::String(path) = p {
-                fs::remove_file(&path)
-                    .map(|_| Value::Bool(true))
-                    .map_err(|e| format!("remove_file('{}') failed: {}", path, e))
-            } else {
-                Err("remove_file() expects a string path".to_string())
-            }
-        }
-        "is_empty" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::Bool(a.is_empty()))
-            } else {
-                Err("is_empty() expects a string".to_string())
-            }
-        }
-        "find" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let sub = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (s, sub) {
-                match a.find(&b) {
-                    Some(i) => Ok(Value::Int(i as i64)),
-                    None => Ok(Value::Int(-1)),
+                "fs_copy" => {
+                    let src = eval_expr(&args[0], env, defs)?;
+                    let dst = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(s), Value::String(d)) = (src, dst) {
+                        std::fs::copy(&s, &d)
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("fs_copy('{}', '{}') failed: {}", s, d, e))
+                    } else {
+                        Err("fs_copy() expects (string src, string dst)".to_string())
+                    }
                 }
-            } else {
-                Err("find() expects two strings".to_string())
-            }
-        }
-        "count" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            let sub = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (s, sub) {
-                if b.is_empty() {
-                    Ok(Value::Int(a.chars().count() as i64))
-                } else {
-                    Ok(Value::Int(a.matches(&b).count() as i64))
+                "fs_rename" => {
+                    let src = eval_expr(&args[0], env, defs)?;
+                    let dst = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(s), Value::String(d)) = (src, dst) {
+                        std::fs::rename(&s, &d)
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("fs_rename('{}', '{}') failed: {}", s, d, e))
+                    } else {
+                        Err("fs_rename() expects (string src, string dst)".to_string())
+                    }
                 }
-            } else {
-                Err("count() expects two strings".to_string())
-            }
-        }
-        "trim_start" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::String(a.trim_start().to_string()))
-            } else {
-                Err("trim_start() expects a string".to_string())
-            }
-        }
-        "trim_end" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::String(a.trim_end().to_string()))
-            } else {
-                Err("trim_end() expects a string".to_string())
-            }
-        }
-        "join" => {
-            let sep = eval_expr(&args[0], env, defs)?;
-            let list = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(s), Value::Array(arr)) = (sep, list) {
-                let strs: Result<Vec<String>, _> = arr
-                    .iter()
-                    .map(|v| match v {
-                        Value::String(s) => Ok(s.clone()),
-                        _ => Err("join() list elements must be strings".to_string()),
-                    })
-                    .collect();
-                match strs {
-                    Ok(parts) => Ok(Value::String(parts.join(&s))),
-                    Err(e) => Err(e),
+                "fs_is_file" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        Ok(Value::Bool(std::path::Path::new(&path).is_file()))
+                    } else {
+                        Err("fs_is_file() expects a string path".to_string())
+                    }
                 }
-            } else {
-                Err("join() expects (string, list)".to_string())
-            }
-        }
-        "to_int" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                Ok(Value::Int(a.trim().parse::<i64>().unwrap_or(0)))
-            } else {
-                Err("to_int() expects a string".to_string())
-            }
-        }
-        "to_float" => {
-            let s = eval_expr(&args[0], env, defs)?;
-            if let Value::String(a) = s {
-                match a.trim().parse::<f64>() {
-                    Ok(f) => Ok(Value::Float(f)),
-                    Err(_) => Ok(Value::Float(0.0)),
+                "fs_is_dir" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        Ok(Value::Bool(std::path::Path::new(&path).is_dir()))
+                    } else {
+                        Err("fs_is_dir() expects a string path".to_string())
+                    }
                 }
-            } else {
-                Err("to_float() expects a string".to_string())
-            }
-        }
-        "equals" => {
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (a, b) {
-                Ok(Value::Bool(a == b))
-            } else {
-                Err("equals() expects two strings".to_string())
-            }
-        }
-        "compare" => {
-            let a = eval_expr(&args[0], env, defs)?;
-            let b = eval_expr(&args[1], env, defs)?;
-            if let (Value::String(a), Value::String(b)) = (a, b) {
-                use std::cmp::Ordering;
-                let r = match a.cmp(&b) {
-                    Ordering::Less => -1,
-                    Ordering::Equal => 0,
-                    Ordering::Greater => 1,
-                };
-                Ok(Value::Int(r))
-            } else {
-                Err("compare() expects two strings".to_string())
-            }
-        }
-        other => {
+                "fs_remove_dir" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        std::fs::remove_dir(&path)
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("fs_remove_dir('{}') failed: {}", path, e))
+                    } else {
+                        Err("fs_remove_dir() expects a string path".to_string())
+                    }
+                }
+                "fs_read_lines" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        match std::fs::read_to_string(&path) {
+                            Ok(content) => {
+                                let lines: Vec<Value> = content
+                                    .lines()
+                                    .map(|l| Value::String(l.to_string()))
+                                    .collect();
+                                Ok(Value::Array(lines))
+                            }
+                            Err(e) => Err(format!("fs_read_lines('{}') failed: {}", path, e)),
+                        }
+                    } else {
+                        Err("fs_read_lines() expects a string path".to_string())
+                    }
+                }
+                "fs_write_lines" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    let lines_val = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(path), Value::Array(lines)) = (p, lines_val) {
+                        let parts: Result<Vec<String>, _> =
+                            lines
+                                .iter()
+                                .map(|v| match v {
+                                    Value::String(s) => Ok(s.clone()),
+                                    _ => Err("fs_write_lines() line elements must be strings"
+                                        .to_string()),
+                                })
+                                .collect();
+                        match parts {
+                            Ok(strs) => {
+                                let content = strs.join("\n");
+                                std::fs::write(&path, content)
+                                    .map(|_| Value::Bool(true))
+                                    .map_err(|e| {
+                                        format!("fs_write_lines('{}') failed: {}", path, e)
+                                    })
+                            }
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        Err("fs_write_lines() expects (string path, list lines)".to_string())
+                    }
+                }
+                // Math helpers.
+                "abs" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.abs()))
+                    } else {
+                        Err("abs() expects a float".to_string())
+                    }
+                }
+                "floor" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.floor()))
+                    } else {
+                        Err("floor() expects a float".to_string())
+                    }
+                }
+                "ceil" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.ceil()))
+                    } else {
+                        Err("ceil() expects a float".to_string())
+                    }
+                }
+                "round" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.round()))
+                    } else {
+                        Err("round() expects a float".to_string())
+                    }
+                }
+                "min" => {
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Float(x), Value::Float(y)) = (a, b) {
+                        Ok(Value::Float(x.min(y)))
+                    } else {
+                        Err("min() expects two floats".to_string())
+                    }
+                }
+                "max" => {
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Float(x), Value::Float(y)) = (a, b) {
+                        Ok(Value::Float(x.max(y)))
+                    } else {
+                        Err("max() expects two floats".to_string())
+                    }
+                }
+                "clamp" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    let lo = eval_expr(&args[1], env, defs)?;
+                    let hi = eval_expr(&args[2], env, defs)?;
+                    if let (Value::Float(a), Value::Float(b), Value::Float(c)) = (x, lo, hi) {
+                        Ok(Value::Float(a.max(b).min(c)))
+                    } else {
+                        Err("clamp() expects (float, float, float)".to_string())
+                    }
+                }
+                "sqrt" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.sqrt()))
+                    } else {
+                        Err("sqrt() expects a float".to_string())
+                    }
+                }
+                "pow" => {
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    if let (Value::Float(x), Value::Float(y)) = (a, b) {
+                        Ok(Value::Float(x.powf(y)))
+                    } else {
+                        Err("pow() expects two floats".to_string())
+                    }
+                }
+                "trunc" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.trunc()))
+                    } else {
+                        Err("trunc() expects a float".to_string())
+                    }
+                }
+                "exp" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.exp()))
+                    } else {
+                        Err("exp() expects a float".to_string())
+                    }
+                }
+                "log" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.ln()))
+                    } else {
+                        Err("log() expects a float".to_string())
+                    }
+                }
+                "log10" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.log10()))
+                    } else {
+                        Err("log10() expects a float".to_string())
+                    }
+                }
+                "sin" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.sin()))
+                    } else {
+                        Err("sin() expects a float".to_string())
+                    }
+                }
+                "cos" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.cos()))
+                    } else {
+                        Err("cos() expects a float".to_string())
+                    }
+                }
+                "tan" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.tan()))
+                    } else {
+                        Err("tan() expects a float".to_string())
+                    }
+                }
+                "asin" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.asin()))
+                    } else {
+                        Err("asin() expects a float".to_string())
+                    }
+                }
+                "acos" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.acos()))
+                    } else {
+                        Err("acos() expects a float".to_string())
+                    }
+                }
+                "atan" => {
+                    let x = eval_expr(&args[0], env, defs)?;
+                    if let Value::Float(f) = x {
+                        Ok(Value::Float(f.atan()))
+                    } else {
+                        Err("atan() expects a float".to_string())
+                    }
+                }
+                "math_pi" => Ok(Value::Float(std::f64::consts::PI)),
+                "math_e" => Ok(Value::Float(std::f64::consts::E)),
+                // ===== std.io runtime builtin =====
+                "input" => {
+                    use std::io::Write as _;
+                    if let Some(p) = args.first() {
+                        let prompt = eval_expr(p, env, defs)?;
+                        print!("{}", prompt.to_string());
+                        let _ = std::io::stdout().flush();
+                    }
+                    let mut line = String::new();
+                    std::io::stdin()
+                        .read_line(&mut line)
+                        .map_err(|e| format!("input() failed: {}", e))?;
+                    Ok(Value::String(
+                        line.trim_end_matches(['\n', '\r']).to_string(),
+                    ))
+                }
+                "eprint" => {
+                    use std::io::Write as _;
+                    for arg in args {
+                        let val = eval_expr(arg, env, defs)?;
+                        eprint!("{}", val.to_string());
+                    }
+                    let _ = std::io::stderr().flush();
+                    Ok(Value::Int(0))
+                }
+                "eprintln" => {
+                    use std::io::Write as _;
+                    for arg in args {
+                        let val = eval_expr(arg, env, defs)?;
+                        eprintln!("{}", val.to_string());
+                    }
+                    let _ = std::io::stderr().flush();
+                    Ok(Value::Int(0))
+                }
+                "io_read_line" => {
+                    use std::io::Write as _;
+                    let _ = std::io::stdout().flush();
+                    let mut line = String::new();
+                    std::io::stdin()
+                        .read_line(&mut line)
+                        .map_err(|e| format!("io_read_line() failed: {}", e))?;
+                    Ok(Value::String(
+                        line.trim_end_matches(['\n', '\r']).to_string(),
+                    ))
+                }
+                "io_read_all" => {
+                    use std::io::Read as _;
+                    let mut buf = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut buf)
+                        .map_err(|e| format!("io_read_all() failed: {}", e))?;
+                    Ok(Value::String(buf))
+                }
+                "io_write_stdout" => {
+                    use std::io::Write as _;
+                    let v = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(s) = v {
+                        let result = std::io::stdout().write_all(s.as_bytes());
+                        Ok(Value::Bool(result.is_ok()))
+                    } else {
+                        Err("io_write_stdout() expects a string".to_string())
+                    }
+                }
+                "io_write_stderr" => {
+                    use std::io::Write as _;
+                    let v = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(s) = v {
+                        let result = std::io::stderr().write_all(s.as_bytes());
+                        Ok(Value::Bool(result.is_ok()))
+                    } else {
+                        Err("io_write_stderr() expects a string".to_string())
+                    }
+                }
+                // ===== std.fs runtime builtins (Phase 10 P3) =====
+                "read_file" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        fs::read_to_string(&path)
+                            .map(Value::String)
+                            .map_err(|e| format!("read_file('{}') failed: {}", path, e))
+                    } else {
+                        Err("read_file() expects a string path".to_string())
+                    }
+                }
+                "write_file" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    let c = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(path), Value::String(content)) = (p, c) {
+                        fs::write(&path, content)
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("write_file('{}') failed: {}", path, e))
+                    } else {
+                        Err("write_file() expects (string path, string content)".to_string())
+                    }
+                }
+                "append_file" => {
+                    use std::io::Write as _;
+                    let p = eval_expr(&args[0], env, defs)?;
+                    let c = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(path), Value::String(content)) = (p, c) {
+                        let mut f = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                            .map_err(|e| format!("append_file('{}') failed: {}", path, e))?;
+                        f.write_all(content.as_bytes())
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("append_file('{}') failed: {}", path, e))
+                    } else {
+                        Err("append_file() expects (string path, string content)".to_string())
+                    }
+                }
+                "file_exists" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        Ok(Value::Bool(std::path::Path::new(&path).exists()))
+                    } else {
+                        Err("file_exists() expects a string path".to_string())
+                    }
+                }
+                "remove_file" => {
+                    let p = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(path) = p {
+                        fs::remove_file(&path)
+                            .map(|_| Value::Bool(true))
+                            .map_err(|e| format!("remove_file('{}') failed: {}", path, e))
+                    } else {
+                        Err("remove_file() expects a string path".to_string())
+                    }
+                }
+                "is_empty" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::Bool(a.is_empty()))
+                    } else {
+                        Err("is_empty() expects a string".to_string())
+                    }
+                }
+                "find" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let sub = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (s, sub) {
+                        match a.find(&b) {
+                            Some(i) => Ok(Value::Int(i as i64)),
+                            None => Ok(Value::Int(-1)),
+                        }
+                    } else {
+                        Err("find() expects two strings".to_string())
+                    }
+                }
+                "count" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    let sub = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (s, sub) {
+                        if b.is_empty() {
+                            Ok(Value::Int(a.chars().count() as i64))
+                        } else {
+                            Ok(Value::Int(a.matches(&b).count() as i64))
+                        }
+                    } else {
+                        Err("count() expects two strings".to_string())
+                    }
+                }
+                "trim_start" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::String(a.trim_start().to_string()))
+                    } else {
+                        Err("trim_start() expects a string".to_string())
+                    }
+                }
+                "trim_end" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::String(a.trim_end().to_string()))
+                    } else {
+                        Err("trim_end() expects a string".to_string())
+                    }
+                }
+                "join" => {
+                    let sep = eval_expr(&args[0], env, defs)?;
+                    let list = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(s), Value::Array(arr)) = (sep, list) {
+                        let strs: Result<Vec<String>, _> = arr
+                            .iter()
+                            .map(|v| match v {
+                                Value::String(s) => Ok(s.clone()),
+                                _ => Err("join() list elements must be strings".to_string()),
+                            })
+                            .collect();
+                        match strs {
+                            Ok(parts) => Ok(Value::String(parts.join(&s))),
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        Err("join() expects (string, list)".to_string())
+                    }
+                }
+                "to_int" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        Ok(Value::Int(a.trim().parse::<i64>().unwrap_or(0)))
+                    } else {
+                        Err("to_int() expects a string".to_string())
+                    }
+                }
+                "to_float" => {
+                    let s = eval_expr(&args[0], env, defs)?;
+                    if let Value::String(a) = s {
+                        match a.trim().parse::<f64>() {
+                            Ok(f) => Ok(Value::Float(f)),
+                            Err(_) => Ok(Value::Float(0.0)),
+                        }
+                    } else {
+                        Err("to_float() expects a string".to_string())
+                    }
+                }
+                "equals" => {
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (a, b) {
+                        Ok(Value::Bool(a == b))
+                    } else {
+                        Err("equals() expects two strings".to_string())
+                    }
+                }
+                "compare" => {
+                    let a = eval_expr(&args[0], env, defs)?;
+                    let b = eval_expr(&args[1], env, defs)?;
+                    if let (Value::String(a), Value::String(b)) = (a, b) {
+                        use std::cmp::Ordering;
+                        let r = match a.cmp(&b) {
+                            Ordering::Less => -1,
+                            Ordering::Equal => 0,
+                            Ordering::Greater => 1,
+                        };
+                        Ok(Value::Int(r))
+                    } else {
+                        Err("compare() expects two strings".to_string())
+                    }
+                }
+                other => {
                     // `obj.field.method(...)` is parsed (ambiguously with module
                     // calls) as a single dotted Call. If `other` is not a real
                     // (module-qualified) function, reinterpret it as a method call
@@ -15859,23 +18850,23 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                             }
                         }
                     }
-                    let struct_key = defs
-                        .structs
-                        .get(&base)
-                        .map(|_| base.to_string())
-                        .or_else(|| {
-                            let suffix = format!(".{}", base);
-                            let mut found: Option<String> = None;
-                            for k in defs.structs.keys() {
-                                if k.ends_with(&suffix) {
-                                    if found.is_some() {
-                                        return None;
+                    let struct_key =
+                        defs.structs
+                            .get(&base)
+                            .map(|_| base.to_string())
+                            .or_else(|| {
+                                let suffix = format!(".{}", base);
+                                let mut found: Option<String> = None;
+                                for k in defs.structs.keys() {
+                                    if k.ends_with(&suffix) {
+                                        if found.is_some() {
+                                            return None;
+                                        }
+                                        found = Some(k.clone());
                                     }
-                                    found = Some(k.clone());
                                 }
-                            }
-                            found
-                        });
+                                found
+                            });
                     if let Some(skey) = struct_key {
                         let struct_def = &defs.structs[&skey];
                         let field_defs = &struct_def.fields;
@@ -15936,14 +18927,20 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                                     }
                                     call_function(&ref_name, arg_vals, defs)
                                 }
-                                Value::Closure { params: cparams, body: cbody, env: cenv } => {
+                                Value::Closure {
+                                    params: cparams,
+                                    body: cbody,
+                                    env: cenv,
+                                } => {
                                     let mut arg_vals = Vec::new();
                                     for a in args {
                                         arg_vals.push(eval_expr(a, env, defs)?);
                                     }
                                     call_closure(&cparams, &cbody, &cenv, arg_vals, defs)
                                 }
-                                other => Err(format!("Cannot call non-function value: {:?}", other)),
+                                other => {
+                                    Err(format!("Cannot call non-function value: {:?}", other))
+                                }
                             }
                         } else if defs.functions.contains_key(&base) {
                             let mut arg_vals = Vec::new();
@@ -15958,7 +18955,11 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                 }
             }
         }
-        Expr::MethodCall { object, method, args } => {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
             // 鬮ｯ貅ｷ・､・ｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩幢ｽ｢繝ｻ・ｧ髫ｰ螟ｲ・ｽ・ｵ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｫ繝ｻ・ｧ鬩包ｽｨ郢ｧ謇假ｽｽ・ｽ繝ｻ・ｾ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ
             let mut arg_vals = Vec::new();
             for a in args {
@@ -16002,10 +19003,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     Value::Struct { name, fields } => {
                         eval_struct_method_or_call(&name, &fields, method, arg_vals, defs)
                     }
-                    other => Err(format!(
-                        "Type {:?} has no method '{}'",
-                        other, method
-                    )),
+                    other => Err(format!("Type {:?} has no method '{}'", other, method)),
                 }
             } else {
                 // 鬮｣蛹・ｽｽ・ｳ繝ｻ縺､ﾂ鬮ｫ・ｴ陟托ｽｱ繝ｻ繝ｻ・ｾ縺､ﾂ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ譏ｴ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髯ｷ・ｷ繝ｻ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｫ繝ｻ・ｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｿ髫ｰ雋ｻ・ｽ・ｶ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ譏ｴ繝ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬨ｾ・｡鬩｢謳ｾ・ｽ・ｹ隴趣ｽ｢繝ｻ・ｽ繝ｻ・｡鬩幢ｽ｢繝ｻ・ｧ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ
@@ -16021,10 +19019,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     Value::Struct { name, fields } => {
                         eval_struct_method_or_call(&name, &fields, method, arg_vals, defs)
                     }
-                    other => Err(format!(
-                        "Type {:?} has no method '{}'",
-                        other, method
-                    )),
+                    other => Err(format!("Type {:?} has no method '{}'", other, method)),
                 }
             }
         }
@@ -16039,10 +19034,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     }
                     Err(format!("Unknown field: {} on struct {}", field, name))
                 }
-                other => Err(format!(
-                    "Field access on non-struct value: {:?}",
-                    other
-                )),
+                other => Err(format!("Field access on non-struct value: {:?}", other)),
             }
         }
         Expr::Array(elements) => {
@@ -16121,17 +19113,19 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
             };
             let start_idx = if start_idx < 0 { 0 } else { start_idx as usize };
             let end_idx = if end_idx > len { len } else { end_idx };
-            let end_idx = if end_idx < start_idx as i64 { start_idx as i64 } else { end_idx };
+            let end_idx = if end_idx < start_idx as i64 {
+                start_idx as i64
+            } else {
+                end_idx
+            };
             Ok(Value::Slice(values[start_idx..end_idx as usize].to_vec()))
         }
 
-        Expr::FnDef { params, body } => {
-            Ok(Value::Closure {
-                params: params.clone(),
-                body: body.clone(),
-                env: env.clone(),
-            })
-        }
+        Expr::FnDef { params, body } => Ok(Value::Closure {
+            params: params.clone(),
+            body: body.clone(),
+            env: env.clone(),
+        }),
         Expr::Await(inner) => {
             let fut = eval_expr(inner, env, defs)?;
             match fut {
@@ -16148,11 +19142,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
     }
 }
 
-fn call_function(
-    name: &str,
-    args: Vec<Value>,
-    defs: &Defs,
-) -> Result<Value, String> {
+fn call_function(name: &str, args: Vec<Value>, defs: &Defs) -> Result<Value, String> {
     call_function_impl(name, args, defs, false)
 }
 
@@ -16241,7 +19231,6 @@ fn call_method(
         .get(method)
         .cloned()
         .ok_or_else(|| format!("Unknown method: {} on {}", method, struct_name))?;
-
 
     if args.len() != func.params.len() {
         return Err(format!(
@@ -16361,8 +19350,14 @@ fn eval_struct_method(
             for e in entries {
                 if let Value::Struct { name, fields } = e {
                     if name == "collections.Entry" {
-                        let ek = fields.iter().find(|(f, _)| f == "key").map(|(_, v)| v.clone());
-                        let ev = fields.iter().find(|(f, _)| f == "value").map(|(_, v)| v.clone());
+                        let ek = fields
+                            .iter()
+                            .find(|(f, _)| f == "key")
+                            .map(|(_, v)| v.clone());
+                        let ev = fields
+                            .iter()
+                            .find(|(f, _)| f == "value")
+                            .map(|(_, v)| v.clone());
                         if let (Some(k), Some(v)) = (ek, ev) {
                             if k == args[0] {
                                 return Ok(Value::Struct {
@@ -16566,15 +19561,10 @@ fn bind_tuple_value(
                     return Err(format!(
                         "nested tuple pattern does not match value {:?}",
                         other
-                    ))
+                    ));
                 }
             },
-            other => {
-                return Err(format!(
-                    "unsupported pattern {:?} in tuple match",
-                    other
-                ))
-            }
+            other => return Err(format!("unsupported pattern {:?} in tuple match", other)),
         }
     }
     Ok(())
@@ -16622,14 +19612,21 @@ fn execute_stmt(
             env.insert(name.clone(), v);
             Ok(ExecResult::Continue)
         }
-        Stmt::Return { explicit_type: _, value } => {
+        Stmt::Return {
+            explicit_type: _,
+            value,
+        } => {
             let v = match value {
                 Some(e) => eval_expr(e, env, defs)?,
                 None => Value::Int(0),
             };
             Ok(ExecResult::Return(v))
         }
-        Stmt::If { cond, then_branch, else_branch } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             let cond_val = eval_expr(cond, env, defs)?;
             let is_true = match cond_val {
                 Value::Bool(b) => b,
@@ -16637,7 +19634,7 @@ fn execute_stmt(
                     return Err(format!(
                         "Condition must be bool (implicit int->bool conversion is forbidden), got {:?}",
                         other
-                    ))
+                    ));
                 }
             };
 
@@ -16650,7 +19647,11 @@ fn execute_stmt(
             }
         }
 
-        Stmt::For { var, iterable, body } => {
+        Stmt::For {
+            var,
+            iterable,
+            body,
+        } => {
             let val = eval_expr(iterable, env, defs)?;
             // Iterable: List(T) / Range
             let items: Vec<Value> = match val {
@@ -16676,7 +19677,7 @@ fn execute_stmt(
                         return Err(format!(
                             "while condition must be bool (implicit int->bool conversion is forbidden), got {:?}",
                             other
-                        ))
+                        ));
                     }
                 };
                 if !is_true {
@@ -16719,11 +19720,15 @@ fn execute_stmt(
                                     return execute_stmts(body, env, defs);
                                 }
                             }
-                            Pattern::Variant { name: pname, bindings } => {
+                            Pattern::Variant {
+                                name: pname,
+                                bindings,
+                            } => {
                                 if pname == &name {
                                     for (idx, binding) in bindings.iter().enumerate() {
                                         if binding != "Ignore" {
-                                            let v = values.get(idx).cloned().unwrap_or(Value::Int(0));
+                                            let v =
+                                                values.get(idx).cloned().unwrap_or(Value::Int(0));
                                             env.insert(binding.clone(), v);
                                         }
                                     }
@@ -16740,7 +19745,10 @@ fn execute_stmt(
                         Some(inner) => {
                             for (pattern, body) in arms {
                                 match pattern {
-                                    Pattern::Variant { name: pname, bindings } => {
+                                    Pattern::Variant {
+                                        name: pname,
+                                        bindings,
+                                    } => {
                                         if pname == "Some" {
                                             for (idx, binding) in bindings.iter().enumerate() {
                                                 if binding != "Ignore" {
@@ -16764,7 +19772,10 @@ fn execute_stmt(
                         None => {
                             for (pattern, body) in arms {
                                 match pattern {
-                                    Pattern::Variant { name: pname, bindings } => {
+                                    Pattern::Variant {
+                                        name: pname,
+                                        bindings,
+                                    } => {
                                         if pname == "None" {
                                             // None 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｫ・ｴ陞｢・ｽ繝ｻ・ｺ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髯晢ｽｶ陷ｻ・ｻ繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
                                             let _ = bindings;
@@ -16894,7 +19905,10 @@ mod phase10_tests {
             warnings
         );
         // The fallback still terminates the function so the module stays valid.
-        assert!(ir.contains("define"), "expected a function definition in IR");
+        assert!(
+            ir.contains("define"),
+            "expected a function definition in IR"
+        );
     }
 
     /// A fully-supported body must emit IR with no codegen warnings.
@@ -16907,7 +19921,10 @@ mod phase10_tests {
             "supported body must not produce warnings: {:?}",
             warnings
         );
-        assert!(ir.contains("define"), "expected a function definition in IR");
+        assert!(
+            ir.contains("define"),
+            "expected a function definition in IR"
+        );
     }
 
     // ===== Phase 7 recovery regression tests (runtime ABI + backend fixes) =====
@@ -16921,7 +19938,8 @@ mod phase10_tests {
         assert!(
             warnings.is_empty(),
             "no warnings expected: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
         assert!(
             ir.contains("call i8* @runtime_alloc"),
@@ -16944,7 +19962,8 @@ mod phase10_tests {
         assert!(
             warnings.is_empty(),
             "no warnings expected: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
         // add / set mutate the receiver in place: the runtime takes a `ptr`
         // to the LimeList (LimeList* restrict) and stores back into it, so the
@@ -16967,7 +19986,8 @@ mod phase10_tests {
         assert!(
             stores >= 1,
             "expected at least the initial store, got {} store(s)\n--- ir ---\n{}",
-            stores, ir
+            stores,
+            ir
         );
     }
 
@@ -16975,12 +19995,16 @@ mod phase10_tests {
     /// build) instead of emitting a silently-misinterpreted element.
     #[test]
     fn codegen_get_on_non_int_list_warns() {
-        let src = "fn main():\n    let strs = [\"a\", \"b\"]\n    println(strs.get(0))\n    return\n";
+        let src =
+            "fn main():\n    let strs = [\"a\", \"b\"]\n    println(strs.get(0))\n    return\n";
         let (ir, warnings) = codegen_from_source(src);
         assert!(
-            warnings.iter().any(|w| w.contains("only supported for lists of Int")),
+            warnings
+                .iter()
+                .any(|w| w.contains("only supported for lists of Int")),
             "expected a get() support warning, got: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
     }
 
@@ -16992,7 +20016,8 @@ mod phase10_tests {
         assert!(
             warnings.is_empty(),
             "no warnings expected: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
         assert!(
             ir.contains("call i64 @strlen"),
@@ -17014,12 +20039,14 @@ mod phase10_tests {
     /// `chars`/`bytes` must use the `ptr sret(%LimeList)` ABI declarations.
     #[test]
     fn codegen_chars_bytes_sret_abi() {
-        let src = "fn main():\n    let cs = \"abc\".chars()\n    let bs = \"abc\".bytes()\n    return\n";
+        let src =
+            "fn main():\n    let cs = \"abc\".chars()\n    let bs = \"abc\".bytes()\n    return\n";
         let (ir, warnings) = codegen_from_source(src);
         assert!(
             warnings.is_empty(),
             "no warnings expected: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
         assert!(
             ir.contains("call void @runtime_str_chars(ptr sret(%LimeList)"),
@@ -17043,7 +20070,8 @@ mod phase10_tests {
         assert!(
             warnings.is_empty(),
             "no warnings expected: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
         assert!(
             ir.contains("define void @main_lime"),
@@ -17065,7 +20093,8 @@ mod phase10_tests {
         assert!(
             warnings.is_empty(),
             "no warnings expected: {:?}\n--- ir ---\n{}",
-            warnings, ir
+            warnings,
+            ir
         );
         assert!(
             ir.contains("define void @main_lime"),
@@ -17080,7 +20109,8 @@ mod phase10_tests {
     /// (empty if type-checking succeeded).
     fn type_check_source_as(name: &str, src: &str) -> String {
         let (tokens, locs) = tokenize(src).expect("tokenize");
-        let (stmts, stmt_locs) = parse_with_locs(tokens, locs, &std::collections::HashSet::new()).expect("parse");
+        let (stmts, stmt_locs) =
+            parse_with_locs(tokens, locs, &std::collections::HashSet::new()).expect("parse");
         let mut defs = Defs::new();
         collect_defs(&stmts, &mut defs);
         let loc = make_loc_map(&stmts, &stmt_locs, name);
@@ -17094,7 +20124,8 @@ mod phase10_tests {
     /// the rendered warning strings (empty if none).
     fn warnings_from_source(src: &str) -> Vec<String> {
         let (tokens, locs) = tokenize(src).expect("tokenize");
-        let (stmts, stmt_locs) = parse_with_locs(tokens, locs, &std::collections::HashSet::new()).expect("parse");
+        let (stmts, stmt_locs) =
+            parse_with_locs(tokens, locs, &std::collections::HashSet::new()).expect("parse");
         let mut defs = Defs::new();
         collect_defs(&stmts, &mut defs);
         let loc = make_loc_map(&stmts, &stmt_locs, "main.lime");
@@ -17108,10 +20139,7 @@ mod phase10_tests {
     fn type_error_carries_position() {
         for (label, src) in [
             // undefined variable
-            (
-                "undef",
-                "fn main():\n    println(missing)\n    return\n",
-            ),
+            ("undef", "fn main():\n    println(missing)\n    return\n"),
             // type mismatch (+ Int with String)
             (
                 "mismatch",
@@ -17125,13 +20153,13 @@ mod phase10_tests {
         ] {
             let err = type_check_source_as("main.lime", src);
             assert!(
-                err.contains("error[type] main.lime:"),
-                "[{}] expected error[type] with file:line:col, got:\n{}",
+                err.contains("error[") && err.contains("main.lime:"),
+                "[{}] expected error[E02xx] with file:line:col, got:\n{}",
                 label,
                 err
             );
             // A `line:col` shape (digit:digit) must follow the file name.
-            let after = err.split("error[type] main.lime:").nth(1).unwrap_or("");
+            let after = err.split("main.lime:").nth(1).unwrap_or("");
             assert!(
                 after.chars().next().map_or(false, |c| c.is_ascii_digit()),
                 "[{}] expected line number after 'main.lime:', got:\n{}",
@@ -17146,7 +20174,11 @@ mod phase10_tests {
     fn valid_program_has_no_type_error() {
         let src = "fn main():\n    let x = 1 + 2\n    println(x)\n    return\n";
         let err = type_check_source_as("main.lime", src);
-        assert!(err.is_empty(), "valid program should not error, got:\n{}", err);
+        assert!(
+            err.is_empty(),
+            "valid program should not error, got:\n{}",
+            err
+        );
     }
 
     /// Phase 11 Step 4: multiple type errors across statements must be
@@ -17172,7 +20204,7 @@ mod phase10_tests {
             err
         );
         // Each error carries its own location line.
-        let annotated = err.matches("error[type] main.lime:").count();
+        let annotated = err.matches("main.lime:").count();
         assert!(
             annotated >= 3,
             "expected >=3 annotated errors (one per failing statement), got {}:\n{}",
@@ -17207,17 +20239,17 @@ fn main():
         let err = type_check_source_as("main.lime", src);
         // The hint line is rendered for each near-miss.
         assert!(
-            err.contains("did you mean 'counter'?"),
+            err.contains("= help: did you mean 'counter'?"),
             "expected hint for undefined variable 'countre', got:\n{}",
             err
         );
         assert!(
-            err.contains("did you mean 'print'?"),
+            err.contains("= help: did you mean 'print'?"),
             "expected hint for undefined function 'prnit', got:\n{}",
             err
         );
         assert!(
-            err.contains("did you mean 'message'?"),
+            err.contains("= help: did you mean 'message'?"),
             "expected hint for unknown field 'messgae', got:\n{}",
             err
         );
@@ -17259,7 +20291,9 @@ fn main():
         );
         // Warnings render with the `warning[type]` tag and a location.
         assert!(
-            warns.iter().any(|w| w.starts_with("warning[type] main.lime:")),
+            warns
+                .iter()
+                .any(|w| w.contains("warning[") && w.contains("main.lime:")),
             "warnings must render via render_diagnostic, got:\n{:?}",
             warns
         );
@@ -17283,9 +20317,67 @@ fn main():
     fn no_warnings_for_clean_program() {
         let src = "fn main():\n    let x = 1\n    println(x)\n    return\n";
         let warns = warnings_from_source(src);
-        assert!(warns.is_empty(), "clean program should warn nothing, got:\n{:?}", warns);
+        assert!(
+            warns.is_empty(),
+            "clean program should warn nothing, got:\n{:?}",
+            warns
+        );
     }
 }
 
+#[cfg(test)]
+mod lexer_hex_tests {
+    //! Iteration 33 P3: hexadecimal integer literals (`0x…` / `0X…`).
+    //! The lexer previously split `0x11` into IntLit(0) + Ident("x11").
 
+    use super::*;
 
+    fn ints(src: &str) -> Vec<i64> {
+        let (toks, _) = tokenize(src).expect("tokenize failed");
+        toks.into_iter()
+            .filter_map(|t| match t {
+                Token::IntLit(v) => Some(v),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn hex_lowercase_prefix() {
+        assert_eq!(ints("0x11"), vec![17]);
+        assert_eq!(ints("0xff"), vec![255]);
+        assert_eq!(ints("0x7f"), vec![127]);
+    }
+
+    #[test]
+    fn hex_uppercase_prefix_and_digits() {
+        assert_eq!(ints("0X11"), vec![17]);
+        assert_eq!(ints("0XFF"), vec![255]);
+        assert_eq!(ints("0xFf"), vec![255]);
+    }
+
+    #[test]
+    fn decimal_literals_unchanged() {
+        assert_eq!(ints("0"), vec![0]);
+        assert_eq!(ints("1"), vec![1]);
+        assert_eq!(ints("10"), vec![10]);
+        assert_eq!(ints("123"), vec![123]);
+    }
+
+    #[test]
+    fn bare_0_followed_by_ident_still_lexes_as_before() {
+        // `0x` with NO hex digit must fall back to the old shape:
+        // IntLit(0) followed by an identifier starting with `x`.
+        let (toks, _) = tokenize("let x = 0xzoo").expect("tokenize failed");
+        let kinds: Vec<String> = toks
+            .iter()
+            .map(|t| match t {
+                Token::IntLit(_) => "int".to_string(),
+                Token::Ident(s) => format!("id:{}", s),
+                _ => "other".to_string(),
+            })
+            .collect();
+        assert!(kinds.contains(&"int".to_string()));
+        assert!(kinds.iter().any(|k| k.starts_with("id:x")));
+    }
+}

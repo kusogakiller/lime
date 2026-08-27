@@ -1,0 +1,14 @@
+{
+  "library": "SDL2",
+  "version": "2.30.9",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "store": "SDL2-2.30.9-win",
+  "functions": [
+    { "name": "SDL_Init", "params": ["Int"], "ret": "Int", "symbol": "SDL_Init" },
+    { "name": "SDL_Quit", "params": [], "ret": "Unit", "symbol": "SDL_Quit" },
+    { "name": "SDL_GetPlatform", "params": [], "ret": "String", "symbol": "SDL_GetPlatform" },
+    { "name": "SDL_GetError", "params": [], "ret": "String", "symbol": "SDL_GetError" }
+  ],
+  "required_symbols": ["SDL_Init", "SDL_Quit", "SDL_GetPlatform", "SDL_GetError"]
+}

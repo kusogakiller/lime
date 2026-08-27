@@ -1,0 +1,26 @@
+{
+  "library": "libparamtypes (ABI fixture)",
+  "version": "0.1.0",
+  "platform": "x86_64-pc-windows-msvc",
+  "compiler": "clang 22.1.8",
+  "functions": [
+    { "name": "ptt_uc", "params": ["Int"], "ret": "Int", "symbol": "ptt_uc" },
+    { "name": "ptt_sc", "params": ["Int"], "ret": "Int", "symbol": "ptt_sc" },
+    { "name": "ptt_ui", "params": ["Int"], "ret": "Int", "symbol": "ptt_ui" },
+    { "name": "ptt_ll", "params": ["Int"], "ret": "Int", "symbol": "ptt_ll" },
+    { "name": "ptt_d", "params": ["Float"], "ret": "Float", "symbol": "ptt_d" },
+    { "name": "ptt_make", "params": ["Int", "Int"], "ret": "Opaque(PTPoint)", "symbol": "lime_ret_ptt_make" },
+    { "name": "ptt_sum", "params": ["Opaque(PTPoint)"], "ret": "Int", "symbol": "lime_val_ptt_sum" }
+  ],
+  "required_symbols": [
+    "ptt_uc", "ptt_sc", "ptt_ui", "ptt_ll", "ptt_d",
+    "lime_ret_ptt_make", "lime_val_ptt_sum"
+  ],
+  "forbidden_substrings": [
+    "Opaque(unsigned)",
+    "Opaque(signed)",
+    "\"lime_val_ptt_uc\"",
+    "\"lime_val_ptt_sc\"",
+    "\"lime_val_ptt_ui\""
+  ]
+}

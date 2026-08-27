@@ -39,6 +39,9 @@ libfreshprobe:bench_clang/realworld/corpus/libfreshprobe:bench_clang/regression/
 libcolprobe:bench_clang/realworld/corpus/libcolprobe:bench_clang/regression/libcolprobe_smoke
 libvarargedge:bench_clang/realworld/corpus/libvarargedge:bench_clang/regression/libvarargedge_smoke
 libubi:bench_clang/realworld/corpus/libubi:bench_clang/regression/libubi_smoke
+libptrtypedef:bench_clang/realworld/corpus/libptrtypedef:bench_clang/regression/libptrtypedef_smoke/libptrtypedef_smoke
+libpackedanon:bench_clang/realworld/corpus/libpackedanon:bench_clang/regression/libpackedanon_smoke/libpackedanon_smoke
+libparamtypes:bench_clang/realworld/corpus/libparamtypes:bench_clang/regression/libparamtypes_smoke/libparamtypes_smoke
 "
 
 PASS=0
@@ -75,4 +78,31 @@ for row in $LIBS; do
 done
 echo "---"
 echo "PASS=$PASS FAIL=$FAIL"
-[ "$FAIL" -eq 0 ]
+
+# =========================================================================
+# Phase 2: ABI CONTRACT GATE (Iteration 31).
+#
+# Verifies each Official Support library (+ ABI regression fixtures) against
+# its FROZEN, human-reviewed expected contract in bench_clang/abi_contracts/.
+# Detects signature drift, dangling shim references (iface symbols absent
+# from the manifest), platform drift, and forbidden historical shapes.
+# A single contract failure fails the whole gate — Official Support is only
+# claimed when BOTH the E2E phase above AND this ABI phase pass.
+# =========================================================================
+ABI_LIBS="zlib sqlite curl SDL2-2.30.9-win ffmpeg_avutil_version ffmpeg_media_objects libpng libjpeg libparamtypes libptrtypedef libpackedanon libfreshprobe libvarargedge"
+ABIPASS=0
+ABIFAIL=0
+for lib in $ABI_LIBS; do
+  if ./target/release/lime.exe charger verify-contract "$lib" > "/tmp/abi_${lib}.log" 2>&1; then
+    ABIPASS=$((ABIPASS+1))
+    grep -E "^PASS" "/tmp/abi_${lib}.log" | head -1 | sed 's/^PASS/ABI PASS/'
+  else
+    ABIFAIL=$((ABIFAIL+1))
+    echo "ABI FAIL $lib"
+    cat "/tmp/abi_${lib}.log"
+  fi
+done
+echo "---"
+echo "ABI PASS=$ABIPASS FAIL=$ABIFAIL"
+
+[ "$FAIL" -eq 0 ] && [ "$ABIFAIL" -eq 0 ]

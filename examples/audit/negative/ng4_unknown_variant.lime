@@ -1,0 +1,8 @@
+// EXPECT: FAIL ? `Win` is not a variant of enum St (measured message:
+// unknown function / undefined variable depending on path)
+enum St:
+    Todo
+    Done
+fn main():
+    let s = Win
+    println(s)

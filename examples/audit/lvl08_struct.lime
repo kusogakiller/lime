@@ -1,0 +1,12 @@
+// Level 8: struct (construction / field read / whole-value rebinding)
+struct Task:
+    int: id
+    str: title
+    int: priority
+fn main():
+    let t = Task(1, "write audit", 7)
+    println(t.id)
+    println(t.title)
+    println(t.priority)
+    let bumped = Task(t.id, t.title, t.priority + 3)
+    println(bumped.priority)

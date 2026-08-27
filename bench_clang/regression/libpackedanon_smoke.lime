@@ -1,0 +1,48 @@
+extern fn pka_make() -> Opaque(PackedAnon) "lime_make_PackedAnon"
+extern fn pka_free(Opaque(PackedAnon): a0) -> Unit "pka_free"
+extern fn pka_get_head(Opaque(PackedAnon): a0) -> Int "pka_get_head"
+extern fn pka_set_head(Opaque(PackedAnon): a0, Opaque(unsigned): a1) "pka_set_head"
+extern fn pka_get_x(Opaque(PackedAnon): a0) -> Int "pka_get_x"
+extern fn pka_set_x(Opaque(PackedAnon): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_set_x"
+extern fn pka_get_y(Opaque(PackedAnon): a0) -> Int "pka_get_y"
+extern fn pka_set_y(Opaque(PackedAnon): a0, Opaque(unsigned): a1) "pka_set_y"
+extern fn pka_get_tail(Opaque(PackedAnon): a0) -> Int "pka_get_tail"
+extern fn pka_set_tail(Opaque(PackedAnon): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_set_tail"
+
+extern fn pka_bit_make() -> Opaque(PackedAnonBit) "lime_make_PackedAnonBit"
+extern fn pka_bit_free(Opaque(PackedAnonBit): a0) -> Unit "pka_bit_free"
+extern fn pka_bit_get_lead(Opaque(PackedAnonBit): a0) -> Int "pka_bit_get_lead"
+extern fn pka_bit_set_lead(Opaque(PackedAnonBit): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_bit_set_lead"
+extern fn pka_bit_get_a(Opaque(PackedAnonBit): a0) -> Int "pka_bit_get_a"
+extern fn pka_bit_set_a(Opaque(PackedAnonBit): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_bit_set_a"
+extern fn pka_bit_get_b(Opaque(PackedAnonBit): a0) -> Int "pka_bit_get_b"
+extern fn pka_bit_set_b(Opaque(PackedAnonBit): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_bit_set_b"
+extern fn pka_bit_get_trail(Opaque(PackedAnonBit): a0) -> Int "pka_bit_get_trail"
+extern fn pka_bit_set_trail(Opaque(PackedAnonBit): a0, Opaque(unsigned): a1) -> Unit "lime_val_pka_bit_set_trail"
+
+extern fn pka_link_anchor() -> Int "pka_link_anchor"
+
+fn main():
+    let p = pka_make()
+    pka_set_head(p, 0x11)
+    pka_set_x(p, 0x22)
+    pka_set_y(p, 0x3344)
+    pka_set_tail(p, 0x55)
+
+    let h = pka_get_head(p)
+    let x = pka_get_x(p)
+    let y = pka_get_y(p)
+    let t = pka_get_tail(p)
+
+    let p2 = pka_bit_make()
+    pka_bit_set_lead(p2, 0xAA)
+    pka_bit_set_a(p2, 5)
+    pka_bit_set_b(p2, 0xABC)
+    pka_bit_set_trail(p2, 0xBB)
+
+    let l = pka_bit_get_lead(p2)
+    let a = pka_bit_get_a(p2)
+    let b = pka_bit_get_b(p2)
+    let tr = pka_bit_get_trail(p2)
+
+    print("PACKED_ANON_OK\n")

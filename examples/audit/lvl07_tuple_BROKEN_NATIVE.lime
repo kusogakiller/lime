@@ -1,0 +1,10 @@
+// Level 7: tuple ? INTERP OK / NATIVE SILENTLY BROKEN (Iteration 33 finding)
+//
+// check passes and the interpreter prints 16, but `lime build` emits an EMPTY
+// main body (ret void) with NO codegen warning, prints ok:, exits 0, and the
+// executable outputs nothing. Do not use tuples in native programs until
+// fixed. Kept here as a documented audit repro.
+fn main():
+    let t = (7, 9)
+    print(t.0 + t.1)
+    print("\n")
