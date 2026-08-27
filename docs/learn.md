@@ -16,14 +16,18 @@ a planned or idealized feature.
 - [Values and types](#values-and-types)
 - [Variables](#variables)
 - [Functions](#functions)
+- [Closures](#closures)
 - [Expressions and operators](#expressions-and-operators)
 - [Control flow](#control-flow)
 - [Strings](#strings)
 - [Lists](#lists)
 - [Structs and methods](#structs-and-methods)
+- [State and enum types](#state-and-enum-types)
 - [Interfaces](#interfaces)
 - [Generics](#generics)
 - [Async and await](#async-and-await)
+- [External functions](#external-functions)
+- [Standard library](#standard-library)
 - [Compilation targets](#compilation-targets)
 - [Compiler errors](#compiler-errors)
 - [Feature compatibility table](#feature-compatibility-table)
@@ -43,12 +47,14 @@ This produces a `lime` executable (on Windows, `target\release\lime.exe`).
 The command-line interface is:
 
 ```
-lime build <path> [--emit-ll] [--emit-object] [--release]  Build to binary
-lime run   <path> [--emit-ll]                              Build and execute (deprecated for projects)
-lime check <path>                                          Type-check only
-lime fmt   <file.lime> [--write]                           Format source
-lime <path> [--emit-ll]                                    Shorthand for `run`
+lime build <path> [--emit-ll] [--emit-object] [--release] [--verbose|-v]  Build to binary
+lime run   <path> [--emit-ll] [--verbose|-v]                              Build and execute (deprecated for projects)
+lime check <path> [--verbose|-v]                                          Type-check only
+lime fmt   <file.lime> [--write]                                          Format source
+lime <path> [--emit-ll] [--verbose|-v]                                    Shorthand for `run`
 ```
+
+`--verbose` / `-v` prints compiler diagnostics to stderr.
 
 For project builds there is also the `citrus` CLI (a wrapper around lime):
 
@@ -171,6 +177,7 @@ Lime has the following primitive types.
 | `float` | `f64`, `f` | 64-bit float |
 | `bool` | `i1`, `b` | `true` / `false` |
 | `str` | `s` | string (UTF-8, immutable) |
+| `json` | — | first-class JSON value (parsed/stringified via `json` module) |
 
 The unit type exists internally (functions with no return value return unit), but
 it is inferred and cannot be written in a type annotation — omit the annotation
@@ -324,6 +331,36 @@ fn main():
 
 ---
 
+## Closures
+
+Anonymous function expressions create closure values that can be stored in
+variables and passed as arguments:
+
+```lime
+fn main():
+    let double = fn(int: x):
+        return x * 2
+    println(double(5))   // 10
+
+    let numbers = [1, 2, 3]
+    let doubled = numbers.map(fn(int: x): return x * 2)
+    println(doubled)     // [2, 4, 6]
+    return
+```
+
+Closures capture variables from their surrounding scope by value:
+
+```lime
+fn main():
+    let factor = 10
+    let multiply = fn(int: x):
+        return x * factor
+    println(multiply(3))   // 30
+    return
+```
+
+---
+
 ## Expressions and operators
 
 Arithmetic: `+`, `-`, `*`, `/`, `%`. Integer division truncates (`10 / 3` is
@@ -384,22 +421,23 @@ println(sliced)     // Slice[10, 20]
 
 ## Control flow
 
-### if / else
+### if / elif / else
 
-There is no `elif`. Nest `else` blocks for multiple conditions.
+`elif` chains multiple conditions without nesting:
 
 ```lime
 fn classify(int: x):
     if x > 0:
         return "positive"
+    elif x < 0:
+        return "negative"
     else:
-        if x < 0:
-            return "negative"
-        else:
-            return "zero"
+        return "zero"
 
 fn main():
-    println(classify(5))   // positive
+    println(classify(5))    // positive
+    println(classify(-3))   // negative
+    println(classify(0))    // zero
     return
 ```
 
@@ -647,6 +685,60 @@ There are also several standard library struct types: `Instant` and
 
 ---
 
+## State and enum types
+
+Lime has two kinds of sum types: `state` (simple bare variants) and `enum`
+(typed variant fields).
+
+### state
+
+`state` declares variants without typed fields:
+
+```lime
+state Direction:
+    North
+    South
+    East
+    West
+
+fn main():
+    let d = North
+    match d:
+        North:
+            println("going north")
+        South:
+            println("going south")
+        catch:
+            println("other")
+    return
+```
+
+### enum
+
+`enum` declares variants with typed fields:
+
+```lime
+enum Shape:
+    Circle(float: radius)
+    Rectangle(float: width, float: height)
+
+fn area(Shape: s):
+    match s:
+        Circle(r):
+            return 3.14 * r * r
+        Rectangle(w, h):
+            return w * h
+
+fn main():
+    let c = Circle(5.0)
+    println(area(c))   // 78.5
+    return
+```
+
+Both `state` and `enum` support generics (see [Generics](#generics)).
+
+---
+
 ## Interfaces
 
 An interface declares a set of method signatures. A struct conforms to an
@@ -761,6 +853,60 @@ functions.
 
 ---
 
+## External functions
+
+`extern fn` declares a native symbol that is resolved at link time. The symbol
+name is a string after the signature:
+
+```lime
+extern fn puts(str: msg) -> int "puts"
+extern fn malloc(int: size) -> void* "malloc"
+extern fn free(void*: ptr) "free"
+```
+
+External functions integrate with the Charger FFI system, which can automatically
+generate Lime bindings from C/C++ headers:
+
+```sh
+lime charger install /path/to/library
+lime charger list
+```
+
+See `docs/ffi_return_width.md` for details on return width policies.
+
+---
+
+## Standard library
+
+Lime ships with the following standard library packages. Import them in a
+`citrus.toml` project:
+
+```toml
+[import]
+string = "v0.1.0"
+math = "v0.1.0"
+```
+
+| Package | Description |
+|---------|-------------|
+| `string` | String manipulation: `trim`, `contains`, `split`, `replace`, `to_upper`, `to_lower`, `repeat`, `join`, `find`, `count`, etc. |
+| `math` | Math functions: `abs`, `min`, `max`, `clamp`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `sin`, `cos`, `tan`, `pi`, `e`, etc. |
+| `collections` | Data structures: `List`, `HashMap`, `HashSet`, `Queue`, `Stack`, plus list helpers (`push`, `pop`, `sort`, `reverse`, etc.) |
+| `io` | I/O: `print`, `println`, `eprint`, `eprintln`, `read_line`, `read_all`, `prompt` |
+| `fs` | Filesystem: `read`, `write`, `append`, `exists`, `remove`, `metadata`, `size`, `list_dir`, `create_dir`, `copy`, `rename` |
+| `json` | JSON: `parse`, `stringify`, `get`, `has`, `len`, `as_string`, `as_int`, `as_float`, `as_bool`, `object`, `array`, `set`, `push` |
+| `requests` | HTTP client: `get`, `post`, `put`, `patch`, `delete`, `head`, `options`; `Session` with cookies/headers; `Response` with status/text/json |
+| `time` | Time: `Instant` struct, `now()`, `elapsed()`, `sleep()` |
+| `path` | Path utilities: `join`, `basename`, `dirname`, `extension`, `is_absolute`, `normalize`, `parent` |
+| `os` | OS info: `name()`, `arch()`, `platform()`, `hostname()`, `cwd()` |
+| `env` | Environment: `get()` (returns Option), `has()`, `set()`, `remove()`, `all()` |
+| `process` | Subprocess: `spawn`, `run`, `output`, `wait`, `kill`, `status` |
+| `regex` | Regular expressions: `is_match`, `find`, `find_all`, `replace`, `split` |
+| `option` | Option helpers: `extract_or`, `is_some`, `is_none`, `extract` |
+| `result` | Result helpers: `extract_or`, `is_ok`, `is_err`, `extract`, `map`, `and`, `or` |
+
+---
+
 ## Compilation targets
 
 Besides the interpreter (`lime run`), the compiler can emit native code.
@@ -811,7 +957,18 @@ functions were removed.
 ## Compiler errors
 
 Errors are printed with error codes, file locations, and source snippets.
-There are four main categories:
+The main categories are:
+
+| Code Range | Category |
+|------------|----------|
+| `E0001` | Lexer errors (tokenization failures) |
+| `E0101` | Parser errors (syntax errors) |
+| `E0200`–`E0226` | Type errors (type mismatches, undefined variables, etc.) |
+| `E0290`–`E0292` | Type inference / interface conformance / monomorphization |
+| `E0401`–`E0402` | Code emission errors (LLVM IR generation) |
+| `E0501` | Build / linker errors |
+| `E0601` | Runtime errors (interpreter) |
+| `E0701` | Memory analysis errors |
 
 **Lexer errors** (`error[E0001]`) — the source cannot be tokenized:
 
@@ -875,9 +1032,11 @@ Legend: **Yes** = fully supported, **No** = rejected or not implemented,
 | `let mut` + reassignment | Yes | Partial | Same scalar-store limitation |
 | Type annotations / aliases | Yes | Yes | `int`, `i32`, `i`, `long`… |
 | `Option(T)` / `T?`, `Some`/`None` | Yes | No | Not lowered by the backend |
+| `Result(T, E)` | Yes | No | Via `result` package builtins |
 | Tuples and destructuring | Partial | No | `let (a, b) = ...` is parsed but not type-checked; use `match` patterns |
 | Functions, recursion | Yes | Yes | Calls are lowered |
-| Generic functions/structs | Yes | Partial | — |
+| Closures (`fn(...)`) | Yes | Yes | Anonymous function expressions with captures |
+| Generic functions/structs | Yes | Partial | Monomorphized in codegen |
 | `fn` params `Type: name` / untyped | Yes | Yes | — |
 | `return Type: expr` | Yes | Yes | — |
 | Arithmetic `+ - * / %` | Yes | Yes | — |
@@ -887,15 +1046,16 @@ Legend: **Yes** = fully supported, **No** = rejected or not implemented,
 | String indexing/slicing | Yes | No | — |
 | List indexing `list[i]` | Yes | Partial | — |
 | List slicing `list[a:b]` | Yes | No | — |
-| if / else | Yes | Yes | No `elif` |
+| if / elif / else | Yes | Yes | `elif` desugars to nested if/else |
 | while | Yes | Yes | No `break`/`continue` |
 | for over list / range | Yes | Partial | — |
 | match + patterns | Yes | Partial | — |
-| defer | Yes | No | — |
+| defer | Yes | No | Interpreter only |
 | struct + fields | Yes | Yes | — |
 | struct methods | Yes | Yes | — |
 | interfaces | Yes | Partial | — |
 | state / enum variants | Yes | No | Construction not lowered |
+| `extern fn` (Charger FFI) | Yes | Yes | Native symbol declarations |
 | String methods | Yes | Partial | — |
 | `string.*` module | Yes | No | — |
 | List methods (`push`, `pop`, …) | Yes | Partial | — |
@@ -905,8 +1065,15 @@ Legend: **Yes** = fully supported, **No** = rejected or not implemented,
 | `int()` / `float()` / `str()` | Yes | No | — |
 | `len()` | Yes | Partial | — |
 | `print` / `println` | Yes | Yes | Both print each arg on its own line |
+| `json` type | Yes | No | First-class JSON with `json.*` module |
 | `time.*` module | Yes | No | `now()`, `elapsed()`, `sleep()` |
 | `fs.*` module | Yes | No | `write`, `exists`, `metadata`, … |
 | `math.*` module | Yes | No | `abs`, `max`, `min`, `sqrt`, `pow` |
+| `requests.*` module | Yes | No | Full HTTP client |
+| `regex.*` module | Yes | No | Pattern matching |
+| `process.*` module | Yes | No | Subprocess management |
+| `env.*` module | Yes | No | Environment variables |
+| `path.*` module | Yes | No | Path manipulation |
+| `os.*` module | Yes | No | OS information |
 | `lime` async fn + `await` | Yes | Yes | `await` lowers to a direct synchronous call; no parallelism |
 | Type-check (`lime check`) | Yes | — | Same checker feeds both paths |

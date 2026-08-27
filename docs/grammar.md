@@ -344,7 +344,7 @@ Syntax (explicit specification):
 Escape determination (compiler internal):
 - Value is `return`ed → Escape (Heap)
 - Passed as argument to `await` in a `lime` function / used after `await` → held in Heap frame
-- Since Lime has no closures / callbacks / global variables, actual arguments of
+- Since closures capture variables by value, actual arguments of
   normal function calls are not considered Escape (compiler manages intelligently)
 
 Constraints (compile errors):
