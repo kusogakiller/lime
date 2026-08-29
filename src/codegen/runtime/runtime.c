@@ -5637,3 +5637,99 @@ ChallengerWaker* challenger_waker_new_for_task(ChallengerExecutor* exec, uint64_
 void challenger_waker_wake_from_executor(ChallengerExecutor* exec, uint64_t task_id) {
     challenger_executor_wake_task(exec, task_id);
 }
+
+// ============================================================
+// Challenger Async Runtime — Timer (Phase 6)
+// ============================================================
+
+#ifdef _WIN32
+#include <windows.h>
+static LARGE_INTEGER g_qpc_freq = {0};
+static int g_qpc_initialized = 0;
+
+static void init_qpc(void) {
+    if (!g_qpc_initialized) {
+        QueryPerformanceFrequency(&g_qpc_freq);
+        g_qpc_initialized = 1;
+    }
+}
+#endif
+
+void challenger_timer_init(ChallengerTimerWheel* tw) {
+    if (!tw) return;
+    tw->count = 0;
+    for (int i = 0; i < CHALLENGER_MAX_TIMERS; i++) {
+        tw->timers[i].active = 0;
+    }
+}
+
+int64_t challenger_time_now_us(void) {
+#ifdef _WIN32
+    init_qpc();
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (int64_t)((now.QuadPart * 1000000LL) / g_qpc_freq.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000LL + (int64_t)ts.tv_nsec / 1000LL;
+#endif
+}
+
+uint64_t challenger_timer_sleep(ChallengerExecutor* exec, ChallengerTimerWheel* tw, int64_t duration_us) {
+    if (!tw || !exec) return 0;
+
+    int64_t deadline = challenger_time_now_us() + duration_us;
+
+    // Find free slot
+    for (int i = 0; i < CHALLENGER_MAX_TIMERS; i++) {
+        if (!tw->timers[i].active) {
+            tw->timers[i].task_id = 0; // will be set when task is known
+            tw->timers[i].deadline_us = deadline;
+            tw->timers[i].active = 1;
+            tw->count++;
+            return (uint64_t)(i + 1); // 1-based timer ID
+        }
+    }
+    return 0; // no free slot
+}
+
+void challenger_timer_cancel(ChallengerTimerWheel* tw, uint64_t timer_id) {
+    if (!tw || timer_id == 0) return;
+    int idx = (int)(timer_id - 1);
+    if (idx >= 0 && idx < CHALLENGER_MAX_TIMERS && tw->timers[idx].active) {
+        tw->timers[idx].active = 0;
+        tw->count--;
+    }
+}
+
+int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw) {
+    if (!tw || !exec) return -1;
+
+    int64_t now = challenger_time_now_us();
+    int64_t next_deadline = -1;
+
+    for (int i = 0; i < CHALLENGER_MAX_TIMERS; i++) {
+        if (tw->timers[i].active) {
+            if (now >= tw->timers[i].deadline_us) {
+                // Timer expired: wake the task
+                uint64_t task_id = tw->timers[i].task_id;
+                tw->timers[i].active = 0;
+                tw->count--;
+                if (task_id > 0) {
+                    challenger_executor_wake_task(exec, task_id);
+                }
+            } else {
+                // Track next deadline
+                if (next_deadline < 0 || tw->timers[i].deadline_us < next_deadline) {
+                    next_deadline = tw->timers[i].deadline_us;
+                }
+            }
+        }
+    }
+
+    if (next_deadline >= 0) {
+        return next_deadline - now; // microseconds until next timer
+    }
+    return -1; // no active timers
+}

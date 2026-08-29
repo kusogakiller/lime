@@ -761,4 +761,29 @@ int challenger_ready_queue_is_empty(ReadyQueue* q);
 void challenger_set_global_executor(ChallengerExecutor* exec);
 ChallengerWaker* challenger_waker_new_for_task(ChallengerExecutor* exec, uint64_t task_id);
 
+// ============================================================
+// Challenger Async Runtime — Timer (Phase 6)
+// ============================================================
+
+#define CHALLENGER_MAX_TIMERS 4096
+
+typedef struct {
+    uint64_t task_id;
+    int64_t deadline_us;   // microseconds from epoch
+    int active;
+} ChallengerTimer;
+
+typedef struct {
+    ChallengerTimer timers[CHALLENGER_MAX_TIMERS];
+    int count;
+} ChallengerTimerWheel;
+
+// Timer operations
+void challenger_timer_init(ChallengerTimerWheel* tw);
+int64_t challenger_time_now_us(void);
+uint64_t challenger_timer_sleep(ChallengerExecutor* exec, ChallengerTimerWheel* tw, int64_t duration_us);
+void challenger_timer_cancel(ChallengerTimerWheel* tw, uint64_t timer_id);
+// Check expired timers and wake their tasks. Returns time until next timer (us), or -1 if none.
+int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw);
+
 #endif // LIME_RUNTIME_H

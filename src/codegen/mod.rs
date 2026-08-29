@@ -221,7 +221,13 @@ pub fn emit_llvm(
     out.push_str("declare void @challenger_executor_cancel(i8*, i64)\n");
     out.push_str("declare i32 @challenger_executor_run(i8*)\n");
     out.push_str("declare void @challenger_executor_wake_task(i8*, i64)\n");
-    out.push_str("declare void @challenger_waker_wake_from_executor(i8*, i64)\n\n");
+    out.push_str("declare void @challenger_waker_wake_from_executor(i8*, i64)\n");
+    // Challenger Timer (Phase 6)
+    out.push_str("declare void @challenger_timer_init(i8*)\n");
+    out.push_str("declare i64 @challenger_time_now_us()\n");
+    out.push_str("declare i64 @challenger_timer_sleep(i8*, i8*, i64)\n");
+    out.push_str("declare void @challenger_timer_cancel(i8*, i64)\n");
+    out.push_str("declare i64 @challenger_timer_tick(i8*, i8*)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");
