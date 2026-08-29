@@ -5989,3 +5989,307 @@ int challenger_tcp_close(int fd) {
 }
 
 #endif // _WIN32
+
+// ============================================================
+// Challenger Async Runtime — UDP (Phase 9)
+// ============================================================
+
+#ifdef _WIN32
+int challenger_udp_socket(void) {
+    SOCKET s = WSASocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP, NULL, 0, WSA_FLAG_OVERLAPPED);
+    if (s == INVALID_SOCKET) return -1;
+    return _open_osfhandle((intptr_t)s, 0);
+}
+#else
+int challenger_udp_socket(void) {
+    return socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+}
+#endif
+
+int challenger_udp_bind(int fd, const char* host, int port) {
+#ifdef _WIN32
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+#else
+    int s = fd;
+#endif
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    addr.sin_addr.s_addr = host ? inet_addr(host) : INADDR_ANY;
+    return bind(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 ? 0 : -1;
+}
+
+int challenger_udp_recv(int fd, char* buf, int buf_len, int64_t* out_addr) {
+#ifdef _WIN32
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+#else
+    int s = fd;
+#endif
+    struct sockaddr_in from;
+    socklen_t fromlen = sizeof(from);
+    int n = recvfrom(s, buf, buf_len, 0, (struct sockaddr*)&from, &fromlen);
+    if (out_addr) *out_addr = (int64_t)from.sin_addr.s_addr;
+    return n;
+}
+
+int challenger_udp_send(int fd, const char* buf, int buf_len, const char* host, int port) {
+#ifdef _WIN32
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+#else
+    int s = fd;
+#endif
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    addr.sin_addr.s_addr = host ? inet_addr(host) : INADDR_ANY;
+    return sendto(s, buf, buf_len, 0, (struct sockaddr*)&addr, sizeof(addr));
+}
+
+int challenger_udp_close(int fd) {
+#ifdef _WIN32
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    return closesocket(s) == 0 ? 0 : -1;
+#else
+    return close(fd);
+#endif
+}
+
+// ============================================================
+// Challenger Async Runtime — Async Synchronization (Phase 10)
+// ============================================================
+
+ChallengerMutex* challenger_mutex_new(void) {
+    ChallengerMutex* m = (ChallengerMutex*)calloc(1, sizeof(ChallengerMutex));
+    if (m) { m->state = CHALLENGER_SYNC_UNLOCKED; }
+    return m;
+}
+
+void challenger_mutex_free(ChallengerMutex* m) { free(m); }
+
+int challenger_mutex_try_lock(ChallengerMutex* m, uint64_t task_id) {
+    if (!m) return 0;
+    if (m->state == CHALLENGER_SYNC_UNLOCKED) {
+        m->state = CHALLENGER_SYNC_LOCKED;
+        m->owner = task_id;
+        return 1;
+    }
+    // Add to waiters
+    if (m->waiter_count < 256) {
+        m->waiters[m->waiter_count++] = task_id;
+    }
+    return 0;
+}
+
+void challenger_mutex_unlock(ChallengerMutex* m, uint64_t task_id) {
+    if (!m || m->owner != task_id) return;
+    m->state = CHALLENGER_SYNC_UNLOCKED;
+    m->owner = 0;
+    // Wake next waiter (handled by executor)
+}
+
+ChallengerRwLock* challenger_rwlock_new(void) {
+    ChallengerRwLock* rw = (ChallengerRwLock*)calloc(1, sizeof(ChallengerRwLock));
+    return rw;
+}
+
+void challenger_rwlock_free(ChallengerRwLock* rw) { free(rw); }
+
+int challenger_rwlock_try_read(ChallengerRwLock* rw, uint64_t task_id) {
+    if (!rw) return 0;
+    if (rw->write_locked) {
+        if (rw->read_waiter_count < 256)
+            rw->read_waiters[rw->read_waiter_count++] = task_id;
+        return 0;
+    }
+    rw->read_count++;
+    return 1;
+}
+
+void challenger_rwlock_read_unlock(ChallengerRwLock* rw) {
+    if (!rw) return;
+    if (rw->read_count > 0) rw->read_count--;
+}
+
+int challenger_rwlock_try_write(ChallengerRwLock* rw, uint64_t task_id) {
+    if (!rw) return 0;
+    if (rw->read_count > 0 || rw->write_locked) {
+        if (rw->write_waiter_count < 256)
+            rw->write_waiters[rw->write_waiter_count++] = task_id;
+        return 0;
+    }
+    rw->write_locked = 1;
+    rw->write_owner = task_id;
+    return 1;
+}
+
+void challenger_rwlock_write_unlock(ChallengerRwLock* rw) {
+    if (!rw) return;
+    rw->write_locked = 0;
+    rw->write_owner = 0;
+}
+
+ChallengerSemaphore* challenger_semaphore_new(int max_count) {
+    ChallengerSemaphore* s = (ChallengerSemaphore*)calloc(1, sizeof(ChallengerSemaphore));
+    if (s) { s->max_count = max_count; s->count = max_count; }
+    return s;
+}
+
+void challenger_semaphore_free(ChallengerSemaphore* s) { free(s); }
+
+int challenger_semaphore_try_acquire(ChallengerSemaphore* s, uint64_t task_id) {
+    if (!s) return 0;
+    if (s->count > 0) { s->count--; return 1; }
+    if (s->waiter_count < 256)
+        s->waiters[s->waiter_count++] = task_id;
+    return 0;
+}
+
+void challenger_semaphore_release(ChallengerSemaphore* s) {
+    if (!s) return;
+    s->count++;
+}
+
+ChallengerNotify* challenger_notify_new(void) {
+    return (ChallengerNotify*)calloc(1, sizeof(ChallengerNotify));
+}
+
+void challenger_notify_free(ChallengerNotify* n) { free(n); }
+
+int challenger_notify_wait(ChallengerNotify* n, uint64_t task_id) {
+    if (!n) return 0;
+    if (n->waiter_count < 256)
+        n->waiters[n->waiter_count++] = task_id;
+    return 0;
+}
+
+void challenger_notify_one(ChallengerExecutor* exec, ChallengerNotify* n) {
+    if (!n || n->waiter_count == 0) return;
+    uint64_t task_id = n->waiters[--n->waiter_count];
+    challenger_executor_wake_task(exec, task_id);
+}
+
+void challenger_notify_all(ChallengerExecutor* exec, ChallengerNotify* n) {
+    if (!n) return;
+    while (n->waiter_count > 0) {
+        uint64_t task_id = n->waiters[--n->waiter_count];
+        challenger_executor_wake_task(exec, task_id);
+    }
+}
+
+// ============================================================
+// Challenger Async Runtime — Channels (Phase 11)
+// ============================================================
+
+ChallengerChannel* challenger_channel_new(int capacity) {
+    ChallengerChannel* ch = (ChallengerChannel*)calloc(1, sizeof(ChallengerChannel));
+    (void)capacity; // unbounded for now
+    return ch;
+}
+
+void challenger_channel_free(ChallengerChannel* ch) { free(ch); }
+
+int challenger_channel_send(ChallengerChannel* ch, int64_t value) {
+    if (!ch || ch->closed) return -1;
+    if (ch->count >= CHALLENGER_CHANNEL_MAX_MSGS) return 0; // full
+    ch->messages[ch->tail] = value;
+    ch->tail = (ch->tail + 1) % CHALLENGER_CHANNEL_MAX_MSGS;
+    ch->count++;
+    return 1;
+}
+
+int challenger_channel_receive(ChallengerChannel* ch, int64_t* out) {
+    if (!ch) return -1;
+    if (ch->count == 0) {
+        if (ch->closed) return -1; // closed and empty
+        return 0; // empty
+    }
+    if (out) *out = ch->messages[ch->head];
+    ch->head = (ch->head + 1) % CHALLENGER_CHANNEL_MAX_MSGS;
+    ch->count--;
+    return 1;
+}
+
+void challenger_channel_close(ChallengerChannel* ch) {
+    if (ch) ch->closed = 1;
+}
+
+int challenger_channel_is_closed(ChallengerChannel* ch) {
+    return ch ? ch->closed : 1;
+}
+
+// ============================================================
+// Challenger Async Runtime — Join / Select (Phase 12)
+// ============================================================
+
+ChallengerJoinAll* challenger_join_all_new(ChallengerFuture** futures, int count) {
+    ChallengerJoinAll* ja = (ChallengerJoinAll*)calloc(1, sizeof(ChallengerJoinAll));
+    if (!ja) return NULL;
+    ja->futures = futures;
+    ja->count = count;
+    ja->results = (Poll*)calloc(count, sizeof(Poll));
+    ja->completed = 0;
+    return ja;
+}
+
+void challenger_join_all_free(ChallengerJoinAll* ja) {
+    if (!ja) return;
+    free(ja->results);
+    free(ja);
+}
+
+int challenger_join_all_poll(ChallengerJoinAll* ja, ChallengerWaker* waker) {
+    if (!ja) return 1;
+    int all_ready = 1;
+    for (int i = 0; i < ja->count; i++) {
+        if (ja->futures[i] && !ja->futures[i]->completed) {
+            Poll p = challenger_future_poll(ja->futures[i], waker);
+            ja->results[i] = p;
+            if (p.tag != 0) all_ready = 0;
+        } else {
+            ja->results[i].tag = 0;
+            ja->results[i].value = ja->futures[i] ? ja->futures[i]->output : 0;
+        }
+    }
+    ja->completed = all_ready;
+    return all_ready;
+}
+
+int challenger_select_poll(ChallengerFuture** futures, int count, ChallengerWaker* waker, int64_t* out_value) {
+    for (int i = 0; i < count; i++) {
+        if (!futures[i] || futures[i]->completed) continue;
+        Poll p = challenger_future_poll(futures[i], waker);
+        if (p.tag == 0) {
+            if (out_value) *out_value = p.value;
+            return i;
+        }
+    }
+    return -1; // none ready
+}
+
+// ============================================================
+// Challenger Async Runtime — Cancellation (Phase 13)
+// ============================================================
+
+void challenger_task_cancel(ChallengerExecutor* exec, uint64_t task_id) {
+    if (!exec) return;
+    for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
+        ChallengerTask* t = exec->ready.tasks[i];
+        if (t && t->id == task_id) {
+            t->state = CHALLENGER_TASK_CANCELLED;
+            return;
+        }
+    }
+}
+
+int challenger_task_is_cancelled(ChallengerExecutor* exec, uint64_t task_id) {
+    if (!exec) return 0;
+    for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
+        ChallengerTask* t = exec->ready.tasks[i];
+        if (t && t->id == task_id) {
+            return t->state == CHALLENGER_TASK_CANCELLED;
+        }
+    }
+    return 0;
+}

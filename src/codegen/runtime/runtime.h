@@ -833,6 +833,135 @@ int challenger_tcp_write(int fd, const char* buf, int buf_len);
 // Close
 int challenger_tcp_close(int fd);
 
+// ============================================================
+// Challenger Async Runtime — UDP (Phase 9)
+// ============================================================
+
+int challenger_udp_socket(void);
+int challenger_udp_bind(int fd, const char* host, int port);
+int challenger_udp_recv(int fd, char* buf, int buf_len, int64_t* out_addr);
+int challenger_udp_send(int fd, const char* buf, int buf_len, const char* host, int port);
+int challenger_udp_close(int fd);
+
+// ============================================================
+// Challenger Async Runtime — Async Synchronization (Phase 10)
+// ============================================================
+
+#define CHALLENGER_SYNC_LOCKED   1
+#define CHALLENGER_SYNC_UNLOCKED 0
+
+typedef struct {
+    int state;          // 0=unlocked, 1=locked
+    uint64_t owner;     // task_id of owner (0 = none)
+    uint64_t waiters[256];
+    int waiter_count;
+} ChallengerMutex;
+
+typedef struct {
+    int read_count;
+    int write_locked;
+    uint64_t write_owner;
+    uint64_t read_waiters[256];
+    int read_waiter_count;
+    uint64_t write_waiters[256];
+    int write_waiter_count;
+} ChallengerRwLock;
+
+typedef struct {
+    int count;
+    int max_count;
+    uint64_t waiters[256];
+    int waiter_count;
+} ChallengerSemaphore;
+
+typedef struct {
+    uint64_t waiters[256];
+    int waiter_count;
+} ChallengerNotify;
+
+ChallengerMutex* challenger_mutex_new(void);
+void challenger_mutex_free(ChallengerMutex* m);
+// Try lock: returns 1 if acquired, 0 if contention (caller should Pending)
+int challenger_mutex_try_lock(ChallengerMutex* m, uint64_t task_id);
+void challenger_mutex_unlock(ChallengerMutex* m, uint64_t task_id);
+
+ChallengerRwLock* challenger_rwlock_new(void);
+void challenger_rwlock_free(ChallengerRwLock* rw);
+int challenger_rwlock_try_read(ChallengerRwLock* rw, uint64_t task_id);
+void challenger_rwlock_read_unlock(ChallengerRwLock* rw);
+int challenger_rwlock_try_write(ChallengerRwLock* rw, uint64_t task_id);
+void challenger_rwlock_write_unlock(ChallengerRwLock* rw);
+
+ChallengerSemaphore* challenger_semaphore_new(int max_count);
+void challenger_semaphore_free(ChallengerSemaphore* s);
+int challenger_semaphore_try_acquire(ChallengerSemaphore* s, uint64_t task_id);
+void challenger_semaphore_release(ChallengerSemaphore* s);
+
+ChallengerNotify* challenger_notify_new(void);
+void challenger_notify_free(ChallengerNotify* n);
+// Wait: adds task to wait list, returns 0 (caller should Pending)
+int challenger_notify_wait(ChallengerNotify* n, uint64_t task_id);
+// Notify one: wakes one waiter
+void challenger_notify_one(ChallengerExecutor* exec, ChallengerNotify* n);
+// Notify all: wakes all waiters
+void challenger_notify_all(ChallengerExecutor* exec, ChallengerNotify* n);
+
+// ============================================================
+// Challenger Async Runtime — Channels (Phase 11)
+// ============================================================
+
+#define CHALLENGER_CHANNEL_UNBOUNDED 0
+#define CHALLENGER_CHANNEL_MAX_MSGS  65536
+
+typedef struct {
+    int64_t messages[CHALLENGER_CHANNEL_MAX_MSGS];
+    int head;
+    int tail;
+    int count;
+    int closed;
+    uint64_t recv_waiters[256];
+    int recv_waiter_count;
+    uint64_t send_waiters[256];
+    int send_waiter_count;
+} ChallengerChannel;
+
+ChallengerChannel* challenger_channel_new(int capacity);
+void challenger_channel_free(ChallengerChannel* ch);
+// Send: returns 1 if sent, 0 if full (caller should Pending)
+int challenger_channel_send(ChallengerChannel* ch, int64_t value);
+// Receive: returns 1 if received (value in *out), 0 if empty (caller should Pending)
+int challenger_channel_receive(ChallengerChannel* ch, int64_t* out);
+void challenger_channel_close(ChallengerChannel* ch);
+int challenger_channel_is_closed(ChallengerChannel* ch);
+
+// ============================================================
+// Challenger Async Runtime — Join / Select (Phase 12)
+// ============================================================
+
+typedef struct {
+    ChallengerFuture** futures;
+    Poll* results;
+    int count;
+    int completed;
+} ChallengerJoinAll;
+
+ChallengerJoinAll* challenger_join_all_new(ChallengerFuture** futures, int count);
+void challenger_join_all_free(ChallengerJoinAll* ja);
+// Poll all futures. Returns 1 when all are Ready, 0 if any Pending.
+int challenger_join_all_poll(ChallengerJoinAll* ja, ChallengerWaker* waker);
+
+// Select: polls futures in order, returns index of first Ready
+int challenger_select_poll(ChallengerFuture** futures, int count, ChallengerWaker* waker, int64_t* out_value);
+
+// ============================================================
+// Challenger Async Runtime — Cancellation (Phase 13)
+// ============================================================
+
+// Cancel a task: marks it cancelled, frees its future
+void challenger_task_cancel(ChallengerExecutor* exec, uint64_t task_id);
+// Check if a task is cancelled
+int challenger_task_is_cancelled(ChallengerExecutor* exec, uint64_t task_id);
+
 // Set non-blocking mode
 int challenger_tcp_set_nonblocking(int fd);
 

@@ -243,7 +243,48 @@ pub fn emit_llvm(
     out.push_str("declare i32 @challenger_tcp_connect(i32, i8*, i32)\n");
     out.push_str("declare i32 @challenger_tcp_read(i32, i8*, i32)\n");
     out.push_str("declare i32 @challenger_tcp_write(i32, i8*, i32)\n");
-    out.push_str("declare i32 @challenger_tcp_close(i32)\n\n");
+    out.push_str("declare i32 @challenger_tcp_close(i32)\n");
+    // Challenger UDP (Phase 9)
+    out.push_str("declare i32 @challenger_udp_socket()\n");
+    out.push_str("declare i32 @challenger_udp_bind(i32, i8*, i32)\n");
+    out.push_str("declare i32 @challenger_udp_recv(i32, i8*, i32, i64*)\n");
+    out.push_str("declare i32 @challenger_udp_send(i32, i8*, i32, i8*, i32)\n");
+    out.push_str("declare i32 @challenger_udp_close(i32)\n");
+    // Challenger Async Synchronization (Phase 10)
+    out.push_str("declare i8* @challenger_mutex_new()\n");
+    out.push_str("declare void @challenger_mutex_free(i8*)\n");
+    out.push_str("declare i32 @challenger_mutex_try_lock(i8*, i64)\n");
+    out.push_str("declare void @challenger_mutex_unlock(i8*, i64)\n");
+    out.push_str("declare i8* @challenger_rwlock_new()\n");
+    out.push_str("declare void @challenger_rwlock_free(i8*)\n");
+    out.push_str("declare i32 @challenger_rwlock_try_read(i8*, i64)\n");
+    out.push_str("declare void @challenger_rwlock_read_unlock(i8*)\n");
+    out.push_str("declare i32 @challenger_rwlock_try_write(i8*, i64)\n");
+    out.push_str("declare void @challenger_rwlock_write_unlock(i8*)\n");
+    out.push_str("declare i8* @challenger_semaphore_new(i32)\n");
+    out.push_str("declare void @challenger_semaphore_free(i8*)\n");
+    out.push_str("declare i32 @challenger_semaphore_try_acquire(i8*, i64)\n");
+    out.push_str("declare void @challenger_semaphore_release(i8*)\n");
+    out.push_str("declare i8* @challenger_notify_new()\n");
+    out.push_str("declare void @challenger_notify_free(i8*)\n");
+    out.push_str("declare i32 @challenger_notify_wait(i8*, i64)\n");
+    out.push_str("declare void @challenger_notify_one(i8*, i8*)\n");
+    out.push_str("declare void @challenger_notify_all(i8*, i8*)\n");
+    // Challenger Channels (Phase 11)
+    out.push_str("declare i8* @challenger_channel_new(i32)\n");
+    out.push_str("declare void @challenger_channel_free(i8*)\n");
+    out.push_str("declare i32 @challenger_channel_send(i8*, i64)\n");
+    out.push_str("declare i32 @challenger_channel_receive(i8*, i64*)\n");
+    out.push_str("declare void @challenger_channel_close(i8*)\n");
+    out.push_str("declare i32 @challenger_channel_is_closed(i8*)\n");
+    // Challenger Join/Select (Phase 12)
+    out.push_str("declare i8* @challenger_join_all_new(i8**, i32)\n");
+    out.push_str("declare void @challenger_join_all_free(i8*)\n");
+    out.push_str("declare i32 @challenger_join_all_poll(i8*, %ChallengerWaker*)\n");
+    out.push_str("declare i32 @challenger_select_poll(i8**, i32, %ChallengerWaker*, i64*)\n");
+    // Challenger Cancellation (Phase 13)
+    out.push_str("declare void @challenger_task_cancel(i8*, i64)\n");
+    out.push_str("declare i32 @challenger_task_is_cancelled(i8*, i64)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");
