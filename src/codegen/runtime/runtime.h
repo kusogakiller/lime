@@ -753,6 +753,7 @@ void challenger_executor_park(ChallengerExecutor* exec);
 void challenger_executor_wake_task(ChallengerExecutor* exec, uint64_t task_id);
 
 // Ready queue operations
+void challenger_ready_queue_init(ReadyQueue* q);
 void challenger_ready_queue_push(ReadyQueue* q, ChallengerTask* task);
 ChallengerTask* challenger_ready_queue_pop(ReadyQueue* q);
 int challenger_ready_queue_is_empty(ReadyQueue* q);
@@ -1027,6 +1028,32 @@ typedef struct {
 
 ChallengerDnsResult challenger_dns_resolve(const char* hostname);
 int64_t challenger_dns_resolve_async(ChallengerBlockingPool* pool, const char* hostname);
+
+// ============================================================
+// Challenger Async Runtime — Multi-thread Runtime (Phase 18)
+// ============================================================
+
+#define CHALLENGER_MAX_WORKERS 64
+
+typedef struct {
+    ChallengerExecutor* exec;
+    int worker_count;
+    void* worker_threads[CHALLENGER_MAX_WORKERS];
+    int shutdown;
+    // Per-worker ready queues for work stealing
+    ReadyQueue worker_queues[CHALLENGER_MAX_WORKERS];
+    // Mutex for shared queue access
+    int queue_lock;
+} ChallengerMtExecutor;
+
+ChallengerMtExecutor* challenger_mt_executor_new(int worker_count);
+void challenger_mt_executor_free(ChallengerMtExecutor* mt);
+// Spawn a task into the multi-thread executor
+uint64_t challenger_mt_spawn(ChallengerMtExecutor* mt, ChallengerFuture* fut);
+// Run the multi-thread executor (blocks until all tasks complete)
+int challenger_mt_run(ChallengerMtExecutor* mt);
+// Shutdown the multi-thread executor
+void challenger_mt_shutdown(ChallengerMtExecutor* mt);
 
 // Set non-blocking mode
 int challenger_tcp_set_nonblocking(int fd);

@@ -5460,6 +5460,13 @@ Poll challenger_poll_pending(void) {
 
 // --- Ready Queue ---
 
+void challenger_ready_queue_init(ReadyQueue* q) {
+    if (!q) return;
+    q->head = 0;
+    q->tail = 0;
+    q->count = 0;
+}
+
 void challenger_ready_queue_push(ReadyQueue* q, ChallengerTask* task) {
     if (!q || !task) return;
     if (q->count >= CHALLENGER_MAX_TASKS) return;
@@ -6568,4 +6575,157 @@ int64_t challenger_dns_resolve_async(ChallengerBlockingPool* pool, const char* h
     (void)pool; (void)hostname;
     // Runs blocking DNS on the blocking pool
     return 0;
+}
+
+// ============================================================
+// Challenger Async Runtime — Multi-thread Runtime (Phase 18)
+// ============================================================
+
+#ifdef _WIN32
+static DWORD WINAPI mt_worker(LPVOID arg) {
+    ChallengerMtExecutor* mt = (ChallengerMtExecutor*)arg;
+    int worker_id = 0; // simplified
+    while (!mt->shutdown) {
+        ChallengerTask* task = NULL;
+
+        // Try own queue first
+        task = challenger_ready_queue_pop(&mt->worker_queues[worker_id]);
+
+        // If empty, try shared executor queue
+        if (!task) {
+            task = challenger_ready_queue_pop(&mt->exec->ready);
+        }
+
+        // If still empty, yield
+        if (!task) {
+            SwitchToThread();
+            continue;
+        }
+
+        if (task->state == CHALLENGER_TASK_CANCELLED) {
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            free(task);
+            continue;
+        }
+
+        task->state = CHALLENGER_TASK_RUNNING;
+        if (task->future && !task->future->completed) {
+            Poll result = challenger_future_poll(task->future, task->waker);
+            if (result.tag == 0) {
+                task->state = CHALLENGER_TASK_COMPLETED;
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                free(task);
+            } else {
+                task->state = CHALLENGER_TASK_READY;
+            }
+        } else {
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            free(task);
+        }
+    }
+    return 0;
+}
+#else
+static void* mt_worker(void* arg) {
+    ChallengerMtExecutor* mt = (ChallengerMtExecutor*)arg;
+    int worker_id = 0;
+    while (!mt->shutdown) {
+        ChallengerTask* task = challenger_ready_queue_pop(&mt->worker_queues[worker_id]);
+        if (!task) task = challenger_ready_queue_pop(&mt->exec->ready);
+        if (!task) { sched_yield(); continue; }
+
+        if (task->state == CHALLENGER_TASK_CANCELLED) {
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            free(task);
+            continue;
+        }
+
+        task->state = CHALLENGER_TASK_RUNNING;
+        if (task->future && !task->future->completed) {
+            Poll result = challenger_future_poll(task->future, task->waker);
+            if (result.tag == 0) {
+                task->state = CHALLENGER_TASK_COMPLETED;
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                free(task);
+            } else {
+                task->state = CHALLENGER_TASK_READY;
+            }
+        } else {
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            free(task);
+        }
+    }
+    return NULL;
+}
+#endif
+
+ChallengerMtExecutor* challenger_mt_executor_new(int worker_count) {
+    ChallengerMtExecutor* mt = (ChallengerMtExecutor*)calloc(1, sizeof(ChallengerMtExecutor));
+    if (!mt) return NULL;
+    mt->exec = challenger_executor_new();
+    mt->worker_count = worker_count > 0 ? worker_count : 4;
+    if (mt->worker_count > CHALLENGER_MAX_WORKERS) mt->worker_count = CHALLENGER_MAX_WORKERS;
+    mt->shutdown = 0;
+    mt->queue_lock = 0;
+
+    for (int i = 0; i < mt->worker_count; i++) {
+        challenger_ready_queue_init(&mt->worker_queues[i]);
+    }
+
+    // Start worker threads
+    for (int i = 0; i < mt->worker_count; i++) {
+#ifdef _WIN32
+        mt->worker_threads[i] = CreateThread(NULL, 0, mt_worker, mt, 0, NULL);
+#else
+        pthread_t t;
+        pthread_create(&t, NULL, mt_worker, mt);
+        mt->worker_threads[i] = (void*)(intptr_t)t;
+#endif
+    }
+
+    return mt;
+}
+
+void challenger_mt_executor_free(ChallengerMtExecutor* mt) {
+    if (!mt) return;
+    challenger_mt_shutdown(mt);
+    if (mt->exec) challenger_executor_free(mt->exec);
+    free(mt);
+}
+
+uint64_t challenger_mt_spawn(ChallengerMtExecutor* mt, ChallengerFuture* fut) {
+    if (!mt || !fut) return 0;
+    return challenger_executor_spawn(mt->exec, fut);
+}
+
+int challenger_mt_run(ChallengerMtExecutor* mt) {
+    if (!mt) return -1;
+    mt->exec->running = 1;
+    while (!mt->shutdown) {
+        if (challenger_ready_queue_is_empty(&mt->exec->ready)) {
+            // Check if all workers are idle
+            break;
+        }
+        SwitchToThread(); // yield to workers
+    }
+    return 0;
+}
+
+void challenger_mt_shutdown(ChallengerMtExecutor* mt) {
+    if (!mt || mt->shutdown) return;
+    mt->shutdown = 1;
+    for (int i = 0; i < mt->worker_count; i++) {
+#ifdef _WIN32
+        if (mt->worker_threads[i]) {
+            WaitForSingleObject((HANDLE)mt->worker_threads[i], 1000);
+            CloseHandle((HANDLE)mt->worker_threads[i]);
+        }
+#endif
+    }
 }

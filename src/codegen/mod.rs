@@ -305,7 +305,13 @@ pub fn emit_llvm(
     out.push_str("declare i8* @challenger_process_read_stdout(i8*, i64*)\n");
     out.push_str("declare i32 @challenger_process_write_stdin(i8*, i8*, i32)\n");
     // Challenger DNS (Phase 17)
-    out.push_str("declare i64 @challenger_dns_resolve_async(i8*, i8*)\n\n");
+    out.push_str("declare i64 @challenger_dns_resolve_async(i8*, i8*)\n");
+    // Challenger Multi-thread Runtime (Phase 18)
+    out.push_str("declare i8* @challenger_mt_executor_new(i32)\n");
+    out.push_str("declare void @challenger_mt_executor_free(i8*)\n");
+    out.push_str("declare i64 @challenger_mt_spawn(i8*, i8*)\n");
+    out.push_str("declare i32 @challenger_mt_run(i8*)\n");
+    out.push_str("declare void @challenger_mt_shutdown(i8*)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");
