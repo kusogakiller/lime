@@ -697,4 +697,68 @@ void challenger_waker_wake_by_ref(ChallengerWaker* waker);
 Poll challenger_poll_ready(int64_t value);
 Poll challenger_poll_pending(void);
 
+// ============================================================
+// Challenger Async Runtime — Task / Executor (Phase 3-5)
+// ============================================================
+
+#define CHALLENGER_TASK_READY     0
+#define CHALLENGER_TASK_RUNNING   1
+#define CHALLENGER_TASK_COMPLETED 2
+#define CHALLENGER_TASK_CANCELLED 3
+
+#define CHALLENGER_MAX_TASKS  65536
+#define CHALLENGER_MAX_EVENTS 1024
+
+typedef struct ChallengerTask ChallengerTask;
+
+struct ChallengerTask {
+    uint64_t id;
+    ChallengerFuture* future;
+    ChallengerWaker* waker;
+    int state;          // CHALLENGER_TASK_*
+    int needs_poll;     // 1 = in ready queue, 0 = waiting
+};
+
+typedef struct {
+    ChallengerTask* tasks[CHALLENGER_MAX_TASKS];
+    int head;
+    int tail;
+    int count;
+} ReadyQueue;
+
+typedef struct {
+    ReadyQueue ready;
+    uint64_t next_task_id;
+    int running;
+    int shutdown;
+    // Worker thread (for multi-thread, later)
+    void* worker_handle;
+} ChallengerExecutor;
+
+// Executor lifecycle
+ChallengerExecutor* challenger_executor_new(void);
+void challenger_executor_free(ChallengerExecutor* exec);
+
+// Task management
+uint64_t challenger_executor_spawn(ChallengerExecutor* exec, ChallengerFuture* fut);
+void challenger_executor_cancel(ChallengerExecutor* exec, uint64_t task_id);
+
+// Run the executor until all tasks complete or shutdown is requested
+int challenger_executor_run(ChallengerExecutor* exec);
+
+// Block the current thread, wake on event (for single-thread reactor integration)
+void challenger_executor_park(ChallengerExecutor* exec);
+
+// Wake a specific task (called by Waker)
+void challenger_executor_wake_task(ChallengerExecutor* exec, uint64_t task_id);
+
+// Ready queue operations
+void challenger_ready_queue_push(ReadyQueue* q, ChallengerTask* task);
+ChallengerTask* challenger_ready_queue_pop(ReadyQueue* q);
+int challenger_ready_queue_is_empty(ReadyQueue* q);
+
+// Global executor for waker callbacks (single-thread mode)
+void challenger_set_global_executor(ChallengerExecutor* exec);
+ChallengerWaker* challenger_waker_new_for_task(ChallengerExecutor* exec, uint64_t task_id);
+
 #endif // LIME_RUNTIME_H

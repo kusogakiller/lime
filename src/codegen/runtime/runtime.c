@@ -5453,3 +5453,187 @@ Poll challenger_poll_pending(void) {
     p.value = 0;
     return p;
 }
+
+// ============================================================
+// Challenger Async Runtime — Task / Executor (Phase 3-5)
+// ============================================================
+
+// --- Ready Queue ---
+
+void challenger_ready_queue_push(ReadyQueue* q, ChallengerTask* task) {
+    if (!q || !task) return;
+    if (q->count >= CHALLENGER_MAX_TASKS) return;
+    q->tasks[q->tail] = task;
+    q->tail = (q->tail + 1) % CHALLENGER_MAX_TASKS;
+    q->count++;
+    task->needs_poll = 1;
+}
+
+ChallengerTask* challenger_ready_queue_pop(ReadyQueue* q) {
+    if (!q || q->count == 0) return NULL;
+    ChallengerTask* task = q->tasks[q->head];
+    q->head = (q->head + 1) % CHALLENGER_MAX_TASKS;
+    q->count--;
+    if (task) task->needs_poll = 0;
+    return task;
+}
+
+int challenger_ready_queue_is_empty(ReadyQueue* q) {
+    return q ? (q->count == 0) : 1;
+}
+
+// --- Executor ---
+
+ChallengerExecutor* challenger_executor_new(void) {
+    ChallengerExecutor* exec = (ChallengerExecutor*)calloc(1, sizeof(ChallengerExecutor));
+    if (!exec) return NULL;
+    exec->ready.head = 0;
+    exec->ready.tail = 0;
+    exec->ready.count = 0;
+    exec->next_task_id = 1;
+    exec->running = 0;
+    exec->shutdown = 0;
+    exec->worker_handle = NULL;
+    return exec;
+}
+
+void challenger_executor_free(ChallengerExecutor* exec) {
+    if (!exec) return;
+    // Free all remaining tasks
+    while (!challenger_ready_queue_is_empty(&exec->ready)) {
+        ChallengerTask* t = challenger_ready_queue_pop(&exec->ready);
+        if (t) {
+            if (t->future) challenger_future_free(t->future);
+            if (t->waker) challenger_waker_free(t->waker);
+            free(t);
+        }
+    }
+    free(exec);
+}
+
+uint64_t challenger_executor_spawn(ChallengerExecutor* exec, ChallengerFuture* fut) {
+    if (!exec || !fut) return 0;
+
+    ChallengerTask* task = (ChallengerTask*)calloc(1, sizeof(ChallengerTask));
+    if (!task) return 0;
+
+    task->id = exec->next_task_id++;
+    task->future = fut;
+    task->state = CHALLENGER_TASK_READY;
+    task->needs_poll = 0;
+
+    // Create a waker that references the executor and this task
+    task->waker = challenger_waker_new(NULL, NULL); // placeholder waker
+
+    challenger_ready_queue_push(&exec->ready, task);
+    return task->id;
+}
+
+void challenger_executor_cancel(ChallengerExecutor* exec, uint64_t task_id) {
+    if (!exec) return;
+    // Find task in the ready queue and mark as cancelled
+    for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
+        ChallengerTask* t = exec->ready.tasks[i];
+        if (t && t->id == task_id) {
+            t->state = CHALLENGER_TASK_CANCELLED;
+            return;
+        }
+    }
+}
+
+void challenger_executor_wake_task(ChallengerExecutor* exec, uint64_t task_id) {
+    if (!exec) return;
+    // Find the task and re-enqueue it
+    for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
+        ChallengerTask* t = exec->ready.tasks[i];
+        if (t && t->id == task_id) {
+            if (!t->needs_poll) {
+                challenger_ready_queue_push(&exec->ready, t);
+            }
+            return;
+        }
+    }
+}
+
+int challenger_executor_run(ChallengerExecutor* exec) {
+    if (!exec) return -1;
+    exec->running = 1;
+
+    while (!exec->shutdown) {
+        // Check if all tasks are done
+        if (challenger_ready_queue_is_empty(&exec->ready)) {
+            break;
+        }
+
+        ChallengerTask* task = challenger_ready_queue_pop(&exec->ready);
+        if (!task) continue;
+        if (task->state == CHALLENGER_TASK_CANCELLED) {
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            free(task);
+            continue;
+        }
+
+        task->state = CHALLENGER_TASK_RUNNING;
+
+        // Poll the future
+        if (task->future && !task->future->completed) {
+            Poll result = challenger_future_poll(task->future, task->waker);
+
+            if (result.tag == 0) {
+                // Ready: task completed
+                task->state = CHALLENGER_TASK_COMPLETED;
+                task->future->output = result.value;
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                free(task);
+            } else {
+                // Pending: task waits for wake
+                task->state = CHALLENGER_TASK_READY;
+                // Task stays in the system but is not in the ready queue.
+                // When waker fires, it will be re-enqueued.
+            }
+        } else {
+            // Future already completed or null
+            task->state = CHALLENGER_TASK_COMPLETED;
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            free(task);
+        }
+    }
+
+    exec->running = 0;
+    return 0;
+}
+
+void challenger_executor_park(ChallengerExecutor* exec) {
+    if (!exec) return;
+    // In single-thread mode: if no tasks are ready, we're done.
+    // In multi-thread mode (later): block on a condition variable.
+    // For now: no-op — the run loop handles this.
+}
+
+// --- Waker-Executor integration ---
+
+// Global executor reference for waker callbacks (single-thread mode)
+static ChallengerExecutor* g_challenger_executor = NULL;
+
+void challenger_set_global_executor(ChallengerExecutor* exec) {
+    g_challenger_executor = exec;
+}
+
+// Wake callback: called by waker when a task needs to be rescheduled
+static void challenger_wake_callback(void* data) {
+    uint64_t task_id = (uint64_t)(uintptr_t)data;
+    if (g_challenger_executor) {
+        challenger_executor_wake_task(g_challenger_executor, task_id);
+    }
+}
+
+ChallengerWaker* challenger_waker_new_for_task(ChallengerExecutor* exec, uint64_t task_id) {
+    return challenger_waker_new(challenger_wake_callback, (void*)(uintptr_t)task_id);
+}
+
+void challenger_waker_wake_from_executor(ChallengerExecutor* exec, uint64_t task_id) {
+    challenger_executor_wake_task(exec, task_id);
+}

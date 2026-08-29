@@ -213,7 +213,15 @@ pub fn emit_llvm(
     out.push_str("declare void @challenger_waker_wake(%ChallengerWaker*)\n");
     out.push_str("declare void @challenger_waker_wake_by_ref(%ChallengerWaker*)\n");
     out.push_str("declare %ChallengerPoll @challenger_poll_ready(i64)\n");
-    out.push_str("declare %ChallengerPoll @challenger_poll_pending()\n\n");
+    out.push_str("declare %ChallengerPoll @challenger_poll_pending()\n");
+    // Challenger Task / Executor (Phase 3-5)
+    out.push_str("declare i8* @challenger_executor_new()\n");
+    out.push_str("declare void @challenger_executor_free(i8*)\n");
+    out.push_str("declare i64 @challenger_executor_spawn(i8*, i8*)\n");
+    out.push_str("declare void @challenger_executor_cancel(i8*, i64)\n");
+    out.push_str("declare i32 @challenger_executor_run(i8*)\n");
+    out.push_str("declare void @challenger_executor_wake_task(i8*, i64)\n");
+    out.push_str("declare void @challenger_waker_wake_from_executor(i8*, i64)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");
@@ -979,8 +987,24 @@ fn emit_main_wrapper(out: &mut String, defs: &Defs) {
     if !defs.functions.contains_key("main") {
         return;
     }
+    let is_main_async = defs
+        .functions
+        .get("main")
+        .map(|f| f.is_async)
+        .unwrap_or(false);
+
     out.push_str("define i32 @main() {\n");
-    out.push_str(&format!("  call void @{}()\n", LIME_MAIN));
+    if is_main_async {
+        // Async main: create executor, spawn main future, run
+        out.push_str("  %exec = call i8* @challenger_executor_new()\n");
+        out.push_str("  call void @challenger_set_global_executor(i8* %exec)\n");
+        out.push_str("  %main_fut = call i8* @main_lime()\n");
+        out.push_str("  %task_id = call i64 @challenger_executor_spawn(i8* %exec, i8* %main_fut)\n");
+        out.push_str("  call i32 @challenger_executor_run(i8* %exec)\n");
+        out.push_str("  call void @challenger_executor_free(i8* %exec)\n");
+    } else {
+        out.push_str(&format!("  call void @{}()\n", LIME_MAIN));
+    }
     out.push_str("  ret i32 0\n");
     out.push_str("}\n\n");
 }
