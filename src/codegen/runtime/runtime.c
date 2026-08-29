@@ -5733,3 +5733,259 @@ int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw
     }
     return -1; // no active timers
 }
+
+// ============================================================
+// Challenger Async Runtime — OS Reactor (Phase 7)
+// ============================================================
+
+#ifdef _WIN32
+
+ChallengerReactor* challenger_reactor_new(void) {
+    ChallengerReactor* r = (ChallengerReactor*)calloc(1, sizeof(ChallengerReactor));
+    if (!r) return NULL;
+    r->iocp_handle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
+    r->event_handle = NULL;
+    r->backend = 0; // IOCP
+    if (r->iocp_handle == NULL) {
+        free(r);
+        return NULL;
+    }
+    return r;
+}
+
+void challenger_reactor_free(ChallengerReactor* reactor) {
+    if (!reactor) return;
+    if (reactor->iocp_handle) CloseHandle(reactor->iocp_handle);
+    free(reactor);
+}
+
+int challenger_reactor_register(ChallengerReactor* reactor, int fd, uint64_t task_id) {
+    if (!reactor || fd < 0) return -1;
+    HANDLE h = (HANDLE)(intptr_t)_get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    // Associate with IOCP, use task_id as completion key
+    HANDLE result = CreateIoCompletionPort(h, reactor->iocp_handle, (ULONG_PTR)task_id, 0);
+    return result ? 0 : -1;
+}
+
+int challenger_reactor_unregister(ChallengerReactor* reactor, int fd) {
+    // IOCP: unregistering is implicit when the handle is closed
+    (void)reactor; (void)fd;
+    return 0;
+}
+
+int challenger_reactor_poll(ChallengerExecutor* exec, ChallengerReactor* reactor, int timeout_ms) {
+    if (!reactor || !reactor->iocp_handle) return 0;
+
+    DWORD bytes;
+    ULONG_PTR completion_key;
+    OVERLAPPED* overlapped;
+    BOOL ok = GetQueuedCompletionStatus(
+        reactor->iocp_handle, &bytes, &completion_key, &overlapped, (DWORD)timeout_ms
+    );
+
+    if (ok && completion_key > 0) {
+        // Wake the task associated with this completion
+        challenger_executor_wake_task(exec, (uint64_t)completion_key);
+        return 1;
+    }
+    return 0;
+}
+
+#else
+// POSIX fallback (epoll on Linux, kqueue on macOS)
+
+ChallengerReactor* challenger_reactor_new(void) {
+    ChallengerReactor* r = (ChallengerReactor*)calloc(1, sizeof(ChallengerReactor));
+    if (!r) return NULL;
+#ifdef __linux__
+    r->event_handle = (void*)(intptr_t)epoll_create1(0);
+    r->backend = 1;
+#else
+    r->event_handle = (void*)(intptr_t)kqueue();
+    r->backend = 2;
+#endif
+    r->iocp_handle = NULL;
+    return r;
+}
+
+void challenger_reactor_free(ChallengerReactor* reactor) {
+    if (!reactor) return;
+    if (reactor->event_handle) close((int)(intptr_t)reactor->event_handle);
+    free(reactor);
+}
+
+int challenger_reactor_register(ChallengerReactor* reactor, int fd, uint64_t task_id) {
+    if (!reactor || fd < 0) return -1;
+#ifdef __linux__
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+    ev.data.u64 = task_id;
+    return epoll_ctl((int)(intptr_t)reactor->event_handle, EPOLL_CTL_ADD, fd, &ev);
+#else
+    struct kevent ev;
+    EV_SET(&ev, fd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, (void*)task_id);
+    return kevent((int)(intptr_t)reactor->event_handle, &ev, 1, NULL, 0, NULL);
+#endif
+}
+
+int challenger_reactor_unregister(ChallengerReactor* reactor, int fd) {
+    if (!reactor || fd < 0) return -1;
+#ifdef __linux__
+    return epoll_ctl((int)(intptr_t)reactor->event_handle, EPOLL_CTL_DEL, fd, NULL);
+#else
+    struct kevent ev;
+    EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+    return kevent((int)(intptr_t)reactor->event_handle, &ev, 1, NULL, 0, NULL);
+#endif
+}
+
+int challenger_reactor_poll(ChallengerExecutor* exec, ChallengerReactor* reactor, int timeout_ms) {
+    if (!reactor || !reactor->event_handle) return 0;
+#ifdef __linux__
+    struct epoll_event events[CHALLENGER_MAX_EVENTS];
+    int n = epoll_wait((int)(intptr_t)reactor->event_handle, events, CHALLENGER_MAX_EVENTS, timeout_ms);
+    for (int i = 0; i < n; i++) {
+        uint64_t task_id = events[i].data.u64;
+        if (task_id > 0) challenger_executor_wake_task(exec, task_id);
+    }
+    return n;
+#else
+    struct kevent events[CHALLENGER_MAX_EVENTS];
+    int timeout_ns = timeout_ms >= 0 ? timeout_ms * 1000000 : -1;
+    struct timespec ts;
+    if (timeout_ns >= 0) {
+        ts.tv_sec = timeout_ns / 1000000000;
+        ts.tv_nsec = timeout_ns % 1000000000;
+    }
+    int n = kevent((int)(intptr_t)reactor->event_handle, NULL, 0, events, CHALLENGER_MAX_EVENTS,
+                   timeout_ns >= 0 ? &ts : NULL);
+    for (int i = 0; i < n; i++) {
+        uint64_t task_id = (uint64_t)(uintptr_t)events[i].udata;
+        if (task_id > 0) challenger_executor_wake_task(exec, task_id);
+    }
+    return n;
+#endif
+}
+
+#endif // _WIN32
+
+// ============================================================
+// Challenger Async Runtime — TCP (Phase 8)
+// ============================================================
+
+#ifdef _WIN32
+
+int challenger_tcp_socket(void) {
+    SOCKET s = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
+    if (s == INVALID_SOCKET) return -1;
+    return _open_osfhandle((intptr_t)s, 0);
+}
+
+int challenger_tcp_set_nonblocking(int fd) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
+    u_long mode = 1;
+    return ioctlsocket(s, FIONBIO, &mode) == 0 ? 0 : -1;
+}
+
+int challenger_tcp_bind(int fd, const char* host, int port) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    addr.sin_addr.s_addr = host ? inet_addr(host) : INADDR_ANY;
+    return bind(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 ? 0 : -1;
+}
+
+int challenger_tcp_listen(int fd, int backlog) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    return listen(s, backlog) == 0 ? 0 : -1;
+}
+
+int challenger_tcp_accept(int fd) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    struct sockaddr_in addr;
+    int addrlen = sizeof(addr);
+    SOCKET client = accept(s, (struct sockaddr*)&addr, &addrlen);
+    if (client == INVALID_SOCKET) return -1;
+    return _open_osfhandle((intptr_t)client, 0);
+}
+
+int challenger_tcp_connect(int fd, const char* host, int port) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    addr.sin_addr.s_addr = inet_addr(host);
+    return connect(s, (struct sockaddr*)&addr, sizeof(addr)) == 0 ? 0 : -1;
+}
+
+int challenger_tcp_read(int fd, char* buf, int buf_len) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    return recv(s, buf, buf_len, 0);
+}
+
+int challenger_tcp_write(int fd, const char* buf, int buf_len) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    return send(s, buf, buf_len, 0);
+}
+
+int challenger_tcp_close(int fd) {
+    SOCKET s = (SOCKET)_get_osfhandle(fd);
+    return closesocket(s) == 0 ? 0 : -1;
+}
+
+#else
+// POSIX TCP
+
+int challenger_tcp_socket(void) {
+    return socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+}
+
+int challenger_tcp_set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+int challenger_tcp_bind(int fd, const char* host, int port) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = host ? inet_addr(host) : INADDR_ANY;
+    return bind(fd, (struct sockaddr*)&addr, sizeof(addr));
+}
+
+int challenger_tcp_listen(int fd, int backlog) {
+    return listen(fd, backlog);
+}
+
+int challenger_tcp_accept(int fd) {
+    return accept(fd, NULL, NULL);
+}
+
+int challenger_tcp_connect(int fd, const char* host, int port) {
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = inet_addr(host);
+    return connect(fd, (struct sockaddr*)&addr, sizeof(addr));
+}
+
+int challenger_tcp_read(int fd, char* buf, int buf_len) {
+    return recv(fd, buf, buf_len, 0);
+}
+
+int challenger_tcp_write(int fd, const char* buf, int buf_len) {
+    return send(fd, buf, buf_len, 0);
+}
+
+int challenger_tcp_close(int fd) {
+    return close(fd);
+}
+
+#endif // _WIN32

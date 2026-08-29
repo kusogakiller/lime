@@ -227,7 +227,23 @@ pub fn emit_llvm(
     out.push_str("declare i64 @challenger_time_now_us()\n");
     out.push_str("declare i64 @challenger_timer_sleep(i8*, i8*, i64)\n");
     out.push_str("declare void @challenger_timer_cancel(i8*, i64)\n");
-    out.push_str("declare i64 @challenger_timer_tick(i8*, i8*)\n\n");
+    out.push_str("declare i64 @challenger_timer_tick(i8*, i8*)\n");
+    // Challenger Reactor (Phase 7)
+    out.push_str("declare i8* @challenger_reactor_new()\n");
+    out.push_str("declare void @challenger_reactor_free(i8*)\n");
+    out.push_str("declare i32 @challenger_reactor_register(i8*, i32, i64)\n");
+    out.push_str("declare i32 @challenger_reactor_unregister(i8*, i32)\n");
+    out.push_str("declare i32 @challenger_reactor_poll(i8*, i8*, i32)\n");
+    // Challenger TCP (Phase 8)
+    out.push_str("declare i32 @challenger_tcp_socket()\n");
+    out.push_str("declare i32 @challenger_tcp_set_nonblocking(i32)\n");
+    out.push_str("declare i32 @challenger_tcp_bind(i32, i8*, i32)\n");
+    out.push_str("declare i32 @challenger_tcp_listen(i32, i32)\n");
+    out.push_str("declare i32 @challenger_tcp_accept(i32)\n");
+    out.push_str("declare i32 @challenger_tcp_connect(i32, i8*, i32)\n");
+    out.push_str("declare i32 @challenger_tcp_read(i32, i8*, i32)\n");
+    out.push_str("declare i32 @challenger_tcp_write(i32, i8*, i32)\n");
+    out.push_str("declare i32 @challenger_tcp_close(i32)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");

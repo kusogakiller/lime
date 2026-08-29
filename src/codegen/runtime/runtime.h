@@ -786,4 +786,54 @@ void challenger_timer_cancel(ChallengerTimerWheel* tw, uint64_t timer_id);
 // Check expired timers and wake their tasks. Returns time until next timer (us), or -1 if none.
 int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw);
 
+// ============================================================
+// Challenger Async Runtime — OS Reactor (Phase 7)
+// ============================================================
+
+typedef struct {
+    void* iocp_handle;        // IOCP handle on Windows
+    void* event_handle;       // epoll fd on Linux / kqueue fd on macOS
+    int backend;              // 0=IOCP, 1=epoll, 2=kqueue
+} ChallengerReactor;
+
+// Reactor lifecycle
+ChallengerReactor* challenger_reactor_new(void);
+void challenger_reactor_free(ChallengerReactor* reactor);
+
+// Register/unregister an fd for async I/O
+int challenger_reactor_register(ChallengerReactor* reactor, int fd, uint64_t task_id);
+int challenger_reactor_unregister(ChallengerReactor* reactor, int fd);
+
+// Poll for events. Returns number of events. Calls wake for completed tasks.
+int challenger_reactor_poll(ChallengerExecutor* exec, ChallengerReactor* reactor, int timeout_ms);
+
+// ============================================================
+// Challenger Async Runtime — TCP (Phase 8)
+// ============================================================
+
+// Create a non-blocking TCP socket
+int challenger_tcp_socket(void);
+
+// Bind and listen
+int challenger_tcp_bind(int fd, const char* host, int port);
+int challenger_tcp_listen(int fd, int backlog);
+
+// Accept: returns new fd or -1 (would block)
+int challenger_tcp_accept(int fd);
+
+// Connect: returns 0 on success, -1 on error
+int challenger_tcp_connect(int fd, const char* host, int port);
+
+// Read: returns bytes read or -1
+int challenger_tcp_read(int fd, char* buf, int buf_len);
+
+// Write: returns bytes written or -1
+int challenger_tcp_write(int fd, const char* buf, int buf_len);
+
+// Close
+int challenger_tcp_close(int fd);
+
+// Set non-blocking mode
+int challenger_tcp_set_nonblocking(int fd);
+
 #endif // LIME_RUNTIME_H
