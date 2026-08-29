@@ -1,6 +1,0 @@
-// EXPECT: check FAILS ? struct has no field `nmae`
-struct Task:
-    int: id
-fn main():
-    let t = Task(1)
-    println(t.nmae)

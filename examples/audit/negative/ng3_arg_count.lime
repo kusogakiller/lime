@@ -1,7 +1,0 @@
-// EXPECT: check FAILS ? wrong argument count for Task constructor
-struct Task:
-    int: id
-    str: title
-fn main():
-    let t = Task(1)
-    println(t.id)

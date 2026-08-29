@@ -1,9 +1,0 @@
-fn main():
-    let Instant: start = time.now()
-    let bool: slept = time.sleep(0.05)
-    println(slept)
-    let Duration: d = time.elapsed(start)
-    println(d.secs)
-    let Instant: again = time.now()
-    println(again.secs > 0.0)
-    return

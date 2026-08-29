@@ -1,4 +1,0 @@
-[package]
-name = "string_stdlib_demo"
-version = "0.1.0"
-description = "Demo of std.string standard library"

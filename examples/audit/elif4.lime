@@ -1,8 +1,0 @@
-fn main():
-    let x = 99
-    if x == 1:
-        println("A")
-    elif x == 2:
-        println("B")
-    else:
-        println("C")

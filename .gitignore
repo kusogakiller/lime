@@ -59,3 +59,17 @@ test_new.obj
 runtime_backup.obj
 runtime_dump.txt
 current_status.txt
+
+# Build/test batch scripts (local convenience, not distributable)
+*.bat
+!bench_clang/**/*.bat
+
+# Demo and audit examples (not part of the compiler)
+examples/
+
+# Bot and log directories
+bot/
+logs/
+
+# IDE/backup directories
+.opencode.bak/
