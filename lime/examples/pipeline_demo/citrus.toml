@@ -1,9 +1,0 @@
-[package]
-name = "pipeline_demo"
-version = "v0.1.0"
-
-[files]
-main = "main.lime"
-
-[import]
-math = "v0.1.0"

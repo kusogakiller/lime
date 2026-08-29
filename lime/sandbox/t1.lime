@@ -1,7 +1,0 @@
-struct User:
-    str: name
-    int: age
-
-fn main():
-    let user = User("Alice", 15)
-    print(user)

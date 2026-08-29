@@ -1,8 +1,0 @@
-[package]
-name = "tuple_match_demo"
-version = "v0.1.0"
-
-[files]
-main = "main.lime"
-
-[import]

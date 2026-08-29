@@ -1,6 +1,0 @@
-[package]
-name = "io"
-version = "v0.1.0"
-
-[files]
-io = "src/io.lime"

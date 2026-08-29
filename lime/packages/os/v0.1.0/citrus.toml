@@ -1,6 +1,0 @@
-[package]
-name = "os"
-version = "v0.1.0"
-
-[files]
-os = "src/os.lime"

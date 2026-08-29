@@ -1,7 +1,0 @@
-fn main():
-    let result = Success("ok")
-    match result:
-        Success(data):
-            print(data)
-        Error(Ignore):
-            print("error")

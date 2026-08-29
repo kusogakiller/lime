@@ -1,9 +1,0 @@
-[package]
-name = "time_demo"
-version = "0.1.0"
-
-[files]
-main = "main.lime"
-
-[import]
-time = "v0.1.0"

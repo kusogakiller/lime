@@ -1,6 +1,0 @@
-[package]
-name = "time"
-version = "v0.1.0"
-
-[files]
-time = "src/time.lime"

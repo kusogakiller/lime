@@ -1,6 +1,0 @@
-fn main():
-    let t = (1, 2, 3)
-    match t:
-        (a, b):
-            println(a)
-    println("ok")

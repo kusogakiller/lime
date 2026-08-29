@@ -1,6 +1,0 @@
-fn main():
-    let w = (7, "seven")
-    match w:
-        catch:
-            println("wildcard")
-    println("ok")

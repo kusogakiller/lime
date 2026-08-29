@@ -1,6 +1,0 @@
-[package]
-name = "string"
-version = "v0.1.0"
-
-[files]
-string = "src/string.lime"

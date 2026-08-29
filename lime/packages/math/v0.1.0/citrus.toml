@@ -1,6 +1,0 @@
-[package]
-name = "math"
-version = "v0.1.0"
-
-[files]
-math = "src/math.lime"

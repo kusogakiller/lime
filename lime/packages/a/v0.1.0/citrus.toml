@@ -1,9 +1,0 @@
-[package]
-name = "a"
-version = "v0.1.0"
-
-[files]
-lib = "src/a.lime"
-
-[import]
-b = "v0.1.0"

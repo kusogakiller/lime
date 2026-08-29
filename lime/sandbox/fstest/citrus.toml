@@ -1,9 +1,0 @@
-[package]
-name = "fstest"
-version = "v0.1.0"
-
-[files]
-main = "main.lime"
-
-[import]
-fs = "v0.1.0"

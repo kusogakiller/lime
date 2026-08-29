@@ -1,9 +1,0 @@
-[package]
-name = "string_demo2"
-version = "0.1.0"
-
-[files]
-main = "main.lime"
-
-[import]
-string = "v0.1.0"

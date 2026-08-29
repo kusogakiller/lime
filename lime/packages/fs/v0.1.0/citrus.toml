@@ -1,6 +1,0 @@
-[package]
-name = "fs"
-version = "v0.1.0"
-
-[files]
-fs = "src/fs.lime"

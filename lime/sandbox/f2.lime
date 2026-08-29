@@ -1,6 +1,0 @@
-fn calc(int: x) int:
-    let int: y = x + 1
-    return y
-
-fn main():
-    print(calc(3))

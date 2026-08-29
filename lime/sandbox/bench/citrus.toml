@@ -1,6 +1,0 @@
-[package]
-name = "bench_prog"
-version = "v0.1.0"
-
-[import]
-collections = "v0.1.0"

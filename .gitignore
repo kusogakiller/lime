@@ -73,3 +73,6 @@ logs/
 
 # IDE/backup directories
 .opencode.bak/
+
+# Old nested compiler copy (superseded by root src/)
+lime/

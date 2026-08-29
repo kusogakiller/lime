@@ -1,6 +1,0 @@
-fn add(i: a, i: b):
-    return a + b
-
-fn main():
-    let x = add(2, 3)
-    println(x)

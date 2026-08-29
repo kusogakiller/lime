@@ -1,9 +1,0 @@
-struct Counter:
-    int: value
-
-    fn add(int: n) int:
-        return value + n
-
-fn main():
-    let c = Counter(10)
-    print(c.add(5))
