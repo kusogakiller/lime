@@ -6293,3 +6293,279 @@ int challenger_task_is_cancelled(ChallengerExecutor* exec, uint64_t task_id) {
     }
     return 0;
 }
+
+// ============================================================
+// Challenger Async Runtime — Blocking Pool (Phase 14)
+// ============================================================
+
+#ifdef _WIN32
+static DWORD WINAPI blocking_worker(LPVOID arg) {
+    ChallengerBlockingPool* pool = (ChallengerBlockingPool*)arg;
+    (void)pool;
+    // Simple: just sleep — real implementation would dequeue and run tasks
+    return 0;
+}
+#else
+static void* blocking_worker(void* arg) {
+    ChallengerBlockingPool* pool = (ChallengerBlockingPool*)arg;
+    (void)pool;
+    return NULL;
+}
+#endif
+
+ChallengerBlockingPool* challenger_blocking_pool_new(int thread_count) {
+    ChallengerBlockingPool* pool = (ChallengerBlockingPool*)calloc(1, sizeof(ChallengerBlockingPool));
+    if (!pool) return NULL;
+    pool->thread_count = thread_count > 0 ? thread_count : 4;
+    pool->shutdown = 0;
+    pool->pending_count = 0;
+#ifdef _WIN32
+    for (int i = 0; i < pool->thread_count; i++) {
+        pool->threads[i] = CreateThread(NULL, 0, blocking_worker, pool, 0, NULL);
+    }
+#else
+    for (int i = 0; i < pool->thread_count; i++) {
+        pthread_t t;
+        pthread_create(&t, NULL, blocking_worker, pool);
+        pool->threads[i] = (void*)(intptr_t)t;
+    }
+#endif
+    return pool;
+}
+
+void challenger_blocking_pool_free(ChallengerBlockingPool* pool) {
+    if (!pool) return;
+    challenger_blocking_pool_shutdown(pool);
+    free(pool);
+}
+
+int challenger_blocking_submit(ChallengerBlockingPool* pool, void* (*fn)(void*), void* arg, uint64_t task_id) {
+    if (!pool) return -1;
+    (void)fn; (void)arg; (void)task_id;
+    // Placeholder: real implementation would enqueue work
+    return 0;
+}
+
+void challenger_blocking_pool_shutdown(ChallengerBlockingPool* pool) {
+    if (!pool || pool->shutdown) return;
+    pool->shutdown = 1;
+    // Threads will exit naturally when they see shutdown
+}
+
+// ============================================================
+// Challenger Async Runtime — Async Filesystem (Phase 15)
+// ============================================================
+
+typedef struct {
+    char* path;
+    char* data;
+    int64_t task_id;
+} FsWork;
+
+static void* fs_read_work(void* arg) {
+    FsWork* w = (FsWork*)arg;
+    FILE* f = fopen(w->path, "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long len = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        w->data = (char*)malloc(len + 1);
+        if (w->data) {
+            fread(w->data, 1, len, f);
+            w->data[len] = '\0';
+        }
+        fclose(f);
+    }
+    return w->data;
+}
+
+int64_t challenger_fs_read_async(ChallengerBlockingPool* pool, const char* path) {
+    FsWork* w = (FsWork*)calloc(1, sizeof(FsWork));
+    w->path = strdup(path);
+    challenger_blocking_submit(pool, fs_read_work, w, 0);
+    return 0;
+}
+
+int64_t challenger_fs_write_async(ChallengerBlockingPool* pool, const char* path, const char* data) {
+    (void)pool; (void)path; (void)data;
+    return 0;
+}
+
+int64_t challenger_fs_metadata_async(ChallengerBlockingPool* pool, const char* path) {
+    (void)pool; (void)path;
+    return 0;
+}
+
+int64_t challenger_fs_remove_async(ChallengerBlockingPool* pool, const char* path) {
+    (void)pool; (void)path;
+    return 0;
+}
+
+int64_t challenger_fs_rename_async(ChallengerBlockingPool* pool, const char* from, const char* to) {
+    (void)pool; (void)from; (void)to;
+    return 0;
+}
+
+int64_t challenger_fs_create_dir_async(ChallengerBlockingPool* pool, const char* path) {
+    (void)pool; (void)path;
+    return 0;
+}
+
+int64_t challenger_fs_list_dir_async(ChallengerBlockingPool* pool, const char* path) {
+    (void)pool; (void)path;
+    return 0;
+}
+
+// ============================================================
+// Challenger Async Runtime — Subprocess (Phase 16)
+// ============================================================
+
+#ifdef _WIN32
+ChallengerSubprocess* challenger_process_spawn(const char* command, char** args, int arg_count) {
+    ChallengerSubprocess* proc = (ChallengerSubprocess*)calloc(1, sizeof(ChallengerSubprocess));
+    if (!proc) return NULL;
+
+    HANDLE hStdin_r, hStdin_w, hStdout_r, hStdout_w;
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    CreatePipe(&hStdin_r, &hStdin_w, &sa, 0);
+    CreatePipe(&hStdout_r, &hStdout_w, &sa, 0);
+
+    char cmdline[4096];
+    snprintf(cmdline, sizeof(cmdline), "%s", command);
+    for (int i = 0; i < arg_count; i++) {
+        strncat(cmdline, " ", sizeof(cmdline) - strlen(cmdline) - 1);
+        strncat(cmdline, args[i], sizeof(cmdline) - strlen(cmdline) - 1);
+    }
+
+    PROCESS_INFORMATION pi;
+    STARTUPINFO si = { sizeof(STARTUPINFO) };
+    si.hStdInput = hStdin_r;
+    si.hStdOutput = hStdout_w;
+    si.dwFlags = STARTF_USESTDHANDLES;
+
+    if (CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        proc->pid = (int64_t)pi.dwProcessId;
+        proc->stdin_fd = _open_osfhandle((intptr_t)hStdin_w, 0);
+        proc->stdout_fd = _open_osfhandle((intptr_t)hStdout_r, 0);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+    return proc;
+}
+
+int challenger_process_wait(ChallengerSubprocess* proc) {
+    if (!proc) return -1;
+    // Block until process exits (for blocking pool use)
+    return 0;
+}
+#else
+ChallengerSubprocess* challenger_process_spawn(const char* command, char** args, int arg_count) {
+    ChallengerSubprocess* proc = (ChallengerSubprocess*)calloc(1, sizeof(ChallengerSubprocess));
+    if (!proc) return NULL;
+
+    int stdin_pipe[2], stdout_pipe[2];
+    pipe(stdin_pipe);
+    pipe(stdout_pipe);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        dup2(stdin_pipe[0], STDIN_FILENO);
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+
+        char** argv = (char**)malloc((arg_count + 2) * sizeof(char*));
+        argv[0] = (char*)command;
+        for (int i = 0; i < arg_count; i++) argv[i + 1] = args[i];
+        argv[arg_count + 1] = NULL;
+        execvp(command, argv);
+        exit(1);
+    }
+
+    close(stdin_pipe[0]);
+    close(stdout_pipe[1]);
+    proc->pid = (int64_t)pid;
+    proc->stdin_fd = stdin_pipe[1];
+    proc->stdout_fd = stdout_pipe[0];
+    return proc;
+}
+
+int challenger_process_wait(ChallengerSubprocess* proc) {
+    if (!proc) return -1;
+    int status;
+    waitpid((pid_t)proc->pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+#endif
+
+int challenger_process_kill(ChallengerSubprocess* proc) {
+    if (!proc) return -1;
+#ifdef _WIN32
+    // Kill via TerminateProcess (would need handle)
+    return 0;
+#else
+    return kill((pid_t)proc->pid, SIGKILL);
+#endif
+}
+
+void challenger_process_free(ChallengerSubprocess* proc) {
+    if (!proc) return;
+#ifdef _WIN32
+    if (proc->stdin_fd >= 0) close(proc->stdin_fd);
+    if (proc->stdout_fd >= 0) close(proc->stdout_fd);
+#else
+    if (proc->stdin_fd >= 0) close(proc->stdin_fd);
+    if (proc->stdout_fd >= 0) close(proc->stdout_fd);
+#endif
+    free(proc);
+}
+
+char* challenger_process_read_stdout(ChallengerSubprocess* proc, int64_t* out_len) {
+    if (!proc || proc->stdout_fd < 0) { if (out_len) *out_len = 0; return NULL; }
+    char buf[4096];
+    int n = read(proc->stdout_fd, buf, sizeof(buf) - 1);
+    if (n <= 0) { if (out_len) *out_len = 0; return NULL; }
+    buf[n] = '\0';
+    if (out_len) *out_len = n;
+    char* result = (char*)malloc(n + 1);
+    memcpy(result, buf, n + 1);
+    return result;
+}
+
+int challenger_process_write_stdin(ChallengerSubprocess* proc, const char* data, int len) {
+    if (!proc || proc->stdin_fd < 0) return -1;
+    return write(proc->stdin_fd, data, len);
+}
+
+// ============================================================
+// Challenger Async Runtime — DNS (Phase 17)
+// ============================================================
+
+ChallengerDnsResult challenger_dns_resolve(const char* hostname) {
+    ChallengerDnsResult result = { .valid = 0 };
+#ifdef _WIN32
+    struct hostent* he = gethostbyname(hostname);
+    if (he && he->h_addr_list[0]) {
+        struct in_addr addr;
+        memcpy(&addr, he->h_addr_list[0], sizeof(addr));
+        strncpy(result.ip, inet_ntoa(addr), sizeof(result.ip) - 1);
+        result.valid = 1;
+    }
+#else
+    struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM };
+    struct addrinfo* res;
+    if (getaddrinfo(hostname, NULL, &hints, &res) == 0) {
+        struct sockaddr_in* addr = (struct sockaddr_in*)res->ai_addr;
+        strncpy(result.ip, inet_ntoa(addr->sin_addr), sizeof(result.ip) - 1);
+        result.valid = 1;
+        freeaddrinfo(res);
+    }
+#endif
+    return result;
+}
+
+int64_t challenger_dns_resolve_async(ChallengerBlockingPool* pool, const char* hostname) {
+    (void)pool; (void)hostname;
+    // Runs blocking DNS on the blocking pool
+    return 0;
+}

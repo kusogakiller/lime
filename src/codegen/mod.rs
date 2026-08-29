@@ -284,7 +284,28 @@ pub fn emit_llvm(
     out.push_str("declare i32 @challenger_select_poll(i8**, i32, %ChallengerWaker*, i64*)\n");
     // Challenger Cancellation (Phase 13)
     out.push_str("declare void @challenger_task_cancel(i8*, i64)\n");
-    out.push_str("declare i32 @challenger_task_is_cancelled(i8*, i64)\n\n");
+    out.push_str("declare i32 @challenger_task_is_cancelled(i8*, i64)\n");
+    // Challenger Blocking Pool (Phase 14)
+    out.push_str("declare i8* @challenger_blocking_pool_new(i32)\n");
+    out.push_str("declare void @challenger_blocking_pool_free(i8*)\n");
+    out.push_str("declare i32 @challenger_blocking_submit(i8*, i8*, i8*, i64)\n");
+    out.push_str("declare void @challenger_blocking_pool_shutdown(i8*)\n");
+    // Challenger Async Filesystem (Phase 15)
+    out.push_str("declare i64 @challenger_fs_read_async(i8*, i8*)\n");
+    out.push_str("declare i64 @challenger_fs_write_async(i8*, i8*, i8*)\n");
+    out.push_str("declare i64 @challenger_fs_remove_async(i8*, i8*)\n");
+    out.push_str("declare i64 @challenger_fs_rename_async(i8*, i8*, i8*)\n");
+    out.push_str("declare i64 @challenger_fs_create_dir_async(i8*, i8*)\n");
+    out.push_str("declare i64 @challenger_fs_list_dir_async(i8*, i8*)\n");
+    // Challenger Subprocess (Phase 16)
+    out.push_str("declare i8* @challenger_process_spawn(i8*, i8**, i32)\n");
+    out.push_str("declare i32 @challenger_process_wait(i8*)\n");
+    out.push_str("declare i32 @challenger_process_kill(i8*)\n");
+    out.push_str("declare void @challenger_process_free(i8*)\n");
+    out.push_str("declare i8* @challenger_process_read_stdout(i8*, i64*)\n");
+    out.push_str("declare i32 @challenger_process_write_stdin(i8*, i8*, i32)\n");
+    // Challenger DNS (Phase 17)
+    out.push_str("declare i64 @challenger_dns_resolve_async(i8*, i8*)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");

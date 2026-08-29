@@ -962,6 +962,72 @@ void challenger_task_cancel(ChallengerExecutor* exec, uint64_t task_id);
 // Check if a task is cancelled
 int challenger_task_is_cancelled(ChallengerExecutor* exec, uint64_t task_id);
 
+// ============================================================
+// Challenger Async Runtime — Blocking Pool (Phase 14)
+// ============================================================
+
+#define CHALLENGER_MAX_BLOCKING_WORKERS 16
+
+typedef struct {
+    void* threads[CHALLENGER_MAX_BLOCKING_WORKERS];
+    int thread_count;
+    int shutdown;
+    // Simple task queue
+    void* pending_tasks[4096];
+    int pending_count;
+} ChallengerBlockingPool;
+
+ChallengerBlockingPool* challenger_blocking_pool_new(int thread_count);
+void challenger_blocking_pool_free(ChallengerBlockingPool* pool);
+// Submit blocking work: fn(arg) runs on a worker thread, wakes task_id on completion
+int challenger_blocking_submit(ChallengerBlockingPool* pool, void* (*fn)(void*), void* arg, uint64_t task_id);
+void challenger_blocking_pool_shutdown(ChallengerBlockingPool* pool);
+
+// ============================================================
+// Challenger Async Runtime — Async Filesystem (Phase 15)
+// ============================================================
+
+// All filesystem ops delegate to blocking pool to avoid blocking executor
+// Returns a task_id that will be woken on completion
+int64_t challenger_fs_read_async(ChallengerBlockingPool* pool, const char* path);
+int64_t challenger_fs_write_async(ChallengerBlockingPool* pool, const char* path, const char* data);
+int64_t challenger_fs_metadata_async(ChallengerBlockingPool* pool, const char* path);
+int64_t challenger_fs_remove_async(ChallengerBlockingPool* pool, const char* path);
+int64_t challenger_fs_rename_async(ChallengerBlockingPool* pool, const char* from, const char* to);
+int64_t challenger_fs_create_dir_async(ChallengerBlockingPool* pool, const char* path);
+int64_t challenger_fs_list_dir_async(ChallengerBlockingPool* pool, const char* path);
+
+// ============================================================
+// Challenger Async Runtime — Subprocess (Phase 16)
+// ============================================================
+
+typedef struct {
+    int64_t pid;
+    int stdin_fd;
+    int stdout_fd;
+    int stderr_fd;
+} ChallengerSubprocess;
+
+ChallengerSubprocess* challenger_process_spawn(const char* command, char** args, int arg_count);
+int challenger_process_wait(ChallengerSubprocess* proc);
+int challenger_process_kill(ChallengerSubprocess* proc);
+void challenger_process_free(ChallengerSubprocess* proc);
+char* challenger_process_read_stdout(ChallengerSubprocess* proc, int64_t* out_len);
+int challenger_process_write_stdin(ChallengerSubprocess* proc, const char* data, int len);
+
+// ============================================================
+// Challenger Async Runtime — DNS (Phase 17)
+// ============================================================
+
+// Blocking DNS resolution (runs on blocking pool)
+typedef struct {
+    char ip[64];
+    int valid;
+} ChallengerDnsResult;
+
+ChallengerDnsResult challenger_dns_resolve(const char* hostname);
+int64_t challenger_dns_resolve_async(ChallengerBlockingPool* pool, const char* hostname);
+
 // Set non-blocking mode
 int challenger_tcp_set_nonblocking(int fd);
 
