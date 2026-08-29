@@ -154,6 +154,11 @@ impl<'a> Cg<'a> {
             None => "void".to_string(),
         };
         self.fn_ret_ty = ret_ty.clone();
+
+        // Challenger: async (lime) functions → state machine lowering
+        if fdef.is_async {
+            return self.codegen_async_function(name, &llvm_name, fdef, &ret_ty);
+        }
         // Function params with names (%p0, %p1, ...) so alloca/store can reference them
         let mut params = Vec::new();
         let mut param_idx = 0;
@@ -314,6 +319,658 @@ impl<'a> Cg<'a> {
         }
         result.push_str(&format!("{}{}", head, self.out));
         result
+    }
+
+    /// Challenger Phase 2: async function lowering → state machine.
+    ///
+    /// For a `lime` function like:
+    ///   lime add1(int: n):
+    ///       let x = await inner(n)
+    ///       return x + 1
+    ///
+    /// Generates:
+    /// 1. `%Add1State = type { i64, i64 }` — { state_index, params/locals }
+    /// 2. `@add1_poll(i8* %state, %ChallengerWaker* %waker)` — state machine
+    /// 3. `@add1(i64 %n)` → `i8*` — creates Future wrapping poll function
+    fn codegen_async_function(
+        &mut self,
+        name: &str,
+        llvm_name: &str,
+        fdef: &FunctionDef,
+        _ret_ty: &str,
+    ) -> String {
+        // Step 1: scan body for await points and collect state info
+        let mut await_count = 0usize;
+        Self::count_awaits(&fdef.body, &mut await_count);
+        let total_states = await_count + 1; // states 0..N (N = after last await = completion)
+
+        // Step 2: collect variables that live across await points
+        let mut cross_await_vars: Vec<(String, Type)> = Vec::new();
+        Self::collect_cross_await_vars(&fdef.body, &fdef.params, self.defs, &mut cross_await_vars);
+
+        // Step 3: build state struct fields: { state_index, param0, param1, ..., local0, local1, ... }
+        let mut state_fields: Vec<(String, Type)> = Vec::new();
+        state_fields.push(("_state".to_string(), Type::Int));
+        for (pname, ptype_str) in &fdef.params {
+            let ty = type_from_str(ptype_str, self.defs);
+            state_fields.push((pname.clone(), ty));
+        }
+        for (vname, vty) in &cross_await_vars {
+            state_fields.push((vname.clone(), vty.clone()));
+        }
+
+        // Step 4: generate state struct type
+        let state_ty_fields: Vec<String> = state_fields
+            .iter()
+            .map(|(_, ty)| llvm_type_name(ty))
+            .collect();
+        let state_struct_name = format!("{}State", capitalize(name));
+        let state_struct_ir = format!(
+            "%{} = type {{ {} }}\n",
+            state_struct_name,
+            state_ty_fields.join(", ")
+        );
+
+        // Step 5: generate poll function
+        let poll_fn_name = format!("{}_poll", llvm_name);
+        let poll_ir = self.codegen_poll_fn(
+            name,
+            &poll_fn_name,
+            fdef,
+            &state_struct_name,
+            &state_fields,
+            total_states,
+            &cross_await_vars,
+        );
+
+        // Step 6: generate Future wrapper function
+        // Original signature: ret_type @name(params)
+        // Becomes: i8* @name(params) — returns ChallengerFuture*
+        let wrapper_ir = self.codegen_future_wrapper(
+            name,
+            llvm_name,
+            fdef,
+            &poll_fn_name,
+            &state_struct_name,
+            &state_fields,
+        );
+
+        // Collect all generated IR
+        let mut result = String::new();
+        for pf in &self.pending_fns {
+            result.push_str(pf);
+        }
+        result.push_str(&state_struct_ir);
+        result.push_str(&poll_ir);
+        result.push_str(&wrapper_ir);
+        result
+    }
+
+    /// Count await expression occurrences in statements.
+    fn count_awaits(stmts: &[Stmt], count: &mut usize) {
+        for s in stmts {
+            match s {
+                Stmt::Let { value, .. } => Self::count_awaits_expr(value, count),
+                Stmt::Expr(e) => Self::count_awaits_expr(e, count),
+                Stmt::Return { value: Some(e), .. } => Self::count_awaits_expr(e, count),
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                } => {
+                    Self::count_awaits_expr(cond, count);
+                    Self::count_awaits(then_branch, count);
+                    if let Some(e) = else_branch {
+                        Self::count_awaits(e, count);
+                    }
+                }
+                Stmt::While { body, .. } => Self::count_awaits(body, count),
+                Stmt::For { body, .. } => Self::count_awaits(body, count),
+                Stmt::Match { arms, .. } => {
+                    for (_, body) in arms {
+                        Self::count_awaits(body, count);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn count_awaits_expr(e: &Expr, count: &mut usize) {
+        match e {
+            Expr::Await(_) => *count += 1,
+            Expr::BinOp { left, right, .. } => {
+                Self::count_awaits_expr(left, count);
+                Self::count_awaits_expr(right, count);
+            }
+            Expr::Call { args, .. } => {
+                for a in args {
+                    Self::count_awaits_expr(a, count);
+                }
+            }
+            Expr::MethodCall { object, args, .. } => {
+                Self::count_awaits_expr(object, count);
+                for a in args {
+                    Self::count_awaits_expr(a, count);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Collect variables whose definitions precede an await and are used after it.
+    fn collect_cross_await_vars(
+        stmts: &[Stmt],
+        params: &[(String, String)],
+        defs: &Defs,
+        out: &mut Vec<(String, Type)>,
+    ) {
+        let mut defined: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+        let mut seen_await = false;
+        for s in stmts {
+            if seen_await {
+                // After an await: collect variables used in remaining statements
+                Self::collect_used_vars_stmt(s, &defined, defs, out);
+            }
+            match s {
+                Stmt::Let { name, value, .. } => {
+                    Self::collect_awaits_in_expr(value, &mut seen_await);
+                    if seen_await {
+                        defined.push(name.clone());
+                    }
+                }
+                Stmt::Expr(e) => Self::collect_awaits_in_expr(e, &mut seen_await),
+                Stmt::Return { value: Some(e), .. } => Self::collect_awaits_in_expr(e, &mut seen_await),
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_awaits_in_expr(e: &Expr, seen: &mut bool) {
+        match e {
+            Expr::Await(_) => *seen = true,
+            Expr::BinOp { left, right, .. } => {
+                Self::collect_awaits_in_expr(left, seen);
+                Self::collect_awaits_in_expr(right, seen);
+            }
+            Expr::Call { args, .. } => {
+                for a in args {
+                    Self::collect_awaits_in_expr(a, seen);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_used_vars_stmt(
+        stmt: &Stmt,
+        available: &[String],
+        defs: &Defs,
+        out: &mut Vec<(String, Type)>,
+    ) {
+        let mut used = Vec::new();
+        Self::collect_used_vars_in_stmt(stmt, &mut used);
+        for u in &used {
+            if available.contains(u) && !out.iter().any(|(n, _)| n == u) {
+                // Find type from params or inferred
+                let ty = if let Some((_, ptype)) = defs
+                    .functions
+                    .values()
+                    .next()
+                    .and_then(|f| f.params.iter().find(|(n, _)| n == u))
+                {
+                    type_from_str(ptype, defs)
+                } else {
+                    Type::Unknown
+                };
+                out.push((u.clone(), ty));
+            }
+        }
+    }
+
+    fn collect_used_vars_in_stmt(stmt: &Stmt, used: &mut Vec<String>) {
+        match stmt {
+            Stmt::Let { name, value, .. } => {
+                Self::collect_used_vars_in_expr(value, used);
+                used.push(name.clone());
+            }
+            Stmt::Expr(e) => Self::collect_used_vars_in_expr(e, used),
+            Stmt::Return { value: Some(e), .. } => Self::collect_used_vars_in_expr(e, used),
+            _ => {}
+        }
+    }
+
+    fn collect_used_vars_in_expr(e: &Expr, used: &mut Vec<String>) {
+        match e {
+            Expr::Ident(name) => used.push(name.clone()),
+            Expr::BinOp { left, right, .. } => {
+                Self::collect_used_vars_in_expr(left, used);
+                Self::collect_used_vars_in_expr(right, used);
+            }
+            Expr::Call { args, .. } => {
+                for a in args {
+                    Self::collect_used_vars_in_expr(a, used);
+                }
+            }
+            Expr::Await(inner) => Self::collect_used_vars_in_expr(inner, used),
+            _ => {}
+        }
+    }
+
+    /// Generate the poll function for an async function.
+    ///
+    /// The poll function receives `(i8* %state_ptr, %ChallengerWaker* %waker)`
+    /// and returns `%ChallengerPoll = { i64, i64 }`.
+    fn codegen_poll_fn(
+        &mut self,
+        fn_name: &str,
+        poll_name: &str,
+        fdef: &FunctionDef,
+        state_struct_name: &str,
+        state_fields: &[(String, Type)],
+        total_states: usize,
+        _cross_await_vars: &[(String, Type)],
+    ) -> String {
+        let state_llty = format!("%{}", state_struct_name);
+        let mut ir = String::new();
+
+        ir.push_str(&format!(
+            "\n; Challenger async poll function for '{}'\n",
+            fn_name
+        ));
+        ir.push_str(&format!(
+            "define %ChallengerPoll @{}(i8* %state_raw, %ChallengerWaker* %waker) {{\n",
+            poll_name
+        ));
+        ir.push_str("entry:\n");
+
+        // Cast i8* to state struct*
+        let state_ptr = "%state".to_string();
+        ir.push_str(&format!(
+            "  {} = bitcast i8* {} to {}*\n",
+            state_ptr, "%state_raw", state_llty
+        ));
+
+        // Load state index (field 0)
+        let state_idx_ptr = "%state_idx_ptr".to_string();
+        let state_idx = "%state_idx".to_string();
+        ir.push_str(&format!(
+            "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
+            state_idx_ptr, state_llty, state_ptr, state_ptr // GEP to field 0
+        ));
+        ir.push_str(&format!(
+            "  {} = load i64, i64* {}, align 8\n",
+            state_idx, state_idx_ptr
+        ));
+
+        // Load all state fields into allocas (for each state block to use)
+        let mut field_ptrs: Vec<(String, String, Type)> = Vec::new(); // (name, alloca_ptr, type)
+        for (i, (fname, fty)) in state_fields.iter().enumerate() {
+            if fname == "_state" {
+                continue; // state index already loaded
+            }
+            let llty = llvm_type_name(fty);
+            let alloca = format!("%f_{}", fname);
+            ir.push_str(&format!(
+                "  {} = alloca {}, align {}\n",
+                alloca,
+                llty,
+                align_of(fty)
+            ));
+            let gep = format!("%gep_{}", fname);
+            ir.push_str(&format!(
+                "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 {}\n",
+                gep, state_llty, state_llty, state_ptr, i
+            ));
+            ir.push_str(&format!(
+                "  {}_val = load {}, {}* {}, align {}\n",
+                alloca, llty, llty, gep, align_of(fty)
+            ));
+            ir.push_str(&format!(
+                "  store {} {}_val, {}* {}, align {}\n",
+                llty, alloca, llty, alloca, align_of(fty)
+            ));
+            field_ptrs.push((fname.clone(), alloca.clone(), fty.clone()));
+        }
+
+        // Switch on state index
+        let switch_block = "state_dispatch".to_string();
+        ir.push_str(&format!(
+            "  switch i64 {}, label %{} [\n",
+            state_idx, switch_block
+        ));
+        for i in 0..total_states {
+            ir.push_str(&format!("    i64 {}, label %state{}\n", i, i));
+        }
+        ir.push_str("  ]\n");
+        ir.push_str(&format!("{}:\n", switch_block));
+        ir.push_str("  unreachable\n");
+
+        // Generate each state block
+        for state_idx_val in 0..total_states {
+            ir.push_str(&format!("state{}:\n", state_idx_val));
+
+            if state_idx_val < total_states - 1 {
+                // This state has an await point
+                // Find the statements before the next await
+                let stmts_before = Self::get_stmts_before_nth_await(&fdef.body, state_idx_val);
+
+                // Codegen the statements
+                let mut state_builder = self.clone_builder();
+                state_builder.out = String::new();
+                state_builder.current_block = format!("state{}", state_idx_val);
+
+                // Re-load field pointers in this block's context
+                for (fname, alloca, fty) in &field_ptrs {
+                    if fname == "_state" {
+                        continue;
+                    }
+                    state_builder.named.insert(fname.clone(), alloca.clone());
+                    state_builder.env.insert(fname.clone(), fty.clone());
+                }
+
+                // Also insert params as named
+                let mut param_idx = 0;
+                for (pname, ptype_str) in &fdef.params {
+                    let pty = type_from_str(ptype_str, self.defs);
+                    if let Some((_, alloca, _)) = field_ptrs.iter().find(|(n, _, _)| n == pname) {
+                        state_builder.named.insert(pname.clone(), alloca.clone());
+                        state_builder.env.insert(pname.clone(), pty);
+                    }
+                    param_idx += 1;
+                }
+
+                if let Err(e) = state_builder.codegen_stmts(&stmts_before) {
+                    self.warnings
+                        .push(format!("{}: state{}: {}", fn_name, state_idx_val, e));
+                }
+
+                ir.push_str(&state_builder.out);
+
+                // Generate state transition: store next state, return Pending
+                let next_state = state_idx_val + 1;
+                let state_ptr_tmp = format!("%sp_{}", state_idx_val);
+                ir.push_str(&format!(
+                    "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
+                    state_ptr_tmp, state_llty, state_ptr, state_ptr
+                ));
+                ir.push_str(&format!(
+                    "  store i64 {}, i64* {}, align 8\n",
+                    next_state, state_ptr_tmp
+                ));
+                ir.push_str(
+                    "  %poll_pending = call %ChallengerPoll @challenger_poll_pending()\n",
+                );
+                ir.push_str("  ret %ChallengerPoll %poll_pending\n");
+            } else {
+                // Final state: codegen remaining statements, return Ready
+                let stmts_after = Self::get_stmts_after_nth_await(&fdef.body, await_count_in(fdef));
+                let mut state_builder = self.clone_builder();
+                state_builder.out = String::new();
+                state_builder.current_block = format!("state{}", state_idx_val);
+
+                for (fname, alloca, fty) in &field_ptrs {
+                    if fname == "_state" {
+                        continue;
+                    }
+                    state_builder.named.insert(fname.clone(), alloca.clone());
+                    state_builder.env.insert(fname.clone(), fty.clone());
+                }
+
+                if let Err(e) = state_builder.codegen_stmts(&stmts_after) {
+                    self.warnings
+                        .push(format!("{}: state{}: {}", fn_name, state_idx_val, e));
+                }
+
+                ir.push_str(&state_builder.out);
+
+                // Return Ready with zero value (the actual return is handled by ret in body)
+                if !state_builder.terminated {
+                    let ret_zero = zero_value_for_type(&type_from_str(
+                        fdef.return_type.as_deref().unwrap_or(""),
+                        self.defs,
+                    ));
+                    let ll_ret = llvm_type_name(&type_from_str(
+                        fdef.return_type.as_deref().unwrap_or(""),
+                        self.defs,
+                    ));
+                    // Store result in future output
+                    if ll_ret != "void" {
+                        ir.push_str(&format!(
+                            "  %fut_ptr = bitcast i8* %state_raw to %ChallengerFuture*\n"
+                        ));
+                        ir.push_str(
+                            "  %out_ptr = getelementptr inbounds %ChallengerFuture, %ChallengerFuture* %fut_ptr, i32 0, i32 2\n",
+                        );
+                        ir.push_str(&format!(
+                            "  store i64 {}, i64* %out_ptr, align 8\n",
+                            ret_zero
+                        ));
+                    }
+                    ir.push_str(
+                        "  %poll_ready = call %ChallengerPoll @challenger_poll_ready(i64 0)\n",
+                    );
+                    ir.push_str("  ret %ChallengerPoll %poll_ready\n");
+                }
+            }
+        }
+
+        ir.push_str("}\n");
+        ir
+    }
+
+    /// Generate the Future wrapper function.
+    ///
+    /// `name(params)` → allocates state, fills params, creates Future.
+    fn codegen_future_wrapper(
+        &mut self,
+        fn_name: &str,
+        llvm_name: &str,
+        fdef: &FunctionDef,
+        poll_name: &str,
+        state_struct_name: &str,
+        state_fields: &[(String, Type)],
+    ) -> String {
+        let state_llty = format!("%{}", state_struct_name);
+        let mut ir = String::new();
+
+        // Build parameter list (same as original, but return i8*)
+        let mut params = Vec::new();
+        let mut param_idx = 0;
+        for (_, ptype_str) in &fdef.params {
+            let llty = llvm_type_name(&type_from_str(ptype_str, self.defs));
+            params.push(format!("{} %p{}", llty, param_idx));
+            param_idx += 1;
+        }
+        let params_str = params.join(", ");
+
+        ir.push_str(&format!(
+            "\n; Challenger Future wrapper for '{}'\n",
+            fn_name
+        ));
+        ir.push_str(&format!(
+            "define i8* @{} ({}) local_unnamed_addr {{\n",
+            llvm_name, params_str
+        ));
+        ir.push_str("wrapper_entry:\n");
+
+        // Allocate state struct
+        let state_alloca = "%state_alloc".to_string();
+        ir.push_str(&format!(
+            "  {} = alloca {}, align 8\n",
+            state_alloca, state_llty
+        ));
+
+        // Store state index = 0
+        let state_idx_ptr = "%sidx_ptr".to_string();
+        ir.push_str(&format!(
+            "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
+            state_idx_ptr, state_llty, state_alloca, state_alloca
+        ));
+        ir.push_str("  store i64 0, i64* %sidx_ptr, align 8\n");
+
+        // Store each parameter into the state struct
+        for (i, (pname, _)) in state_fields.iter().enumerate() {
+            if pname == "_state" {
+                continue;
+            }
+            let pidx = state_fields
+                .iter()
+                .take(i)
+                .filter(|(n, _)| n != "_state")
+                .count();
+            let gep = format!("%gep_param_{}", pname);
+            ir.push_str(&format!(
+                "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 {}\n",
+                gep, state_llty, state_llty, state_alloca, i
+            ));
+            ir.push_str(&format!(
+                "  store {} %p{}, {}* {}, align 8\n",
+                llvm_type_name(&state_fields[i].1),
+                pidx,
+                llvm_type_name(&state_fields[i].1),
+                gep
+            ));
+        }
+
+        // Cast state alloca to i8*
+        let state_raw = "%state_raw".to_string();
+        ir.push_str(&format!(
+            "  {} = bitcast {}* {} to i8*\n",
+            state_raw, state_llty, state_alloca
+        ));
+
+        // Create Future: challenger_future_new(@poll_fn, state)
+        let fut_tmp = "%fut_new".to_string();
+        ir.push_str(&format!(
+            "  {} = call i8* @challenger_future_new(i8* bitcast ({{ %ChallengerPoll (i8*, %ChallengerWaker*) }}* @{} to i8*), i8* {})\n",
+            fut_tmp, poll_name, state_raw
+        ));
+
+        ir.push_str(&format!("  ret i8* {}\n", fut_tmp));
+        ir.push_str("}\n");
+        ir
+    }
+
+    /// Helper: clone the current builder for sub-block codegen
+    fn clone_builder(&self) -> Cg<'a> {
+        Cg {
+            out: String::new(),
+            defs: self.defs,
+            memory: self.memory,
+            string_literals: self.string_literals,
+            mono_name_map: self.mono_name_map,
+            mono_fdefs: self.mono_fdefs,
+            env: self.env.clone(),
+            named: self.named.clone(),
+            current_block: self.current_block.clone(),
+            temp: self.temp,
+            block: self.block,
+            terminated: false,
+            warnings: Vec::new(),
+            fn_ret_ty: self.fn_ret_ty.clone(),
+            pending_fns: Vec::new(),
+            string_len_trackers: HashMap::new(),
+            pending_len_trackers: HashMap::new(),
+            var_range: HashMap::new(),
+            loop_counter: None,
+            loop_bound: None,
+            loop_counter_init: 0,
+            loop_pure_arith: false,
+            i32_form: HashMap::new(),
+        }
+    }
+
+    /// Get statements before the nth await point (0-indexed).
+    fn get_stmts_before_nth_await(stmts: &[Stmt], n: usize) -> Vec<Stmt> {
+        let mut result = Vec::new();
+        let mut await_seen = 0;
+        for s in stmts {
+            if Self::stmt_has_await(s) {
+                if await_seen == n {
+                    // This statement contains the nth await — split it
+                    // For simplicity: include the let-binding up to the await,
+                    // the actual await is handled by state transition
+                    match s {
+                        Stmt::Let {
+                            mutable,
+                            name,
+                            type_hint,
+                            value,
+                            place,
+                        } => {
+                            if Self::expr_has_await(value) {
+                                // `let x = await expr` → the await is here
+                                // Don't include this statement; the poll fn handles it
+                            } else {
+                                result.push(s.clone());
+                            }
+                        }
+                        _ => {
+                            if Self::expr_has_await_in_stmt(s) {
+                                // Statement has await — skip it here, poll handles it
+                            } else {
+                                result.push(s.clone());
+                            }
+                        }
+                    }
+                    return result;
+                }
+                await_seen += 1;
+            }
+            result.push(s.clone());
+        }
+        result
+    }
+
+    /// Get statements after the nth await point.
+    fn get_stmts_after_nth_await(stmts: &[Stmt], n: usize) -> Vec<Stmt> {
+        let mut result = Vec::new();
+        let mut await_seen = 0;
+        let mut collecting = false;
+        for s in stmts {
+            if Self::stmt_has_await(s) {
+                if await_seen == n {
+                    collecting = true;
+                    await_seen += 1;
+                    continue;
+                }
+                await_seen += 1;
+            }
+            if collecting {
+                result.push(s.clone());
+            }
+        }
+        result
+    }
+
+    fn stmt_has_await(s: &Stmt) -> bool {
+        match s {
+            Stmt::Let { value, .. } => Self::expr_has_await(value),
+            Stmt::Expr(e) => Self::expr_has_await(e),
+            Stmt::Return { value: Some(e), .. } => Self::expr_has_await(e),
+            _ => false,
+        }
+    }
+
+    fn expr_has_await(e: &Expr) -> bool {
+        match e {
+            Expr::Await(_) => true,
+            Expr::BinOp { left, right, .. } => {
+                Self::expr_has_await(left) || Self::expr_has_await(right)
+            }
+            Expr::Call { args, .. } => args.iter().any(|a| Self::expr_has_await(a)),
+            _ => false,
+        }
+    }
+
+    fn expr_has_await_in_stmt(s: &Stmt) -> bool {
+        match s {
+            Stmt::Let { value, .. } => Self::expr_has_await(value),
+            Stmt::Expr(e) => Self::expr_has_await(e),
+            Stmt::Return { value: Some(e), .. } => Self::expr_has_await(e),
+            _ => false,
+        }
     }
 
     /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・
@@ -6728,6 +7385,22 @@ fn expr_supported(e: &Expr) -> bool {
         Expr::TupleAccess { tuple, .. } => expr_supported(tuple),
         _ => false,
     }
+}
+
+/// Capitalize the first letter of a string (for state struct names).
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+    }
+}
+
+/// Count total await expressions in a function body.
+fn await_count_in(fdef: &FunctionDef) -> usize {
+    let mut count = 0usize;
+    Cg::count_awaits(&fdef.body, &mut count);
+    count
 }
 
 /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・(Step 1-7) 縺ｦ繧､繝ｳ繝・・ｽ・ｽ繝医ｒ髢峨�ｸｦ縺ｧ繧｢蜷阪→。
