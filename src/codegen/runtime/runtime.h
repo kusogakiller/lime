@@ -1055,6 +1055,26 @@ int challenger_mt_run(ChallengerMtExecutor* mt);
 // Shutdown the multi-thread executor
 void challenger_mt_shutdown(ChallengerMtExecutor* mt);
 
+// ============================================================
+// Challenger Async Runtime — Configuration (Phase 19)
+// ============================================================
+
+typedef struct {
+    int worker_count;           // number of executor worker threads (0 = auto)
+    int blocking_worker_count;  // number of blocking pool threads (0 = auto)
+    int max_tasks;              // max concurrent tasks (0 = default 65536)
+    int timer_wheel_size;       // max timers (0 = default 4096)
+    int reactor_timeout_ms;     // default reactor poll timeout (-1 = infinite)
+    int shutdown_timeout_ms;    // graceful shutdown timeout (0 = immediate)
+} ChallengerConfig;
+
+ChallengerConfig challenger_config_default(void);
+void challenger_config_set_workers(ChallengerConfig* cfg, int count);
+void challenger_config_set_blocking_workers(ChallengerConfig* cfg, int count);
+void challenger_config_set_max_tasks(ChallengerConfig* cfg, int max);
+void challenger_config_set_timer_wheel_size(ChallengerConfig* cfg, int size);
+void challenger_config_set_reactor_timeout(ChallengerConfig* cfg, int timeout_ms);
+
 // Set non-blocking mode
 int challenger_tcp_set_nonblocking(int fd);
 

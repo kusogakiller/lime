@@ -311,7 +311,14 @@ pub fn emit_llvm(
     out.push_str("declare void @challenger_mt_executor_free(i8*)\n");
     out.push_str("declare i64 @challenger_mt_spawn(i8*, i8*)\n");
     out.push_str("declare i32 @challenger_mt_run(i8*)\n");
-    out.push_str("declare void @challenger_mt_shutdown(i8*)\n\n");
+    out.push_str("declare void @challenger_mt_shutdown(i8*)\n");
+    // Challenger Runtime Configuration (Phase 19)
+    out.push_str("declare i8* @challenger_config_default()\n");
+    out.push_str("declare void @challenger_config_set_workers(i8*, i32)\n");
+    out.push_str("declare void @challenger_config_set_blocking_workers(i8*, i32)\n");
+    out.push_str("declare void @challenger_config_set_max_tasks(i8*, i32)\n");
+    out.push_str("declare void @challenger_config_set_timer_wheel_size(i8*, i32)\n");
+    out.push_str("declare void @challenger_config_set_reactor_timeout(i8*, i32)\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");

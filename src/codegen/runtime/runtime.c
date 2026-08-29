@@ -6729,3 +6729,38 @@ void challenger_mt_shutdown(ChallengerMtExecutor* mt) {
 #endif
     }
 }
+
+// ============================================================
+// Challenger Async Runtime — Configuration (Phase 19)
+// ============================================================
+
+ChallengerConfig challenger_config_default(void) {
+    ChallengerConfig cfg;
+    cfg.worker_count = 4;
+    cfg.blocking_worker_count = 4;
+    cfg.max_tasks = CHALLENGER_MAX_TASKS;
+    cfg.timer_wheel_size = CHALLENGER_MAX_TIMERS;
+    cfg.reactor_timeout_ms = 100;
+    cfg.shutdown_timeout_ms = 5000;
+    return cfg;
+}
+
+void challenger_config_set_workers(ChallengerConfig* cfg, int count) {
+    if (cfg) cfg->worker_count = count > 0 ? count : 4;
+}
+
+void challenger_config_set_blocking_workers(ChallengerConfig* cfg, int count) {
+    if (cfg) cfg->blocking_worker_count = count > 0 ? count : 4;
+}
+
+void challenger_config_set_max_tasks(ChallengerConfig* cfg, int max) {
+    if (cfg) cfg->max_tasks = max > 0 ? max : CHALLENGER_MAX_TASKS;
+}
+
+void challenger_config_set_timer_wheel_size(ChallengerConfig* cfg, int size) {
+    if (cfg) cfg->timer_wheel_size = size > 0 ? size : CHALLENGER_MAX_TIMERS;
+}
+
+void challenger_config_set_reactor_timeout(ChallengerConfig* cfg, int timeout_ms) {
+    if (cfg) cfg->reactor_timeout_ms = timeout_ms;
+}
