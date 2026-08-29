@@ -24,10 +24,15 @@
 
 
 #ifdef _WIN32
+// winsock2.h MUST come before windows.h to avoid redefinition errors
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <io.h>
 #include <direct.h>
 #include <sys/stat.h>
+// Windows does not define socklen_t
+typedef int socklen_t;
 #define strcasecmp _stricmp
 #define strncasecmp _strnicmp
 #define strtok_r strtok_s

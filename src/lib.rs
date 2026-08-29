@@ -4323,23 +4323,28 @@ pub fn compile_pipeline(
                                 // Compile runtime.c on the fly and link it.
                                 let runtime_obj = compile_runtime_c()?;
 
-                                let link_result = std::process::Command::new(llvm_tool("lld-link"))
-                                    .arg(&obj_path)
+                                let mut link = std::process::Command::new(llvm_tool("lld-link"));
+                                link.arg(&obj_path)
                                     .arg(&runtime_obj)
-                                    .arg(&format!("/out:{}", exe_path))
+                                    .arg(format!("/out:{}", exe_path))
                                     .arg("/subsystem:console")
                                     .arg("/OPT:REF")
-                                    .arg("/OPT:ICF")
-                                    // Allow unresolved symbols from third-party
-                                    // libraries whose headers declare optional
-                                    // features that are not compiled into the
-                                    // prepared artifact (e.g. SQLite's
-                                    // unlock-notify / snapshot / rtree entry
-                                    // points). These are never called by the
-                                    // Lime program, so leaving them unresolved
-                                    // is safe and matches how such libs are
-                                    // linked in practice.
-                                    .arg("/FORCE:UNRESOLVED")
+                                    .arg("/OPT:ICF");
+                                // Tell lld-link where to find import libraries
+                                // (uuid.lib, libcmt.lib, etc.)
+                                if let Some(ucrt_lib) = find_ucrt_lib() {
+                                    link.arg(format!("/LIBPATH:{}", ucrt_lib));
+                                }
+                                if let Some(msvc_lib) = find_msvc_lib() {
+                                    link.arg(format!("/LIBPATH:{}", msvc_lib));
+                                }
+                                if let Some(sdk_um_lib) = find_windows_sdk_lib("um") {
+                                    link.arg(format!("/LIBPATH:{}", sdk_um_lib));
+                                }
+                                if let Some(sdk_ucrt_lib) = find_windows_sdk_lib("ucrt") {
+                                    link.arg(format!("/LIBPATH:{}", sdk_ucrt_lib));
+                                }
+                                link.arg("/FORCE:UNRESOLVED")
                                     .arg("/defaultlib:libcmt")
                                     .arg("/defaultlib:oldnames")
                                     .arg("/defaultlib:Winhttp")
@@ -4366,10 +4371,10 @@ pub fn compile_pipeline(
                                     .arg("/defaultlib:Version")
                                     .arg("/defaultlib:Imm32")
                                     .arg("/defaultlib:Dinput8")
-                                    .arg("/defaultlib:Dxguid")
-                                    // Charger: inject prepared native artifacts (.lib).
-                                    .args(&charger_artifacts)
-                                    .status();
+                                    .arg("/defaultlib:Dxguid");
+                                // Charger: inject prepared native artifacts (.lib).
+                                link.args(&charger_artifacts);
+                                let link_result = link.status();
                                 match link_result {
                                     Ok(s) if s.success() => {
                                         report.emitted_exe = Some(exe_path);
@@ -4457,44 +4462,252 @@ fn compile_runtime_c() -> Result<String, String> {
     let tmp_dir = std::env::temp_dir().join("lime_runtime");
     let _ = std::fs::create_dir_all(&tmp_dir);
 
-    let c_path = tmp_dir.join("runtime.c");
-    let h_path = tmp_dir.join("runtime.h");
-
     // Key the object file by a hash of the embedded source so that editing
     // runtime.c never silently links a stale cached object (timestamp-based
     // invalidation is unreliable on some platforms).
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     RUNTIME_C_SOURCE.hash(&mut hasher);
-    let obj_path = tmp_dir.join(format!("runtime-{:016x}.obj", hasher.finish()));
-    let bc_path = obj_path.with_extension("bc");
+    let hash_hex = format!("{:016x}", hasher.finish());
+    let bc_path = tmp_dir.join(format!("runtime-{}.bc", hash_hex));
 
     if !bc_path.exists() {
+        // Use process-unique temp names to avoid race conditions when
+        // multiple lime invocations compile runtime.c in parallel (e.g.
+        // during `cargo test --test emission_regression`).
+        let pid = std::process::id();
+        let c_path = tmp_dir.join(format!("runtime_c_{}.c", pid));
+        let h_tmp = tmp_dir.join(format!("runtime_h_{}.h", pid));
+        let h_final = tmp_dir.join("runtime.h");
+        let out_bc = tmp_dir.join(format!("runtime_bc_{}.bc", pid));
+
         std::fs::write(&c_path, RUNTIME_C_SOURCE)
             .map_err(|e| format!("failed to write runtime.c: {}", e))?;
-        std::fs::write(&h_path, RUNTIME_H_SOURCE)
+        std::fs::write(&h_tmp, RUNTIME_H_SOURCE)
             .map_err(|e| format!("failed to write runtime.h: {}", e))?;
+        // Atomically publish runtime.h so parallel processes can read it.
+        let _ = std::fs::rename(&h_tmp, &h_final);
 
         let clang = llvm_tool("clang");
-        let status = std::process::Command::new(&clang)
-            .arg("-O3")
+        let mut cmd = std::process::Command::new(&clang);
+        cmd.arg("-O3")
             .arg("-flto")
             .arg("-ffunction-sections")
             .arg("-fdata-sections")
             .arg("-c")
             .arg("-emit-llvm")
-            .arg(c_path.to_str().unwrap())
+            .arg(format!("-I{}", tmp_dir.to_str().unwrap()));
+        // On Windows, add MSVC/UCRT system include paths so clang finds stdlib.h etc.
+        if cfg!(target_os = "windows") {
+            if let Some(ucrt) = find_ucrt_include() {
+                cmd.arg(format!("-I{}", ucrt));
+            }
+            if let Some(msvc) = find_msvc_include() {
+                cmd.arg(format!("-I{}", msvc));
+            }
+            for sub in &["shared", "um"] {
+                if let Some(p) = find_windows_sdk_include(sub) {
+                    cmd.arg(format!("-I{}", p));
+                }
+            }
+        }
+        cmd.arg(c_path.to_str().unwrap())
             .arg("-o")
-            .arg(bc_path.to_str().unwrap())
+            .arg(out_bc.to_str().unwrap());
+        let status = cmd
             .status()
             .map_err(|e| format!("failed to launch clang: {}", e))?;
 
         if !status.success() {
+            let _ = std::fs::remove_file(&c_path);
+            let _ = std::fs::remove_file(&out_bc);
             return Err("clang compilation of runtime.c failed".to_string());
         }
+
+        // Atomic rename: if another process raced and already created bc_path,
+        // the rename will fail harmlessly and we just clean up.
+        let _ = std::fs::rename(&out_bc, &bc_path);
+        let _ = std::fs::remove_file(&c_path);
     }
 
     Ok(bc_path.to_str().unwrap().to_string())
 }
+
+/// Find UCRT include directory on Windows (for stdlib.h etc.).
+#[cfg(target_os = "windows")]
+fn find_ucrt_include() -> Option<String> {
+    let kits = std::path::PathBuf::from(r"C:\Program Files (x86)\Windows Kits\10\Include");
+    if !kits.exists() {
+        return None;
+    }
+    let mut best: Option<(u64, String)> = None;
+    if let Ok(entries) = std::fs::read_dir(&kits) {
+        for e in entries.flatten() {
+            let p = e.path().join("ucrt");
+            if p.exists() {
+                let ver: u64 = e.file_name().to_string_lossy()
+                    .split('.').nth(2)
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                if best.as_ref().map_or(true, |(bv, _)| ver > *bv) {
+                    best = Some((ver, p.to_str().unwrap().to_string()));
+                }
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// Find MSVC (CRT) include directory on Windows.
+#[cfg(target_os = "windows")]
+fn find_msvc_include() -> Option<String> {
+    // Try both Program Files and Program Files (x86) for VS BuildTools/Community
+    let bases = [
+        r"C:\Program Files\Microsoft Visual Studio\2022",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2022",
+        r"C:\Program Files\Microsoft Visual Studio\2019",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2019",
+    ];
+    for base in &bases {
+        let msvc = std::path::PathBuf::from(base).join("BuildTools\\VC\\Tools\\MSVC");
+        if msvc.exists() {
+            if let Ok(entries) = std::fs::read_dir(&msvc) {
+                for e in entries.flatten() {
+                    let inc = e.path().join("include");
+                    if inc.exists() {
+                        return Some(inc.to_str().unwrap().to_string());
+                    }
+                }
+            }
+        }
+        // Also try Community edition
+        for edition in &["Community", "Professional", "Enterprise"] {
+            let msvc = std::path::PathBuf::from(base)
+                .join(edition)
+                .join("VC\\Tools\\MSVC");
+            if msvc.exists() {
+                if let Ok(entries) = std::fs::read_dir(&msvc) {
+                    for e in entries.flatten() {
+                        let inc = e.path().join("include");
+                        if inc.exists() {
+                            return Some(inc.to_str().unwrap().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_ucrt_include() -> Option<String> { None }
+#[cfg(not(target_os = "windows"))]
+fn find_msvc_include() -> Option<String> { None }
+
+/// Find Windows SDK sub-directory (shared, um, etc.) for headers like windows.h.
+#[cfg(target_os = "windows")]
+fn find_windows_sdk_include(subdir: &str) -> Option<String> {
+    let kits = std::path::PathBuf::from(r"C:\Program Files (x86)\Windows Kits\10\Include");
+    if !kits.exists() { return None; }
+    let mut best_ver: u64 = 0;
+    let mut best_path = String::new();
+    if let Ok(entries) = std::fs::read_dir(&kits) {
+        for e in entries.flatten() {
+            let p = e.path().join(subdir);
+            if p.exists() {
+                // Parse build number from "10.0.BUILDNUM.0" — take the third component
+                let ver: u64 = e.file_name().to_string_lossy()
+                    .split('.').nth(2)
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                if ver > best_ver {
+                    best_ver = ver;
+                    best_path = p.to_str().unwrap().to_string();
+                }
+            }
+        }
+    }
+    if best_ver > 0 { Some(best_path) } else { None }
+}
+#[cfg(not(target_os = "windows"))]
+fn find_windows_sdk_include(_subdir: &str) -> Option<String> { None }
+
+/// Find UCRT lib directory on Windows (for libcmt.lib etc.).
+#[cfg(target_os = "windows")]
+fn find_ucrt_lib() -> Option<String> {
+    let kits = std::path::PathBuf::from(r"C:\Program Files (x86)\Windows Kits\10\Lib");
+    if !kits.exists() { return None; }
+    let mut best_ver: u64 = 0;
+    let mut best_path = String::new();
+    if let Ok(entries) = std::fs::read_dir(&kits) {
+        for e in entries.flatten() {
+            let p = e.path().join("ucrt").join("x64");
+            if p.exists() {
+                let ver: u64 = e.file_name().to_string_lossy()
+                    .split('.').nth(2)
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                if ver > best_ver {
+                    best_ver = ver;
+                    best_path = p.to_str().unwrap().to_string();
+                }
+            }
+        }
+    }
+    if best_ver > 0 { Some(best_path) } else { None }
+}
+#[cfg(not(target_os = "windows"))]
+fn find_ucrt_lib() -> Option<String> { None }
+
+/// Find MSVC lib directory on Windows.
+#[cfg(target_os = "windows")]
+fn find_msvc_lib() -> Option<String> {
+    let bases = [
+        r"C:\Program Files\Microsoft Visual Studio\2022",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2022",
+        r"C:\Program Files\Microsoft Visual Studio\2019",
+        r"C:\Program Files (x86)\Microsoft Visual Studio\2019",
+    ];
+    for base in &bases {
+        let msvc = std::path::PathBuf::from(base).join("BuildTools\\VC\\Tools\\MSVC");
+        if msvc.exists() {
+            if let Ok(entries) = std::fs::read_dir(&msvc) {
+                for e in entries.flatten() {
+                    let lib = e.path().join("lib").join("x64");
+                    if lib.exists() {
+                        return Some(lib.to_str().unwrap().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+#[cfg(not(target_os = "windows"))]
+fn find_msvc_lib() -> Option<String> { None }
+
+/// Find Windows SDK lib sub-directory (um, ucrt) on Windows.
+#[cfg(target_os = "windows")]
+fn find_windows_sdk_lib(subdir: &str) -> Option<String> {
+    let kits = std::path::PathBuf::from(r"C:\Program Files (x86)\Windows Kits\10\Lib");
+    if !kits.exists() { return None; }
+    let mut best_ver: u64 = 0;
+    let mut best_path = String::new();
+    if let Ok(entries) = std::fs::read_dir(&kits) {
+        for e in entries.flatten() {
+            let p = e.path().join(subdir).join("x64");
+            if p.exists() {
+                let ver: u64 = e.file_name().to_string_lossy()
+                    .split('.').nth(2)
+                    .and_then(|s| s.parse().ok()).unwrap_or(0);
+                if ver > best_ver {
+                    best_ver = ver;
+                    best_path = p.to_str().unwrap().to_string();
+                }
+            }
+        }
+    }
+    if best_ver > 0 { Some(best_path) } else { None }
+}
+#[cfg(not(target_os = "windows"))]
+fn find_windows_sdk_lib(_subdir: &str) -> Option<String> { None }
 
 /// Find the LLVM bin directory by checking environment variables and PATH.
 fn llvm_bindir() -> Option<String> {

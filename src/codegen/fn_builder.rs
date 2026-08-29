@@ -155,8 +155,11 @@ impl<'a> Cg<'a> {
         };
         self.fn_ret_ty = ret_ty.clone();
 
-        // Challenger: async (lime) functions → state machine lowering
-        if fdef.is_async {
+        // Challenger: async (lime) functions with real suspension points
+        // use state-machine lowering. For now, lime functions compile as
+        // regular functions (await is a transparent direct call).
+        // TODO: re-enable state machine when real async I/O is tested.
+        if false && fdef.is_async {
             return self.codegen_async_function(name, &llvm_name, fdef, &ret_ty);
         }
         // Function params with names (%p0, %p1, ...) so alloca/store can reference them
