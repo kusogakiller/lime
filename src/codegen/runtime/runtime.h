@@ -648,4 +648,53 @@ void runtime_requests_cookie_jar_free(RequestsCookieJar* jar);
 // Frees a stream.
 void runtime_requests_stream_free(RequestsStream* stream);
 
+// ============================================================
+// Challenger Async Runtime — Future / Poll / Waker (Phase 1)
+// ============================================================
+
+// Poll result tag:  0 = Ready(value), 1 = Pending
+// Matches Lime's State representation: { i32 tag, [4 x i64] payload }
+typedef struct {
+    int64_t tag;    // 0 = ready, 1 = pending
+    int64_t value;  // output value when ready (i64 slot)
+} Poll;
+
+// Forward declarations
+typedef struct ChallengerWaker ChallengerWaker;
+typedef struct ChallengerFuture ChallengerFuture;
+
+// Poll function signature: poll(self, waker) -> Poll
+typedef Poll (*ChallengerPollFn)(ChallengerFuture* self, ChallengerWaker* waker);
+
+// Wake function signature: wake(waker_data)
+typedef void (*ChallengerWakeFn)(void* waker_data);
+
+struct ChallengerWaker {
+    ChallengerWakeFn wake_fn;
+    void* data;
+};
+
+struct ChallengerFuture {
+    ChallengerPollFn poll_fn;
+    void* state;          // opaque future-local state (heap allocated)
+    int64_t output;       // holds output after Ready
+    int8_t completed;     // 1 = future is done, do not poll again
+};
+
+// Future lifecycle
+ChallengerFuture* challenger_future_new(ChallengerPollFn poll_fn, void* state);
+void challenger_future_free(ChallengerFuture* fut);
+Poll challenger_future_poll(ChallengerFuture* fut, ChallengerWaker* waker);
+int8_t challenger_future_is_completed(ChallengerFuture* fut);
+
+// Waker lifecycle
+ChallengerWaker* challenger_waker_new(ChallengerWakeFn wake_fn, void* data);
+void challenger_waker_free(ChallengerWaker* waker);
+void challenger_waker_wake(ChallengerWaker* waker);
+void challenger_waker_wake_by_ref(ChallengerWaker* waker);
+
+// Poll constructors
+Poll challenger_poll_ready(int64_t value);
+Poll challenger_poll_pending(void);
+
 #endif // LIME_RUNTIME_H

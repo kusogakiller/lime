@@ -51,7 +51,10 @@ pub fn emit_llvm(
     out.push_str("%LimeIface = type { i8*, i8* }\n");
     out.push_str("%LimeClosure = type { i8*, i8* }\n");
     out.push_str("%LimeMap = type { i8*, i64, i64 }\n");
-    out.push_str("%LimeSet = type { i8*, i64, i64 }\n\n");
+    out.push_str("%LimeSet = type { i8*, i64, i64 }\n");
+    out.push_str("%ChallengerPoll = type { i64, i64 }\n");
+    out.push_str("%ChallengerWaker = type { i8*, i8* }\n");
+    out.push_str("%ChallengerFuture = type { i8*, i8*, i64, i8 }\n\n");
 
     // Runtime declarations
     out.push_str("declare i8* @runtime_alloc(i64, i64)\n");
@@ -199,6 +202,18 @@ pub fn emit_llvm(
     out.push_str("declare i64 @runtime_call_closure_i64(%LimeClosure*, i8*)\n");
     out.push_str("declare i8* @runtime_call_closure_ptr(%LimeClosure*, i8*)\n");
     out.push_str("declare %LimeClosure* @runtime_make_fn_ref(i8*)\n\n");
+
+    // Challenger Async Runtime: Future / Poll / Waker (Phase 1)
+    out.push_str("declare i8* @challenger_future_new(i8*, i8*)\n");
+    out.push_str("declare void @challenger_future_free(i8*)\n");
+    out.push_str("declare %ChallengerPoll @challenger_future_poll(i8*, %ChallengerWaker*)\n");
+    out.push_str("declare i8 @challenger_future_is_completed(i8*)\n");
+    out.push_str("declare %ChallengerWaker* @challenger_waker_new(i8*, i8*)\n");
+    out.push_str("declare void @challenger_waker_free(%ChallengerWaker*)\n");
+    out.push_str("declare void @challenger_waker_wake(%ChallengerWaker*)\n");
+    out.push_str("declare void @challenger_waker_wake_by_ref(%ChallengerWaker*)\n");
+    out.push_str("declare %ChallengerPoll @challenger_poll_ready(i64)\n");
+    out.push_str("declare %ChallengerPoll @challenger_poll_pending()\n\n");
 
     // JSON runtime declarations
     out.push_str("declare i8* @runtime_json_parse(i8*)\n");

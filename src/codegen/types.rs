@@ -45,6 +45,7 @@ pub fn llvm_type_name(ty: &Type) -> String {
         Type::Unknown => "i64".to_string(), // Phase 0: placeholder
         Type::Var(_) => "i64".to_string(),  // Phase 0: monomorphization
         Type::Json => "i8*".to_string(), // JSON values are opaque pointers 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
+        Type::Future(_) => "i8*".to_string(), // Challenger Future: opaque pointer to ChallengerFuture struct
     }
 }
 
@@ -82,6 +83,7 @@ pub fn align_of(ty: &Type) -> usize {
         Type::Unknown => 8,
         Type::Var(_) => 8,
         Type::Json => 8,
+        Type::Future(_) => 8, // pointer to ChallengerFuture
     }
 }
 

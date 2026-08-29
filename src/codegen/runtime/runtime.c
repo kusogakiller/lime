@@ -5374,3 +5374,82 @@ char* runtime_requests_stream_read(RequestsStream* stream, int64_t size, int64_t
 int runtime_requests_stream_has_more(RequestsStream* stream) {
     return stream ? (stream->pos < stream->len) : 0;
 }
+
+// ============================================================
+// Challenger Async Runtime — Future / Poll / Waker (Phase 1)
+// ============================================================
+
+ChallengerFuture* challenger_future_new(ChallengerPollFn poll_fn, void* state) {
+    ChallengerFuture* fut = (ChallengerFuture*)malloc(sizeof(ChallengerFuture));
+    if (!fut) return NULL;
+    fut->poll_fn = poll_fn;
+    fut->state = state;
+    fut->output = 0;
+    fut->completed = 0;
+    return fut;
+}
+
+void challenger_future_free(ChallengerFuture* fut) {
+    if (!fut) return;
+    // State is owned by the future; caller is responsible for
+    // freeing state before calling this, or we could add a state_free_fn.
+    // For now: just free the future struct itself.
+    free(fut);
+}
+
+Poll challenger_future_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    if (!fut || fut->completed) {
+        Poll p;
+        p.tag = 0;
+        p.value = fut ? fut->output : 0;
+        return p;
+    }
+    Poll result = fut->poll_fn(fut, waker);
+    if (result.tag == 0) {
+        // Ready: mark completed and store output
+        fut->completed = 1;
+        fut->output = result.value;
+    }
+    return result;
+}
+
+int8_t challenger_future_is_completed(ChallengerFuture* fut) {
+    return fut ? fut->completed : 1;
+}
+
+ChallengerWaker* challenger_waker_new(ChallengerWakeFn wake_fn, void* data) {
+    ChallengerWaker* w = (ChallengerWaker*)malloc(sizeof(ChallengerWaker));
+    if (!w) return NULL;
+    w->wake_fn = wake_fn;
+    w->data = data;
+    return w;
+}
+
+void challenger_waker_free(ChallengerWaker* waker) {
+    if (!waker) return;
+    free(waker);
+}
+
+void challenger_waker_wake(ChallengerWaker* waker) {
+    if (!waker || !waker->wake_fn) return;
+    waker->wake_fn(waker->data);
+}
+
+void challenger_waker_wake_by_ref(ChallengerWaker* waker) {
+    if (!waker || !waker->wake_fn) return;
+    waker->wake_fn(waker->data);
+}
+
+Poll challenger_poll_ready(int64_t value) {
+    Poll p;
+    p.tag = 0;
+    p.value = value;
+    return p;
+}
+
+Poll challenger_poll_pending(void) {
+    Poll p;
+    p.tag = 1;
+    p.value = 0;
+    return p;
+}
