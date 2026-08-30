@@ -730,6 +730,7 @@ typedef struct {
 typedef struct {
     ReadyQueue ready;
     uint64_t next_task_id;
+    uint64_t current_task_id;  // set by executor during poll, read by timer/sync
     int running;
     int shutdown;
     // Worker thread (for multi-thread, later)
@@ -885,19 +886,19 @@ ChallengerMutex* challenger_mutex_new(void);
 void challenger_mutex_free(ChallengerMutex* m);
 // Try lock: returns 1 if acquired, 0 if contention (caller should Pending)
 int challenger_mutex_try_lock(ChallengerMutex* m, uint64_t task_id);
-void challenger_mutex_unlock(ChallengerMutex* m, uint64_t task_id);
+void challenger_mutex_unlock(ChallengerExecutor* exec, ChallengerMutex* m, uint64_t task_id);
 
 ChallengerRwLock* challenger_rwlock_new(void);
 void challenger_rwlock_free(ChallengerRwLock* rw);
 int challenger_rwlock_try_read(ChallengerRwLock* rw, uint64_t task_id);
-void challenger_rwlock_read_unlock(ChallengerRwLock* rw);
+void challenger_rwlock_read_unlock(ChallengerExecutor* exec, ChallengerRwLock* rw);
 int challenger_rwlock_try_write(ChallengerRwLock* rw, uint64_t task_id);
-void challenger_rwlock_write_unlock(ChallengerRwLock* rw);
+void challenger_rwlock_write_unlock(ChallengerExecutor* exec, ChallengerRwLock* rw);
 
 ChallengerSemaphore* challenger_semaphore_new(int max_count);
 void challenger_semaphore_free(ChallengerSemaphore* s);
 int challenger_semaphore_try_acquire(ChallengerSemaphore* s, uint64_t task_id);
-void challenger_semaphore_release(ChallengerSemaphore* s);
+void challenger_semaphore_release(ChallengerExecutor* exec, ChallengerSemaphore* s);
 
 ChallengerNotify* challenger_notify_new(void);
 void challenger_notify_free(ChallengerNotify* n);
@@ -930,9 +931,9 @@ typedef struct {
 ChallengerChannel* challenger_channel_new(int capacity);
 void challenger_channel_free(ChallengerChannel* ch);
 // Send: returns 1 if sent, 0 if full (caller should Pending)
-int challenger_channel_send(ChallengerChannel* ch, int64_t value);
+int challenger_channel_send(ChallengerExecutor* exec, ChallengerChannel* ch, int64_t value);
 // Receive: returns 1 if received (value in *out), 0 if empty (caller should Pending)
-int challenger_channel_receive(ChallengerChannel* ch, int64_t* out);
+int challenger_channel_receive(ChallengerExecutor* exec, ChallengerChannel* ch, int64_t* out);
 void challenger_channel_close(ChallengerChannel* ch);
 int challenger_channel_is_closed(ChallengerChannel* ch);
 
@@ -971,12 +972,23 @@ int challenger_task_is_cancelled(ChallengerExecutor* exec, uint64_t task_id);
 #define CHALLENGER_MAX_BLOCKING_WORKERS 16
 
 typedef struct {
+    void* fn;
+    void* arg;
+    uint64_t task_id;
+} BlockingWorkItem;
+
+typedef struct {
     void* threads[CHALLENGER_MAX_BLOCKING_WORKERS];
     int thread_count;
     int shutdown;
-    // Simple task queue
-    void* pending_tasks[4096];
-    int pending_count;
+    // Work queue (ring buffer)
+    BlockingWorkItem work_queue[4096];
+    int work_head;
+    int work_tail;
+    int work_count;
+    // Condition variable for wake
+    void* work_mutex;     // CRITICAL_SECTION on Windows, pthread_mutex_t*
+    void* work_cond;      // CONDITION_VARIABLE on Windows, pthread_cond_t*
 } ChallengerBlockingPool;
 
 ChallengerBlockingPool* challenger_blocking_pool_new(int thread_count);

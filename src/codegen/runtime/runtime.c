@@ -5540,8 +5540,8 @@ uint64_t challenger_executor_spawn(ChallengerExecutor* exec, ChallengerFuture* f
     task->state = CHALLENGER_TASK_READY;
     task->needs_poll = 0;
 
-    // Create a waker that references the executor and this task
-    task->waker = challenger_waker_new(NULL, NULL); // placeholder waker
+    // Create a real waker that references the executor and this task
+    task->waker = challenger_waker_new_for_task(exec, task->id);
 
     challenger_ready_queue_push(&exec->ready, task);
     return task->id;
@@ -5593,10 +5593,13 @@ int challenger_executor_run(ChallengerExecutor* exec) {
         }
 
         task->state = CHALLENGER_TASK_RUNNING;
+        exec->current_task_id = task->id;
 
         // Poll the future
         if (task->future && !task->future->completed) {
             Poll result = challenger_future_poll(task->future, task->waker);
+
+            exec->current_task_id = 0;
 
             if (result.tag == 0) {
                 // Ready: task completed
@@ -5612,6 +5615,7 @@ int challenger_executor_run(ChallengerExecutor* exec) {
                 // When waker fires, it will be re-enqueued.
             }
         } else {
+            exec->current_task_id = 0;
             // Future already completed or null
             task->state = CHALLENGER_TASK_COMPLETED;
             if (task->future) challenger_future_free(task->future);
@@ -5661,7 +5665,6 @@ void challenger_waker_wake_from_executor(ChallengerExecutor* exec, uint64_t task
 // ============================================================
 
 #ifdef _WIN32
-#include <windows.h>
 static LARGE_INTEGER g_qpc_freq = {0};
 static int g_qpc_initialized = 0;
 
@@ -5684,9 +5687,14 @@ void challenger_timer_init(ChallengerTimerWheel* tw) {
 int64_t challenger_time_now_us(void) {
 #ifdef _WIN32
     init_qpc();
+    if (g_qpc_freq.QuadPart == 0) return 0;
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
-    return (int64_t)((now.QuadPart * 1000000LL) / g_qpc_freq.QuadPart);
+    // Avoid overflow: divide first, then multiply
+    int64_t whole = (now.QuadPart / g_qpc_freq.QuadPart) * 1000000LL;
+    int64_t rem = now.QuadPart % g_qpc_freq.QuadPart;
+    int64_t frac = (rem * 1000000LL) / g_qpc_freq.QuadPart;
+    return whole + frac;
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -5698,11 +5706,12 @@ uint64_t challenger_timer_sleep(ChallengerExecutor* exec, ChallengerTimerWheel* 
     if (!tw || !exec) return 0;
 
     int64_t deadline = challenger_time_now_us() + duration_us;
+    uint64_t task_id = exec->current_task_id;
 
     // Find free slot
     for (int i = 0; i < CHALLENGER_MAX_TIMERS; i++) {
         if (!tw->timers[i].active) {
-            tw->timers[i].task_id = 0; // will be set when task is known
+            tw->timers[i].task_id = task_id;
             tw->timers[i].deadline_us = deadline;
             tw->timers[i].active = 1;
             tw->count++;
@@ -5901,14 +5910,18 @@ int challenger_tcp_socket(void) {
 }
 
 int challenger_tcp_set_nonblocking(int fd) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     if (s == INVALID_SOCKET) return -1;
     u_long mode = 1;
     return ioctlsocket(s, FIONBIO, &mode) == 0 ? 0 : -1;
 }
 
 int challenger_tcp_bind(int fd, const char* host, int port) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -5918,12 +5931,16 @@ int challenger_tcp_bind(int fd, const char* host, int port) {
 }
 
 int challenger_tcp_listen(int fd, int backlog) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     return listen(s, backlog) == 0 ? 0 : -1;
 }
 
 int challenger_tcp_accept(int fd) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     struct sockaddr_in addr;
     int addrlen = sizeof(addr);
     SOCKET client = accept(s, (struct sockaddr*)&addr, &addrlen);
@@ -5932,7 +5949,9 @@ int challenger_tcp_accept(int fd) {
 }
 
 int challenger_tcp_connect(int fd, const char* host, int port) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -5942,17 +5961,23 @@ int challenger_tcp_connect(int fd, const char* host, int port) {
 }
 
 int challenger_tcp_read(int fd, char* buf, int buf_len) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     return recv(s, buf, buf_len, 0);
 }
 
 int challenger_tcp_write(int fd, const char* buf, int buf_len) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     return send(s, buf, buf_len, 0);
 }
 
 int challenger_tcp_close(int fd) {
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     return closesocket(s) == 0 ? 0 : -1;
 }
 
@@ -6026,7 +6051,9 @@ int challenger_udp_socket(void) {
 
 int challenger_udp_bind(int fd, const char* host, int port) {
 #ifdef _WIN32
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
 #else
     int s = fd;
 #endif
@@ -6040,7 +6067,9 @@ int challenger_udp_bind(int fd, const char* host, int port) {
 
 int challenger_udp_recv(int fd, char* buf, int buf_len, int64_t* out_addr) {
 #ifdef _WIN32
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
 #else
     int s = fd;
 #endif
@@ -6053,7 +6082,9 @@ int challenger_udp_recv(int fd, char* buf, int buf_len, int64_t* out_addr) {
 
 int challenger_udp_send(int fd, const char* buf, int buf_len, const char* host, int port) {
 #ifdef _WIN32
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
 #else
     int s = fd;
 #endif
@@ -6067,7 +6098,9 @@ int challenger_udp_send(int fd, const char* buf, int buf_len, const char* host, 
 
 int challenger_udp_close(int fd) {
 #ifdef _WIN32
+    if (fd < 0) return -1;
     SOCKET s = (SOCKET)_get_osfhandle(fd);
+    if (s == INVALID_SOCKET) return -1;
     return closesocket(s) == 0 ? 0 : -1;
 #else
     return close(fd);
@@ -6100,11 +6133,15 @@ int challenger_mutex_try_lock(ChallengerMutex* m, uint64_t task_id) {
     return 0;
 }
 
-void challenger_mutex_unlock(ChallengerMutex* m, uint64_t task_id) {
+void challenger_mutex_unlock(ChallengerExecutor* exec, ChallengerMutex* m, uint64_t task_id) {
     if (!m || m->owner != task_id) return;
     m->state = CHALLENGER_SYNC_UNLOCKED;
     m->owner = 0;
-    // Wake next waiter (handled by executor)
+    // Wake next waiter
+    if (m->waiter_count > 0 && exec) {
+        uint64_t waiter_id = m->waiters[--m->waiter_count];
+        challenger_executor_wake_task(exec, waiter_id);
+    }
 }
 
 ChallengerRwLock* challenger_rwlock_new(void) {
@@ -6125,9 +6162,14 @@ int challenger_rwlock_try_read(ChallengerRwLock* rw, uint64_t task_id) {
     return 1;
 }
 
-void challenger_rwlock_read_unlock(ChallengerRwLock* rw) {
+void challenger_rwlock_read_unlock(ChallengerExecutor* exec, ChallengerRwLock* rw) {
     if (!rw) return;
     if (rw->read_count > 0) rw->read_count--;
+    // If no readers left and a writer is waiting, wake it
+    if (rw->read_count == 0 && rw->write_waiter_count > 0 && exec) {
+        uint64_t waiter_id = rw->write_waiters[--rw->write_waiter_count];
+        challenger_executor_wake_task(exec, waiter_id);
+    }
 }
 
 int challenger_rwlock_try_write(ChallengerRwLock* rw, uint64_t task_id) {
@@ -6142,10 +6184,22 @@ int challenger_rwlock_try_write(ChallengerRwLock* rw, uint64_t task_id) {
     return 1;
 }
 
-void challenger_rwlock_write_unlock(ChallengerRwLock* rw) {
+void challenger_rwlock_write_unlock(ChallengerExecutor* exec, ChallengerRwLock* rw) {
     if (!rw) return;
     rw->write_locked = 0;
     rw->write_owner = 0;
+    // Wake waiting readers (all can proceed now)
+    if (exec) {
+        while (rw->read_waiter_count > 0) {
+            uint64_t waiter_id = rw->read_waiters[--rw->read_waiter_count];
+            challenger_executor_wake_task(exec, waiter_id);
+        }
+        // Wake one waiting writer
+        if (rw->write_waiter_count > 0) {
+            uint64_t waiter_id = rw->write_waiters[--rw->write_waiter_count];
+            challenger_executor_wake_task(exec, waiter_id);
+        }
+    }
 }
 
 ChallengerSemaphore* challenger_semaphore_new(int max_count) {
@@ -6164,9 +6218,14 @@ int challenger_semaphore_try_acquire(ChallengerSemaphore* s, uint64_t task_id) {
     return 0;
 }
 
-void challenger_semaphore_release(ChallengerSemaphore* s) {
+void challenger_semaphore_release(ChallengerExecutor* exec, ChallengerSemaphore* s) {
     if (!s) return;
     s->count++;
+    // Wake next waiter if any
+    if (s->waiter_count > 0 && exec) {
+        uint64_t waiter_id = s->waiters[--s->waiter_count];
+        challenger_executor_wake_task(exec, waiter_id);
+    }
 }
 
 ChallengerNotify* challenger_notify_new(void) {
@@ -6208,16 +6267,21 @@ ChallengerChannel* challenger_channel_new(int capacity) {
 
 void challenger_channel_free(ChallengerChannel* ch) { free(ch); }
 
-int challenger_channel_send(ChallengerChannel* ch, int64_t value) {
+int challenger_channel_send(ChallengerExecutor* exec, ChallengerChannel* ch, int64_t value) {
     if (!ch || ch->closed) return -1;
     if (ch->count >= CHALLENGER_CHANNEL_MAX_MSGS) return 0; // full
     ch->messages[ch->tail] = value;
     ch->tail = (ch->tail + 1) % CHALLENGER_CHANNEL_MAX_MSGS;
     ch->count++;
+    // Wake one waiting receiver
+    if (ch->recv_waiter_count > 0 && exec) {
+        uint64_t waiter_id = ch->recv_waiters[--ch->recv_waiter_count];
+        challenger_executor_wake_task(exec, waiter_id);
+    }
     return 1;
 }
 
-int challenger_channel_receive(ChallengerChannel* ch, int64_t* out) {
+int challenger_channel_receive(ChallengerExecutor* exec, ChallengerChannel* ch, int64_t* out) {
     if (!ch) return -1;
     if (ch->count == 0) {
         if (ch->closed) return -1; // closed and empty
@@ -6226,6 +6290,11 @@ int challenger_channel_receive(ChallengerChannel* ch, int64_t* out) {
     if (out) *out = ch->messages[ch->head];
     ch->head = (ch->head + 1) % CHALLENGER_CHANNEL_MAX_MSGS;
     ch->count--;
+    // Wake one waiting sender (space freed)
+    if (ch->send_waiter_count > 0 && exec) {
+        uint64_t waiter_id = ch->send_waiters[--ch->send_waiter_count];
+        challenger_executor_wake_task(exec, waiter_id);
+    }
     return 1;
 }
 
@@ -6317,58 +6386,249 @@ int challenger_task_is_cancelled(ChallengerExecutor* exec, uint64_t task_id) {
 // ============================================================
 
 #ifdef _WIN32
+#include <windows.h>
+
+typedef struct {
+    ChallengerBlockingPool* pool;
+} BlockingWorkerArg;
+
 static DWORD WINAPI blocking_worker(LPVOID arg) {
-    ChallengerBlockingPool* pool = (ChallengerBlockingPool*)arg;
-    (void)pool;
-    // Simple: just sleep — real implementation would dequeue and run tasks
+    BlockingWorkerArg* warg = (BlockingWorkerArg*)arg;
+    ChallengerBlockingPool* pool = warg->pool;
+    CRITICAL_SECTION* cs = (CRITICAL_SECTION*)pool->work_mutex;
+    CONDITION_VARIABLE* cv = (CONDITION_VARIABLE*)pool->work_cond;
+    free(warg);
+
+    while (1) {
+        EnterCriticalSection(cs);
+        while (pool->work_count == 0 && !pool->shutdown) {
+            SleepConditionVariableCS(cv, cs, INFINITE);
+        }
+        if (pool->shutdown && pool->work_count == 0) {
+            LeaveCriticalSection(cs);
+            break;
+        }
+        // Dequeue work item
+        BlockingWorkItem item = pool->work_queue[pool->work_head];
+        pool->work_head = (pool->work_head + 1) % 4096;
+        pool->work_count--;
+        LeaveCriticalSection(cs);
+
+        // Execute the work
+        if (item.fn) {
+            void* (*fn)(void*) = (void* (*)(void*))item.fn;
+            fn(item.arg);
+        }
+
+        // Wake the associated task
+        if (item.task_id > 0 && g_challenger_executor) {
+            challenger_executor_wake_task(g_challenger_executor, item.task_id);
+        }
+    }
     return 0;
 }
-#else
-static void* blocking_worker(void* arg) {
-    ChallengerBlockingPool* pool = (ChallengerBlockingPool*)arg;
-    (void)pool;
-    return NULL;
-}
-#endif
 
 ChallengerBlockingPool* challenger_blocking_pool_new(int thread_count) {
     ChallengerBlockingPool* pool = (ChallengerBlockingPool*)calloc(1, sizeof(ChallengerBlockingPool));
     if (!pool) return NULL;
     pool->thread_count = thread_count > 0 ? thread_count : 4;
     pool->shutdown = 0;
-    pool->pending_count = 0;
-#ifdef _WIN32
+    pool->work_head = 0;
+    pool->work_tail = 0;
+    pool->work_count = 0;
+
+    CRITICAL_SECTION* cs = (CRITICAL_SECTION*)malloc(sizeof(CRITICAL_SECTION));
+    CONDITION_VARIABLE* cv = (CONDITION_VARIABLE*)malloc(sizeof(CONDITION_VARIABLE));
+    InitializeCriticalSection(cs);
+    InitializeConditionVariable(cv);
+    pool->work_mutex = cs;
+    pool->work_cond = cv;
+
     for (int i = 0; i < pool->thread_count; i++) {
-        pool->threads[i] = CreateThread(NULL, 0, blocking_worker, pool, 0, NULL);
+        BlockingWorkerArg* warg = (BlockingWorkerArg*)malloc(sizeof(BlockingWorkerArg));
+        warg->pool = pool;
+        pool->threads[i] = CreateThread(NULL, 0, blocking_worker, warg, 0, NULL);
     }
-#else
-    for (int i = 0; i < pool->thread_count; i++) {
-        pthread_t t;
-        pthread_create(&t, NULL, blocking_worker, pool);
-        pool->threads[i] = (void*)(intptr_t)t;
-    }
-#endif
     return pool;
 }
 
 void challenger_blocking_pool_free(ChallengerBlockingPool* pool) {
     if (!pool) return;
     challenger_blocking_pool_shutdown(pool);
+    if (pool->work_mutex) {
+        DeleteCriticalSection((CRITICAL_SECTION*)pool->work_mutex);
+        free(pool->work_mutex);
+    }
+    if (pool->work_cond) free(pool->work_cond);
     free(pool);
 }
 
 int challenger_blocking_submit(ChallengerBlockingPool* pool, void* (*fn)(void*), void* arg, uint64_t task_id) {
-    if (!pool) return -1;
-    (void)fn; (void)arg; (void)task_id;
-    // Placeholder: real implementation would enqueue work
+    if (!pool || pool->shutdown) return -1;
+    CRITICAL_SECTION* cs = (CRITICAL_SECTION*)pool->work_mutex;
+    CONDITION_VARIABLE* cv = (CONDITION_VARIABLE*)pool->work_cond;
+
+    EnterCriticalSection(cs);
+    if (pool->work_count >= 4096) {
+        LeaveCriticalSection(cs);
+        return -1; // queue full
+    }
+    pool->work_queue[pool->work_tail].fn = (void*)fn;
+    pool->work_queue[pool->work_tail].arg = arg;
+    pool->work_queue[pool->work_tail].task_id = task_id;
+    pool->work_tail = (pool->work_tail + 1) % 4096;
+    pool->work_count++;
+    LeaveCriticalSection(cs);
+
+    WakeConditionVariable(cv);
     return 0;
 }
 
 void challenger_blocking_pool_shutdown(ChallengerBlockingPool* pool) {
     if (!pool || pool->shutdown) return;
+    CRITICAL_SECTION* cs = (CRITICAL_SECTION*)pool->work_mutex;
+    CONDITION_VARIABLE* cv = (CONDITION_VARIABLE*)pool->work_cond;
+
+    EnterCriticalSection(cs);
     pool->shutdown = 1;
-    // Threads will exit naturally when they see shutdown
+    LeaveCriticalSection(cs);
+    WakeAllConditionVariable(cv);
+
+    for (int i = 0; i < pool->thread_count; i++) {
+        if (pool->threads[i]) {
+            WaitForSingleObject((HANDLE)pool->threads[i], 5000);
+            CloseHandle((HANDLE)pool->threads[i]);
+            pool->threads[i] = NULL;
+        }
+    }
 }
+
+#else
+// POSIX blocking pool
+#include <pthread.h>
+#include <unistd.h>
+
+typedef struct {
+    ChallengerBlockingPool* pool;
+} BlockingWorkerArg;
+
+static void* blocking_worker(void* arg) {
+    BlockingWorkerArg* warg = (BlockingWorkerArg*)arg;
+    ChallengerBlockingPool* pool = warg->pool;
+    pthread_mutex_t* mtx = (pthread_mutex_t*)pool->work_mutex;
+    pthread_cond_t* cv = (pthread_cond_t*)pool->work_cond;
+    free(warg);
+
+    while (1) {
+        pthread_mutex_lock(mtx);
+        while (pool->work_count == 0 && !pool->shutdown) {
+            pthread_cond_wait(cv, mtx);
+        }
+        if (pool->shutdown && pool->work_count == 0) {
+            pthread_mutex_unlock(mtx);
+            break;
+        }
+        // Dequeue work item
+        BlockingWorkItem item = pool->work_queue[pool->work_head];
+        pool->work_head = (pool->work_head + 1) % 4096;
+        pool->work_count--;
+        pthread_mutex_unlock(mtx);
+
+        // Execute the work
+        if (item.fn) {
+            void* (*fn)(void*) = (void* (*)(void*))item.fn;
+            fn(item.arg);
+        }
+
+        // Wake the associated task
+        if (item.task_id > 0 && g_challenger_executor) {
+            challenger_executor_wake_task(g_challenger_executor, item.task_id);
+        }
+    }
+    return NULL;
+}
+
+ChallengerBlockingPool* challenger_blocking_pool_new(int thread_count) {
+    ChallengerBlockingPool* pool = (ChallengerBlockingPool*)calloc(1, sizeof(ChallengerBlockingPool));
+    if (!pool) return NULL;
+    pool->thread_count = thread_count > 0 ? thread_count : 4;
+    pool->shutdown = 0;
+    pool->work_head = 0;
+    pool->work_tail = 0;
+    pool->work_count = 0;
+
+    pthread_mutex_t* mtx = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
+    pthread_cond_t* cv = (pthread_cond_t*)malloc(sizeof(pthread_cond_t));
+    pthread_mutex_init(mtx, NULL);
+    pthread_cond_init(cv, NULL);
+    pool->work_mutex = mtx;
+    pool->work_cond = cv;
+
+    for (int i = 0; i < pool->thread_count; i++) {
+        BlockingWorkerArg* warg = (BlockingWorkerArg*)malloc(sizeof(BlockingWorkerArg));
+        warg->pool = pool;
+        pthread_t t;
+        pthread_create(&t, NULL, blocking_worker, warg);
+        pool->threads[i] = (void*)(intptr_t)t;
+    }
+    return pool;
+}
+
+void challenger_blocking_pool_free(ChallengerBlockingPool* pool) {
+    if (!pool) return;
+    challenger_blocking_pool_shutdown(pool);
+    if (pool->work_mutex) {
+        pthread_mutex_destroy((pthread_mutex_t*)pool->work_mutex);
+        free(pool->work_mutex);
+    }
+    if (pool->work_cond) {
+        pthread_cond_destroy((pthread_cond_t*)pool->work_cond);
+        free(pool->work_cond);
+    }
+    free(pool);
+}
+
+int challenger_blocking_submit(ChallengerBlockingPool* pool, void* (*fn)(void*), void* arg, uint64_t task_id) {
+    if (!pool || pool->shutdown) return -1;
+    pthread_mutex_t* mtx = (pthread_mutex_t*)pool->work_mutex;
+    pthread_cond_t* cv = (pthread_cond_t*)pool->work_cond;
+
+    pthread_mutex_lock(mtx);
+    if (pool->work_count >= 4096) {
+        pthread_mutex_unlock(mtx);
+        return -1; // queue full
+    }
+    pool->work_queue[pool->work_tail].fn = (void*)fn;
+    pool->work_queue[pool->work_tail].arg = arg;
+    pool->work_queue[pool->work_tail].task_id = task_id;
+    pool->work_tail = (pool->work_tail + 1) % 4096;
+    pool->work_count++;
+    pthread_mutex_unlock(mtx);
+
+    pthread_cond_signal(cv);
+    return 0;
+}
+
+void challenger_blocking_pool_shutdown(ChallengerBlockingPool* pool) {
+    if (!pool || pool->shutdown) return;
+    pthread_mutex_t* mtx = (pthread_mutex_t*)pool->work_mutex;
+    pthread_cond_t* cv = (pthread_cond_t*)pool->work_cond;
+
+    pthread_mutex_lock(mtx);
+    pool->shutdown = 1;
+    pthread_mutex_unlock(mtx);
+    pthread_cond_broadcast(cv);
+
+    for (int i = 0; i < pool->thread_count; i++) {
+        if (pool->threads[i]) {
+            pthread_t t = (pthread_t)(intptr_t)pool->threads[i];
+            pthread_join(t, NULL);
+            pool->threads[i] = NULL;
+        }
+    }
+}
+
+#endif
 
 // ============================================================
 // Challenger Async Runtime — Async Filesystem (Phase 15)
@@ -6400,7 +6660,8 @@ static void* fs_read_work(void* arg) {
 int64_t challenger_fs_read_async(ChallengerBlockingPool* pool, const char* path) {
     FsWork* w = (FsWork*)calloc(1, sizeof(FsWork));
     w->path = strdup(path);
-    challenger_blocking_submit(pool, fs_read_work, w, 0);
+    uint64_t task_id = g_challenger_executor ? g_challenger_executor->current_task_id : 0;
+    challenger_blocking_submit(pool, fs_read_work, w, task_id);
     return 0;
 }
 
