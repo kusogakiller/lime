@@ -4085,13 +4085,21 @@ impl<'a> Cg<'a> {
                 let tmp = self.fresh_temp();
                 if func == "list_clone" {
                     // void runtime_list_clone(LimeList* dest, LimeList* src)
+                    let src_slot = self.fresh_temp();
                     self.out
                         .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
+                    self.out
+                        .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                    self.out.push_str(&format!(
+                        "  store %LimeList {}, ptr {}, align 8\n",
+                        self.bare_value(&list_v),
+                        src_slot
+                    ));
                     self.out.push_str(&format!(
                         "  call void @{}(ptr {}, ptr {})\n",
                         rt,
                         slot,
-                        self.bare_value(&list_v)
+                        src_slot
                     ));
                     self.out.push_str(&format!(
                         "  {} = load %LimeList, ptr {}, align 8\n",
@@ -4099,25 +4107,37 @@ impl<'a> Cg<'a> {
                     ));
                 } else {
                     // void runtime_list_clear/sort(LimeList* list)
+                    let src_slot = self.fresh_temp();
+                    self.out
+                        .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                    self.out.push_str(&format!(
+                        "  store %LimeList {}, ptr {}, align 8\n",
+                        self.bare_value(&list_v),
+                        src_slot
+                    ));
                     self.out.push_str(&format!(
                         "  call void @{}(ptr {})\n",
                         rt,
-                        self.bare_value(&list_v)
+                        src_slot
                     ));
                     self.out.push_str(&format!(
                         "  {} = load %LimeList, ptr {}, align 8\n",
-                        tmp,
-                        self.bare_value(&list_v)
+                        tmp, src_slot
                     ));
                 }
                 Ok(Some((tmp, list_t)))
             }
             "list_empty" => {
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
                 self.out
-                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out
-                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- map builtins (Phase C-1.2) ----
@@ -4242,22 +4262,60 @@ impl<'a> Cg<'a> {
                 Ok(Some((tmp, map_t)))
             }
             // ---- set builtins (Phase C-1.2) ----
+            "set_empty" => {
+                let slot = self.fresh_temp();
+                let tmp = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeSet, align 8\n", slot));
+                self.out
+                    .push_str(&format!("  call void @runtime_set_empty(ptr {})\n", slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeSet, ptr {}, align 8\n",
+                    tmp, slot
+                ));
+                Ok(Some((tmp, Type::List(Box::new(Type::Int)))))
+            }
             "set_len" | "set_size" => {
                 let (set_v, _) = self.codegen_expr(&args[0])?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeSet, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeSet {}, ptr {}, align 8\n",
+                    self.bare_value(&set_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeSet, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i64 @runtime_set_len({})\n",
-                    tmp,
-                    self.bare_value(&set_v)
+                    "  {} = call i64 @runtime_set_len(%LimeSet {})\n",
+                    tmp, loaded
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "set_is_empty" => {
                 let (set_v, _) = self.codegen_expr(&args[0])?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeSet, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeSet {}, ptr {}, align 8\n",
+                    self.bare_value(&set_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeSet, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let (v, t) = call_bool(
                     self,
                     "runtime_set_is_empty",
-                    &[self.bare_value(&set_v).to_string()],
+                    &[format!("%LimeSet {}", loaded)],
                 );
                 Ok(Some((v, t)))
             }
@@ -4293,10 +4351,23 @@ impl<'a> Cg<'a> {
                 let (set_v, _) = self.codegen_expr(&args[0])?;
                 let (elem_v, elem_t) = self.codegen_expr(&args[1])?;
                 let elem = self.convert_to_i64(&elem_v, &elem_t)?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeSet, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeSet {}, ptr {}, align 8\n",
+                    self.bare_value(&set_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeSet, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let (v, t) = call_bool(
                     self,
                     "runtime_set_contains",
-                    &[self.bare_value(&set_v).to_string(), elem],
+                    &[format!("%LimeSet {}", loaded), elem],
                 );
                 Ok(Some((v, t)))
             }
@@ -4358,31 +4429,69 @@ impl<'a> Cg<'a> {
                     "queue_back" => "runtime_queue_back",
                     _ => unreachable!(),
                 };
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i64 @{}({})\n",
+                    "  {} = call i64 @{}(%LimeList {})\n",
                     tmp,
                     rt,
-                    self.bare_value(&list_v)
+                    loaded
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "queue_len" | "queue_size" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i64 @runtime_queue_len({})\n",
-                    tmp,
-                    self.bare_value(&list_v)
+                    "  {} = call i64 @runtime_queue_len(%LimeList {})\n",
+                    tmp, loaded
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "queue_is_empty" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let (v, t) = call_bool(
                     self,
                     "runtime_queue_is_empty",
-                    &[self.bare_value(&list_v).to_string()],
+                    &[format!("%LimeList {}", loaded)],
                 );
                 Ok(Some((v, t)))
             }
@@ -4408,11 +4517,16 @@ impl<'a> Cg<'a> {
                 Ok(Some((tmp, list_t)))
             }
             "queue_empty" => {
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
                 self.out
-                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out
-                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- stack builtins (Phase C-1.2) ----
@@ -4446,31 +4560,69 @@ impl<'a> Cg<'a> {
                 } else {
                     "runtime_stack_peek"
                 };
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i64 @{}({})\n",
+                    "  {} = call i64 @{}(%LimeList {})\n",
                     tmp,
                     rt,
-                    self.bare_value(&list_v)
+                    loaded
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "stack_len" | "stack_size" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i64 @runtime_stack_len({})\n",
-                    tmp,
-                    self.bare_value(&list_v)
+                    "  {} = call i64 @runtime_stack_len(%LimeList {})\n",
+                    tmp, loaded
                 ));
                 Ok(Some((tmp, Type::Int)))
             }
             "stack_is_empty" => {
                 let (list_v, _) = self.codegen_expr(&args[0])?;
+                let src_slot = self.fresh_temp();
+                let loaded = self.fresh_temp();
+                self.out
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", src_slot));
+                self.out.push_str(&format!(
+                    "  store %LimeList {}, ptr {}, align 8\n",
+                    self.bare_value(&list_v),
+                    src_slot
+                ));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, src_slot
+                ));
                 let (v, t) = call_bool(
                     self,
                     "runtime_stack_is_empty",
-                    &[self.bare_value(&list_v).to_string()],
+                    &[format!("%LimeList {}", loaded)],
                 );
                 Ok(Some((v, t)))
             }
@@ -4496,11 +4648,16 @@ impl<'a> Cg<'a> {
                 Ok(Some((tmp, list_t)))
             }
             "stack_empty" => {
+                let slot = self.fresh_temp();
                 let tmp = self.fresh_temp();
                 self.out
-                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", tmp));
+                    .push_str(&format!("  {} = alloca %LimeList, align 8\n", slot));
                 self.out
-                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", tmp));
+                    .push_str(&format!("  call void @runtime_list_empty(ptr {})\n", slot));
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    tmp, slot
+                ));
                 Ok(Some((tmp, Type::List(Box::new(Type::Unknown)))))
             }
             // ---- JSON builtins ----
@@ -4508,7 +4665,7 @@ impl<'a> Cg<'a> {
                 let a = str_arg(self, &args[0])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_json_parse(i8* {})\n",
+                    "  {} = call i8* @runtime_json_parse({})\n",
                     tmp, a
                 ));
                 Ok(Some((tmp, Type::Json)))
@@ -4517,7 +4674,7 @@ impl<'a> Cg<'a> {
                 let a = arg(self, &args[0], &Type::Json)?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_json_stringify(i8* {})\n",
+                    "  {} = call i8* @runtime_json_stringify({})\n",
                     tmp, a
                 ));
                 Ok(Some((tmp, Type::String)))
@@ -4527,7 +4684,7 @@ impl<'a> Cg<'a> {
                 let k = str_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_json_get(i8* {}, i8* {})\n",
+                    "  {} = call i8* @runtime_json_get({}, {})\n",
                     tmp, j, k
                 ));
                 // Wrap as Option(Json): check if result is null
@@ -4579,7 +4736,7 @@ impl<'a> Cg<'a> {
                 let i = i64_arg(self, &args[1])?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_json_at(i8* {}, i64 {})\n",
+                    "  {} = call i8* @runtime_json_at({}, i64 {})\n",
                     tmp, j, i
                 ));
                 Ok(Some((tmp, Type::Json)))
@@ -4588,7 +4745,7 @@ impl<'a> Cg<'a> {
                 let j = arg(self, &args[0], &Type::Json)?;
                 let tmp = self.fresh_temp();
                 self.out.push_str(&format!(
-                    "  {} = call i8* @runtime_json_as_string(i8* {})\n",
+                    "  {} = call i8* @runtime_json_as_string({})\n",
                     tmp, j
                 ));
                 Ok(Some((tmp, Type::String)))
@@ -4641,7 +4798,7 @@ impl<'a> Cg<'a> {
             }
             // ===== Option builtins =====
             "option_some" => {
-                let v = any_arg(self, &args[0])?;
+                let (v, v_t) = self.codegen_expr(&args[0])?;
                 let slot = self.fresh_temp();
                 self.out
                     .push_str(&format!("  {} = alloca %Option, align 8\n", slot));
@@ -4657,7 +4814,7 @@ impl<'a> Cg<'a> {
                     "  {} = getelementptr inbounds %Option, ptr {}, i64 0, i32 1, i32 0\n",
                     payload_gep, slot
                 ));
-                let converted = self.convert_to_i64(&v, &Type::Unknown)?;
+                let converted = self.convert_to_i64(&v, &v_t)?;
                 self.out.push_str(&format!(
                     "  store i64 {}, ptr {}, align 8\n",
                     converted, payload_gep
@@ -4977,7 +5134,7 @@ impl<'a> Cg<'a> {
             }
             // ===== Result builtins =====
             "result_success" => {
-                let v = any_arg(self, &args[0])?;
+                let (v, v_t) = self.codegen_expr(&args[0])?;
                 let slot = self.fresh_temp();
                 self.out
                     .push_str(&format!("  {} = alloca %Result, align 8\n", slot));
@@ -4993,7 +5150,7 @@ impl<'a> Cg<'a> {
                     "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n",
                     payload_gep, slot
                 ));
-                let converted = self.convert_to_i64(&v, &Type::Unknown)?;
+                let converted = self.convert_to_i64(&v, &v_t)?;
                 self.out.push_str(&format!(
                     "  store i64 {}, ptr {}, align 8\n",
                     converted, payload_gep
@@ -5009,7 +5166,7 @@ impl<'a> Cg<'a> {
                 )))
             }
             "result_error" => {
-                let v = any_arg(self, &args[0])?;
+                let (v, v_t) = self.codegen_expr(&args[0])?;
                 let slot = self.fresh_temp();
                 self.out
                     .push_str(&format!("  {} = alloca %Result, align 8\n", slot));
@@ -5025,7 +5182,7 @@ impl<'a> Cg<'a> {
                     "  {} = getelementptr inbounds %Result, ptr {}, i64 0, i32 1, i32 0\n",
                     payload_gep, slot
                 ));
-                let converted = self.convert_to_i64(&v, &Type::Unknown)?;
+                let converted = self.convert_to_i64(&v, &v_t)?;
                 self.out.push_str(&format!(
                     "  store i64 {}, ptr {}, align 8\n",
                     converted, payload_gep
@@ -5314,8 +5471,10 @@ impl<'a> Cg<'a> {
             }
             // ===== Path operations (Phase C-1.8) =====
             "path_join" => {
-                let a = str_arg(self, &args[0])?;
-                let b = str_arg(self, &args[1])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let raw_b = str_arg(self, &args[1])?;
+                let a = self.bare_value(&raw_a).to_string();
+                let b = self.bare_value(&raw_b).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_join(i8* {}, i8* {})\n",
@@ -5324,7 +5483,8 @@ impl<'a> Cg<'a> {
                 Ok(Some((call, Type::String)))
             }
             "path_basename" => {
-                let a = str_arg(self, &args[0])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let a = self.bare_value(&raw_a).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_basename(i8* {})\n",
@@ -5333,7 +5493,8 @@ impl<'a> Cg<'a> {
                 Ok(Some((call, Type::String)))
             }
             "path_dirname" => {
-                let a = str_arg(self, &args[0])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let a = self.bare_value(&raw_a).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_dirname(i8* {})\n",
@@ -5342,7 +5503,8 @@ impl<'a> Cg<'a> {
                 Ok(Some((call, Type::String)))
             }
             "path_filename" => {
-                let a = str_arg(self, &args[0])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let a = self.bare_value(&raw_a).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_filename(i8* {})\n",
@@ -5351,7 +5513,8 @@ impl<'a> Cg<'a> {
                 Ok(Some((call, Type::String)))
             }
             "path_extension" => {
-                let a = str_arg(self, &args[0])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let a = self.bare_value(&raw_a).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_extension(i8* {})\n",
@@ -5361,15 +5524,12 @@ impl<'a> Cg<'a> {
             }
             "path_is_absolute" => {
                 let a = str_arg(self, &args[0])?;
-                let call = self.fresh_temp();
-                self.out.push_str(&format!(
-                    "  {} = call i32 @runtime_path_is_absolute(i8* {})\n",
-                    call, a
-                ));
-                Ok(Some((call, Type::Bool)))
+                let (v, t) = call_bool(self, "runtime_path_is_absolute", &[a]);
+                Ok(Some((v, t)))
             }
             "path_normalize" => {
-                let a = str_arg(self, &args[0])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let a = self.bare_value(&raw_a).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_normalize(i8* {})\n",
@@ -5378,8 +5538,10 @@ impl<'a> Cg<'a> {
                 Ok(Some((call, Type::String)))
             }
             "path_equals" => {
-                let a = str_arg(self, &args[0])?;
-                let b = str_arg(self, &args[1])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let raw_b = str_arg(self, &args[1])?;
+                let a = self.bare_value(&raw_a).to_string();
+                let b = self.bare_value(&raw_b).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i32 @runtime_path_equals(i8* {}, i8* {})\n",
@@ -5388,7 +5550,8 @@ impl<'a> Cg<'a> {
                 Ok(Some((call, Type::Bool)))
             }
             "path_parent" => {
-                let a = str_arg(self, &args[0])?;
+                let raw_a = str_arg(self, &args[0])?;
+                let a = self.bare_value(&raw_a).to_string();
                 let call = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_path_parent(i8* {})\n",
@@ -5424,7 +5587,8 @@ impl<'a> Cg<'a> {
             }
             // ===== ENV operations (Phase C-1.9) =====
             "env_get" => {
-                let key = str_arg(self, &args[0])?;
+                let raw_key = str_arg(self, &args[0])?;
+                let key = self.bare_value(&raw_key).to_string();
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_env_get(i8* {})\n",
@@ -5568,8 +5732,10 @@ impl<'a> Cg<'a> {
                 Ok(Some((v, t)))
             }
             "regex_match" | "regex_find" => {
-                let pat = str_arg(self, &args[0])?;
-                let text = str_arg(self, &args[1])?;
+                let raw_pat = str_arg(self, &args[0])?;
+                let raw_text = str_arg(self, &args[1])?;
+                let pat = self.bare_value(&raw_pat).to_string();
+                let text = self.bare_value(&raw_text).to_string();
                 let ptr_val = self.fresh_temp();
                 self.out.push_str(&format!(
                     "  {} = call i8* @runtime_regex_find(i8* {}, i8* {})\n",
@@ -5645,20 +5811,35 @@ impl<'a> Cg<'a> {
             // ===== Process operations (Phase C-1.11) =====
             "process_spawn" => {
                 let cmd = str_arg(self, &args[0])?;
-                let arg_list = list_arg(self, &args[1])?;
-                let (v, t) = call_i64(self, "runtime_process_spawn", &[cmd, arg_list]);
+                let list_slot = list_arg(self, &args[1])?;
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, list_slot
+                ));
+                let (v, t) = call_i64(self, "runtime_process_spawn", &[cmd, format!("%LimeList {}", loaded)]);
                 Ok(Some((v, t)))
             }
             "process_run" => {
                 let cmd = str_arg(self, &args[0])?;
-                let arg_list = list_arg(self, &args[1])?;
-                let (v, t) = call_str(self, "runtime_process_run", &[cmd, arg_list]);
+                let list_slot = list_arg(self, &args[1])?;
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, list_slot
+                ));
+                let (v, t) = call_str(self, "runtime_process_run", &[cmd, format!("%LimeList {}", loaded)]);
                 Ok(Some((v, t)))
             }
             "process_output" => {
                 let cmd = str_arg(self, &args[0])?;
-                let arg_list = list_arg(self, &args[1])?;
-                let (v, t) = call_str(self, "runtime_process_output", &[cmd, arg_list]);
+                let list_slot = list_arg(self, &args[1])?;
+                let loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %LimeList, ptr {}, align 8\n",
+                    loaded, list_slot
+                ));
+                let (v, t) = call_str(self, "runtime_process_output", &[cmd, format!("%LimeList {}", loaded)]);
                 Ok(Some((v, t)))
             }
             "process_wait" => {

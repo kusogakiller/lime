@@ -1357,6 +1357,12 @@ static LimeSet set_grow(LimeSet set, int64_t min_cap) {
     return set;
 }
 
+void runtime_set_empty(LimeSet* out) {
+    out->data = NULL;
+    out->len = 0;
+    out->cap = 0;
+}
+
 int64_t runtime_set_len(LimeSet set) {
     return set.len;
 }

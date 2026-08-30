@@ -165,6 +165,7 @@ typedef struct {
     int64_t cap;  // capacity (number of elements)
 } LimeSet;
 
+void runtime_set_empty(LimeSet* out);
 int64_t runtime_set_len(LimeSet set);
 int runtime_set_is_empty(LimeSet set);
 LimeSet runtime_set_add(LimeSet set, int64_t elem);
