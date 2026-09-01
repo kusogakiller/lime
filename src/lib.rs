@@ -6890,7 +6890,7 @@ fn resolve_operators_stmt(
 
 // 鬮ｮ蜿･隱ｿ陜ｮ・ｩ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ髫ｲ・､隲幢ｽｶ繝ｻ・ｽ繝ｻ・ｭ髯ｷ螂・ｽ｣・ｰ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｮ謇具ｽｶ・｣繝ｻ・ｽ繝ｻ・ｺ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髮九・竏槭・・ｽ遶擾ｽｫ繝ｻ・ｸ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｮ・ｴ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬯ｯ・ｩ繝ｻ・･髣包ｽｳ隶灘･・ｽｽ・｢陝ｷ繝ｻ・ｽ・ｬ隴会ｽｦ繝ｻ・ｽ繝ｻ・ｨ鬯ｮ・ｫ繝ｻ・ｲ髯ｷ・ｴ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻnv 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ let/鬮ｯ貅ｷ・､・ｧ繝ｻ・｢鬮ｮ・｣繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ諛ｷ蟋薙・・ｹ隴趣ｽ｢繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ驛｢譎｢・ｽ・ｻ髯晢ｽｲ繝ｻ・ｨ繝ｻ縺､ﾂ驛｢譎｢・ｽ・ｻ
 // check_expr 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ full env 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮｣蛹・ｽｽ・ｳ髯晢｣ｰ髮懶ｽ｣繝ｻ・ｽ繝ｻ・ｦ驕ｶ荳橸｣ｰ莉ｰﾂ驛｢・ｧ髢ｧ・ｲ繝ｻ・ｶ繝ｻ・ｾ鬩幢ｽ｢繝ｻ・ｧ鬯ｮ・ｮ郢晢ｽｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ髫ｰ逍ｲ・ｻ繧托ｽｽ・ｽ繝ｻ・ｾ髯ｷ莨夲ｽｽ・ｱ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩幢ｽ｢繝ｻ・ｧ髯滓坩・ｯ莨夲ｽｽ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ繝ｻ・ｷ髯具ｽｹ繝ｻ・ｻ驛｢譎｢・ｽ・ｻ Unknown 鬩幢ｽ｢繝ｻ・ｧ髯橸ｽｳ陞滂ｽｲ繝ｻ・ｽ繝ｻ・ｿ髫ｴ竏ｵ閻ｸ繝ｻ・ｿ繝ｻ・ｽE鬩搾ｽｵ繝ｻ・ｲ驛｢譎｢・ｽ・ｻ
-fn infer_type(
+pub(crate) fn infer_type(
     e: &Expr,
     env: &HashMap<String, Type>,
     defs: &Defs,
@@ -6961,6 +6961,46 @@ fn infer_type(
                 "fs_write_lines" => Ok(Type::Bool),
                 "time_now" => Ok(Type::Float),
                 "time_sleep" => Ok(Type::Bool),
+                "sleep" => Ok(Type::Future(Box::new(Type::Unit))),
+                "spawn" => Ok(Type::Int),
+                "cancel" => Ok(Type::Unit),
+                "channel_new" => Ok(Type::Int),
+                "channel_send" => Ok(Type::Future(Box::new(Type::Int))),
+                "channel_receive" => Ok(Type::Future(Box::new(Type::Int))),
+                "channel_close" => Ok(Type::Unit),
+                "notify_new" => Ok(Type::Int),
+                "notify_wait" => Ok(Type::Future(Box::new(Type::Int))),
+                "notify_one" => Ok(Type::Unit),
+                "notify_all" => Ok(Type::Unit),
+                "mutex_new" => Ok(Type::Int),
+                "mutex_lock" => Ok(Type::Future(Box::new(Type::Int))),
+                "mutex_unlock" => Ok(Type::Unit),
+                "semaphore_new" => Ok(Type::Int),
+                "semaphore_acquire" => Ok(Type::Future(Box::new(Type::Int))),
+                "semaphore_release" => Ok(Type::Unit),
+                "rwlock_new" => Ok(Type::Int),
+                "read_lock" => Ok(Type::Future(Box::new(Type::Int))),
+                "read_unlock" => Ok(Type::Unit),
+                "write_lock" => Ok(Type::Future(Box::new(Type::Int))),
+                "write_unlock" => Ok(Type::Unit),
+                "yield_now" => Ok(Type::Future(Box::new(Type::Unit))),
+                "delayed_ready" => Ok(Type::Future(Box::new(Type::Int))),
+                "delayed_ready_multi" => Ok(Type::Future(Box::new(Type::Int))),
+                "tcp_socket" => Ok(Type::Int),
+                "tcp_set_nonblocking" => Ok(Type::Int),
+                "tcp_bind" => Ok(Type::Int),
+                "tcp_listen" => Ok(Type::Int),
+                "tcp_accept" => Ok(Type::Future(Box::new(Type::Int))),
+                "tcp_connect" => Ok(Type::Int),
+                "tcp_read" => Ok(Type::Int),
+                "tcp_write" => Ok(Type::Int),
+                "tcp_close" => Ok(Type::Int),
+                "tcp_connect_async" => Ok(Type::Future(Box::new(Type::Int))),
+                "tcp_accept_async" => Ok(Type::Future(Box::new(Type::Int))),
+                "tcp_read_async" => Ok(Type::Future(Box::new(Type::Int))),
+                "tcp_write_async" => Ok(Type::Future(Box::new(Type::Int))),
+                "tcp_get_last_read_len" => Ok(Type::Int),
+                "tcp_get_last_read_buf" => Ok(Type::String),
                 "split" => Ok(Type::List(Box::new(Type::String))),
                 "trim" | "slice" | "to_upper" | "to_lower" | "replace" | "repeat" | "contains"
                 | "starts_with" | "ends_with" | "byte_len" => {
@@ -8477,7 +8517,13 @@ fn infer_type(
             }
         }
         Expr::Range { .. } => Ok(Type::List(Box::new(Type::Int))),
-        Expr::Await(inner) => infer_type(inner, env, defs, constraints),
+        Expr::Await(inner) => {
+            let inner_ty = infer_type(inner, env, defs, constraints)?;
+            match inner_ty {
+                Type::Future(inner_type) => Ok(*inner_type),
+                _ => Ok(inner_ty),
+            }
+        }
         Expr::Tuple(elems) => Ok(Type::Tuple(
             elems
                 .iter()
@@ -8919,6 +8965,285 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         check_expr(a, env, defs)?;
                     }
                     Ok(Type::Unit)
+                }
+                "spawn" => {
+                    if args.len() != 1 {
+                        return Err("Type error: spawn() takes exactly 1 argument (future)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "cancel" => {
+                    if args.len() != 1 {
+                        return Err("Type error: cancel() takes exactly 1 argument (task_id)".to_string());
+                    }
+                    let arg_ty = check_expr(&args[0], env, defs)?;
+                    match arg_ty {
+                        Type::Int => {}
+                        _ => return Err(format!("Type error: cancel() expects Int, got {:?}", arg_ty)),
+                    }
+                    Ok(Type::Unit)
+                }
+                "channel_new" => {
+                    if args.len() != 1 {
+                        return Err("Type error: channel_new() takes exactly 1 argument (capacity)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "channel_send" => {
+                    if args.len() != 2 {
+                        return Err("Type error: channel_send() takes exactly 2 arguments (channel, value)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "channel_receive" => {
+                    if args.len() != 1 {
+                        return Err("Type error: channel_receive() takes exactly 1 argument (channel)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "channel_close" => {
+                    if args.len() != 1 {
+                        return Err("Type error: channel_close() takes exactly 1 argument (channel)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "notify_new" => {
+                    if !args.is_empty() {
+                        return Err("Type error: notify_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Int)
+                }
+                "notify_wait" => {
+                    if args.len() != 1 {
+                        return Err("Type error: notify_wait() takes exactly 1 argument (notify)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "notify_one" => {
+                    if args.len() != 1 {
+                        return Err("Type error: notify_one() takes exactly 1 argument (notify)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "notify_all" => {
+                    if args.len() != 1 {
+                        return Err("Type error: notify_all() takes exactly 1 argument (notify)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "mutex_new" => {
+                    if !args.is_empty() {
+                        return Err("Type error: mutex_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Int)
+                }
+                "mutex_lock" => {
+                    if args.len() != 1 {
+                        return Err("Type error: mutex_lock() takes exactly 1 argument (mutex)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "mutex_unlock" => {
+                    if args.len() != 1 {
+                        return Err("Type error: mutex_unlock() takes exactly 1 argument (mutex)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "semaphore_new" => {
+                    if args.len() != 1 {
+                        return Err("Type error: semaphore_new() takes exactly 1 argument (max_count)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "semaphore_acquire" => {
+                    if args.len() != 1 {
+                        return Err("Type error: semaphore_acquire() takes exactly 1 argument (semaphore)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "semaphore_release" => {
+                    if args.len() != 1 {
+                        return Err("Type error: semaphore_release() takes exactly 1 argument (semaphore)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "rwlock_new" => {
+                    if !args.is_empty() {
+                        return Err("Type error: rwlock_new() takes no arguments".to_string());
+                    }
+                    Ok(Type::Int)
+                }
+                "read_lock" => {
+                    if args.len() != 1 {
+                        return Err("Type error: read_lock() takes exactly 1 argument (rwlock)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "read_unlock" => {
+                    if args.len() != 1 {
+                        return Err("Type error: read_unlock() takes exactly 1 argument (rwlock)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "write_lock" => {
+                    if args.len() != 1 {
+                        return Err("Type error: write_lock() takes exactly 1 argument (rwlock)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "write_unlock" => {
+                    if args.len() != 1 {
+                        return Err("Type error: write_unlock() takes exactly 1 argument (rwlock)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Unit)
+                }
+                "yield_now" => {
+                    if !args.is_empty() {
+                        return Err("Type error: yield_now() takes no arguments".to_string());
+                    }
+                    Ok(Type::Future(Box::new(Type::Unit)))
+                }
+                "sleep" => {
+                    if args.len() != 1 {
+                        return Err("Type error: sleep() takes exactly 1 argument (int ms)".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Unit)))
+                }
+                "delayed_ready" => {
+                    if args.len() != 1 {
+                        return Err("Type error: delayed_ready() takes exactly 1 argument".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "delayed_ready_multi" => {
+                    if args.len() != 2 {
+                        return Err("Type error: delayed_ready_multi() takes exactly 2 arguments".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    check_expr(&args[1], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "tcp_socket" => {
+                    if !args.is_empty() {
+                        return Err("Type error: tcp_socket() takes no arguments".to_string());
+                    }
+                    Ok(Type::Int)
+                }
+                "tcp_set_nonblocking" => {
+                    if args.len() != 1 {
+                        return Err("Type error: tcp_set_nonblocking() takes exactly 1 argument".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "tcp_bind" => {
+                    if args.len() != 3 {
+                        return Err("Type error: tcp_bind() takes exactly 3 arguments (fd, host, port)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Int)
+                }
+                "tcp_listen" => {
+                    if args.len() != 2 {
+                        return Err("Type error: tcp_listen() takes exactly 2 arguments (fd, backlog)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Int)
+                }
+                "tcp_accept" => {
+                    if args.len() != 1 {
+                        return Err("Type error: tcp_accept() takes exactly 1 argument".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "tcp_connect" => {
+                    if args.len() != 3 {
+                        return Err("Type error: tcp_connect() takes exactly 3 arguments (fd, host, port)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Int)
+                }
+                "tcp_read" => {
+                    if args.len() != 3 {
+                        return Err("Type error: tcp_read() takes exactly 3 arguments (fd, buf, len)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Int)
+                }
+                "tcp_write" => {
+                    if args.len() != 3 {
+                        return Err("Type error: tcp_write() takes exactly 3 arguments (fd, buf, len)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Int)
+                }
+                "tcp_close" => {
+                    if args.len() != 1 {
+                        return Err("Type error: tcp_close() takes exactly 1 argument".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Int)
+                }
+                "tcp_connect_async" => {
+                    if args.len() != 3 {
+                        return Err("Type error: tcp_connect_async() takes exactly 3 arguments (fd, host, port)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "tcp_accept_async" => {
+                    if args.len() != 1 {
+                        return Err("Type error: tcp_accept_async() takes exactly 1 argument".to_string());
+                    }
+                    check_expr(&args[0], env, defs)?;
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "tcp_read_async" => {
+                    if args.len() != 2 {
+                        return Err("Type error: tcp_read_async() takes exactly 2 arguments (fd, max_len)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "tcp_write_async" => {
+                    if args.len() != 3 {
+                        return Err("Type error: tcp_write_async() takes exactly 3 arguments (fd, buf, len)".to_string());
+                    }
+                    for a in args { check_expr(a, env, defs)?; }
+                    Ok(Type::Future(Box::new(Type::Int)))
+                }
+                "tcp_get_last_read_len" => {
+                    if !args.is_empty() {
+                        return Err("Type error: tcp_get_last_read_len() takes no arguments".to_string());
+                    }
+                    Ok(Type::Int)
+                }
+                "tcp_get_last_read_buf" => {
+                    if !args.is_empty() {
+                        return Err("Type error: tcp_get_last_read_buf() takes no arguments".to_string());
+                    }
+                    Ok(Type::String)
                 }
                 "panic" => {
                     if args.len() != 1 {
@@ -10952,16 +11277,33 @@ fn check_expr(expr: &Expr, env: &TypeEnv, defs: &Defs) -> Result<Type, String> {
                         ));
                     }
                     None => {
-                        return Err(format!(
-                            "Type error: await target '{}' is not a known function",
-                            func
-                        ));
+                        if is_runtime_builtin(func) {
+                            let empty_env: HashMap<String, Type> = HashMap::new();
+                            let empty_constraints: HashMap<String, Vec<String>> = HashMap::new();
+                            let rt = infer_type(&inner, &empty_env, defs, &empty_constraints)?;
+                            match rt {
+                                Type::Future(inner_type) => Ok(*inner_type),
+                                _ => return Err(format!(
+                                    "Type error: await can only be applied to a Future, but '{}' returns {}",
+                                    func, type_to_string(&rt)
+                                )),
+                            }
+                        } else {
+                            return Err(format!(
+                                "Type error: await target '{}' is not a known function",
+                                func
+                            ));
+                        }
                     }
                 }
             } else {
-                return Err(
-                    "Type error: await can only be applied to a lime function call".to_string(),
-                );
+                let inner_type = check_expr(&inner, env, defs)?;
+                match inner_type {
+                    Type::Future(inner_type) => Ok(*inner_type),
+                    _ => return Err(
+                        "Type error: await can only be applied to a Future value".to_string(),
+                    ),
+                }
             }
         }
     }
@@ -13927,6 +14269,7 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "repeat"
             | "time_now"
             | "time_sleep"
+            | "sleep"
             | "read_file"
             | "write_file"
             | "append_file"
@@ -14187,6 +14530,45 @@ fn is_runtime_builtin(name: &str) -> bool {
             | "requests_redirect_history_list"
             | "requests_redirect_history_free"
             | "requests_response_redirect_history"
+            | "spawn"
+            | "cancel"
+            | "channel_new"
+            | "channel_send"
+            | "channel_receive"
+            | "channel_close"
+            | "notify_new"
+            | "notify_wait"
+            | "notify_one"
+            | "notify_all"
+            | "mutex_new"
+            | "mutex_lock"
+            | "mutex_unlock"
+            | "semaphore_new"
+            | "semaphore_acquire"
+            | "semaphore_release"
+            | "rwlock_new"
+            | "read_lock"
+            | "read_unlock"
+            | "write_lock"
+            | "write_unlock"
+            | "yield_now"
+            | "delayed_ready"
+            | "delayed_ready_multi"
+            | "tcp_socket"
+            | "tcp_set_nonblocking"
+            | "tcp_bind"
+            | "tcp_listen"
+            | "tcp_accept"
+            | "tcp_connect"
+            | "tcp_read"
+            | "tcp_write"
+            | "tcp_close"
+            | "tcp_connect_async"
+            | "tcp_accept_async"
+            | "tcp_read_async"
+            | "tcp_write_async"
+            | "tcp_get_last_read_len"
+            | "tcp_get_last_read_buf"
     )
 }
 
@@ -18478,6 +18860,136 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                         Err("time_sleep() expects a float (seconds)".to_string())
                     }
                 }
+                "spawn" => {
+                    // spawn() is an async executor operation; in the interpreter
+                    // we just evaluate the argument (the future) and discard it.
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "cancel" => {
+                    // cancel() is an async executor operation; in the interpreter
+                    // it's a no-op.
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "channel_new" => {
+                    // In interpreter: create a simple in-memory channel (no-op for now)
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "channel_send" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    let _ = eval_expr(&args[1], env, defs)?;
+                    Ok(Value::Int(1))
+                }
+                "channel_receive" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "channel_close" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "notify_new" => Ok(Value::Int(0)),
+                "notify_wait" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "notify_one" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "notify_all" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "mutex_new" => Ok(Value::Int(0)),
+                "mutex_lock" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(1))
+                }
+                "mutex_unlock" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "semaphore_new" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "semaphore_acquire" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(1))
+                }
+                "semaphore_release" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "rwlock_new" => Ok(Value::Int(0)),
+                "read_lock" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(1))
+                }
+                "read_unlock" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "write_lock" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(1))
+                }
+                "write_unlock" => {
+                    let _ = eval_expr(&args[0], env, defs)?;
+                    Ok(Value::Int(0))
+                }
+                "yield_now" => {
+                    // yield_now() is an async executor operation; in the interpreter
+                    // it's a no-op.
+                    Ok(Value::Int(0))
+                }
+                "sleep" => {
+                    // sleep(ms) is an async timer operation; in the interpreter
+                    // we fall back to blocking sleep.
+                    let ms_val = eval_expr(&args[0], env, defs)?;
+                    let ms = match ms_val {
+                        Value::Int(n) => n,
+                        Value::Float(f) => f as i64,
+                        _ => return Err("sleep() expects an int (milliseconds)".to_string()),
+                    };
+                    if ms > 0 {
+                        std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+                    }
+                    Ok(Value::Int(0))
+                }
+                "delayed_ready" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    match v {
+                        Value::Int(n) => Ok(Value::Int(n)),
+                        _ => Err("delayed_ready() expects an int".to_string()),
+                    }
+                }
+                "delayed_ready_multi" => {
+                    let v = eval_expr(&args[0], env, defs)?;
+                    let _c = eval_expr(&args[1], env, defs)?;
+                    match v {
+                        Value::Int(n) => Ok(Value::Int(n)),
+                        _ => Err("delayed_ready_multi() expects (int, int)".to_string()),
+                    }
+                }
+                "tcp_socket" => Ok(Value::Int(0)),
+                "tcp_set_nonblocking" => Ok(Value::Int(0)),
+                "tcp_bind" => Ok(Value::Int(0)),
+                "tcp_listen" => Ok(Value::Int(0)),
+                "tcp_accept" => Ok(Value::Int(0)),
+                "tcp_connect" => Ok(Value::Int(0)),
+                "tcp_read" => Ok(Value::Int(0)),
+                "tcp_write" => Ok(Value::Int(0)),
+                "tcp_close" => Ok(Value::Int(0)),
+                "tcp_connect_async" => Ok(Value::Int(0)),
+                "tcp_accept_async" => Ok(Value::Int(0)),
+                "tcp_read_async" => Ok(Value::Int(0)),
+                "tcp_write_async" => Ok(Value::Int(0)),
+                "tcp_get_last_read_len" => Ok(Value::Int(0)),
+                "tcp_get_last_read_buf" => Ok(Value::String(String::new())),
                 // std.fs extensions (Phase 12 Step 1).
                 "fs_exists" => {
                     let p = eval_expr(&args[0], env, defs)?;
@@ -19355,10 +19867,7 @@ fn eval_expr(expr: &Expr, env: &mut HashMap<String, Value>, defs: &Defs) -> Resu
                     // force_run: true 鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬮ｯ・ｷ髣鯉ｽｨ繝ｻ・ｽ繝ｻ・ｷ鬯ｮ・ｮ髮懶ｽ｣繝ｻ・ｽ繝ｻ・｡鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ鬮ｯ・ｷ繝ｻ・ｻ鬮ｯ・ｷ繝ｻ・ｷ髣比ｼ夲ｽｽ・｣驕ｯ・ｶ繝ｻ・ｳ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽE郢晢ｽｻ繝ｻ・ｽ鬩搾ｽｵ繝ｻ・ｺ驛｢譎｢・ｽ・ｻ
                     call_function_impl(&func, args, defs, true)
                 }
-                other => Err(format!(
-                    "await can only be applied to a lime (async) function call, got {:?}",
-                    other
-                )),
+                other => Ok(other),
             }
         }
     }

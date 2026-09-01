@@ -1348,23 +1348,28 @@ fn emit_object_await_int_runs() {
     let ir = fs::read_to_string(&ll).unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
     assert!(
-        ir.contains("define i64 @add1 (i64 %p0)"),
-        "async fn add1 must be emitted with its real body\n--- ir ---\n{}",
+        ir.contains("define i8* @add1 (i64 %p0)"),
+        "async fn add1 must emit a Future wrapper returning i8*\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("add nuw nsw i64"),
-        "add1 body must contain the add instruction\n--- ir ---\n{}",
+        ir.contains("add1_poll"),
+        "async fn add1 must emit a poll function\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("call i64 @add1"),
-        "main must await add1 via a direct synchronous call\n--- ir ---\n{}",
+        ir.contains("add nuw nsw i64") || ir.contains("add nsw i64"),
+        "add1 poll must contain the add instruction\n--- ir ---\n{}",
         ir
     );
     assert!(
-        !ir.contains("define i64 @add1 (i64 %p0) {\n  ret i64 0\n}"),
-        "add1 must not be emitted as a zero stub\n--- ir ---\n{}",
+        ir.contains("call i8* @add1"),
+        "main must call add1 to get a Future\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("challenger_future_poll"),
+        "main must poll the Future via challenger_future_poll\n--- ir ---\n{}",
         ir
     );
     assert!(
@@ -1413,22 +1418,27 @@ fn emit_object_await_string_runs() {
     assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
     assert!(
         ir.contains("define i8* @greet (i8* %p0)"),
-        "async fn greet must be emitted with its real body\n--- ir ---\n{}",
+        "async fn greet must emit a Future wrapper\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("call i8* @runtime_str_concat"),
-        "greet body must contain the string concat call\n--- ir ---\n{}",
+        ir.contains("greet_poll"),
+        "async fn greet must emit a poll function\n--- ir ---\n{}",
+        ir
+    );
+    assert!(
+        ir.contains("call i8* @runtime_str_concat") || ir.contains("runtime_str_concat"),
+        "greet poll must contain the string concat call\n--- ir ---\n{}",
         ir
     );
     assert!(
         ir.contains("call i8* @greet"),
-        "main must await greet via a direct synchronous call\n--- ir ---\n{}",
+        "main must call greet to get a Future\n--- ir ---\n{}",
         ir
     );
     assert!(
-        !ir.contains("define i8* @greet (i8* %p0) {\n  ret i8* 0\n}"),
-        "greet must not be emitted as a zero stub\n--- ir ---\n{}",
+        ir.contains("challenger_future_poll"),
+        "main must poll the Future\n--- ir ---\n{}",
         ir
     );
     assert!(
@@ -1476,35 +1486,28 @@ fn emit_object_await_nested_runs() {
     let ir = fs::read_to_string(&ll).unwrap_or_default();
     assert!(!ir.is_empty(), "expected .ll output, got:\n{}", out);
     assert!(
-        ir.contains("define i64 @inner (i64 %p0)"),
-        "inner must be emitted with its real body\n--- ir ---\n{}",
+        ir.contains("inner_poll") || ir.contains("@inner_poll"),
+        "inner must emit a poll function\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("define i64 @outer (i64 %p0)"),
-        "outer must be emitted with its real body\n--- ir ---\n{}",
+        ir.contains("outer_poll") || ir.contains("@outer_poll"),
+        "outer must emit a poll function\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("mul nuw nsw i64"),
-        "inner body must contain the multiply instruction\n--- ir ---\n{}",
+        ir.contains("mul nuw nsw i64") || ir.contains("mul nsw i64"),
+        "inner poll must contain the multiply instruction\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("call i64 @inner"),
-        "outer must await inner via a direct call\n--- ir ---\n{}",
+        ir.contains("challenger_future_poll"),
+        "must use challenger_future_poll for await\n--- ir ---\n{}",
         ir
     );
     assert!(
-        ir.contains("call i64 @outer"),
-        "main must await outer via a direct call\n--- ir ---\n{}",
-        ir
-    );
-    assert!(
-        !ir.contains("define i64 @inner (i64 %p0) {\n  ret i64 0\n}")
-            && !ir.contains("define i64 @outer (i64 %p0) {\n  ret i64 0\n}")
-            && !ir.contains("define void @main_lime () {\n  ret void\n}"),
-        "no async-related function may be emitted as a stub\n--- ir ---\n{}",
+        ir.contains("@outer") && ir.contains("@inner"),
+        "both async functions must be present\n--- ir ---\n{}",
         ir
     );
 

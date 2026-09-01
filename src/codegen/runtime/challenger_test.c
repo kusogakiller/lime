@@ -1539,6 +1539,154 @@ static void test_realworld_tcp_echo(void) {
 }
 
 // ============================================================
+// P0-B: Async TCP Futures — Full E2E Validation
+// ============================================================
+
+static void test_p0b_tcp_connect_async(void) {
+    TEST("P0-B: TCP connect async (loopback)");
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    int server_fd = challenger_tcp_socket();
+    challenger_tcp_set_nonblocking(server_fd);
+    challenger_tcp_bind(server_fd, "127.0.0.1", 19950);
+    challenger_tcp_listen(server_fd, 5);
+
+    int client_fd = challenger_tcp_socket();
+    ChallengerFuture* fut = challenger_tcp_connect_async(client_fd, "127.0.0.1", 19950);
+
+    uint64_t task_id = challenger_executor_spawn(exec, fut);
+    ASSERT(task_id > 0, "spawn failed");
+    int rc = challenger_executor_run(exec);
+    ASSERT(rc == 0, "executor_run failed");
+
+    ASSERT(fut->completed, "future should be completed");
+    ASSERT(fut->output == 0, "connect should succeed on loopback");
+
+    challenger_tcp_close(client_fd);
+    challenger_tcp_close(server_fd);
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+static void test_p0b_tcp_accept_async(void) {
+    TEST("P0-B: TCP accept async");
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    int server_fd = challenger_tcp_socket();
+    challenger_tcp_set_nonblocking(server_fd);
+    challenger_tcp_bind(server_fd, "127.0.0.1", 19951);
+    challenger_tcp_listen(server_fd, 5);
+
+    int client_fd = challenger_tcp_socket();
+    challenger_tcp_connect(client_fd, "127.0.0.1", 19951);
+
+    ChallengerFuture* fut = challenger_tcp_accept_async(server_fd);
+    uint64_t task_id = challenger_executor_spawn(exec, fut);
+    ASSERT(task_id > 0, "spawn failed");
+    int rc = challenger_executor_run(exec);
+    ASSERT(rc == 0, "executor_run failed");
+
+    ASSERT(fut->completed, "future should be completed");
+    ASSERT(fut->output > 0, "accept should return valid fd");
+    int accepted_fd = (int)fut->output;
+
+    challenger_tcp_close(client_fd);
+    challenger_tcp_close(accepted_fd);
+    challenger_tcp_close(server_fd);
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+static void test_p0b_tcp_read_write_async(void) {
+    TEST("P0-B: TCP read/write async");
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    int server_fd = challenger_tcp_socket();
+    challenger_tcp_set_nonblocking(server_fd);
+    challenger_tcp_bind(server_fd, "127.0.0.1", 19952);
+    challenger_tcp_listen(server_fd, 5);
+
+    int client_fd = challenger_tcp_socket();
+    challenger_tcp_connect(client_fd, "127.0.0.1", 19952);
+    int accepted_fd = challenger_tcp_accept(server_fd);
+    ASSERT(accepted_fd > 0, "accept failed");
+
+    ChallengerFuture* write_fut = challenger_tcp_write_async(client_fd, "hello", 5);
+    challenger_executor_spawn(exec, write_fut);
+    challenger_executor_run(exec);
+    ASSERT(write_fut->completed, "write future should complete");
+    ASSERT(write_fut->output == 5, "should write 5 bytes");
+
+    ChallengerFuture* read_fut = challenger_tcp_read_async(accepted_fd, 100);
+    challenger_executor_spawn(exec, read_fut);
+    challenger_executor_run(exec);
+    ASSERT(read_fut->completed, "read future should complete");
+    ASSERT(read_fut->output == 5, "should read 5 bytes");
+
+    const char* data = challenger_tcp_get_last_read_buf();
+    ASSERT(memcmp(data, "hello", 5) == 0, "data should match");
+
+    challenger_tcp_close(client_fd);
+    challenger_tcp_close(accepted_fd);
+    challenger_tcp_close(server_fd);
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+static void test_p0b_tcp_full_roundtrip(void) {
+    TEST("P0-B: TCP full async roundtrip");
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    int server_fd = challenger_tcp_socket();
+    challenger_tcp_set_nonblocking(server_fd);
+    challenger_tcp_bind(server_fd, "127.0.0.1", 19953);
+    challenger_tcp_listen(server_fd, 5);
+
+    int client_fd = challenger_tcp_socket();
+    ChallengerFuture* connect_fut = challenger_tcp_connect_async(client_fd, "127.0.0.1", 19953);
+    challenger_executor_spawn(exec, connect_fut);
+    challenger_executor_run(exec);
+    ASSERT(connect_fut->completed, "connect should complete");
+    ASSERT(connect_fut->output == 0, "connect should succeed");
+
+    ChallengerFuture* accept_fut = challenger_tcp_accept_async(server_fd);
+    challenger_executor_spawn(exec, accept_fut);
+    challenger_executor_run(exec);
+    ASSERT(accept_fut->completed, "accept should complete");
+    int accepted_fd = (int)accept_fut->output;
+    ASSERT(accepted_fd > 0, "accepted fd should be valid");
+
+    ChallengerFuture* write_fut = challenger_tcp_write_async(client_fd, "P0B_PROOF", 9);
+    challenger_executor_spawn(exec, write_fut);
+    challenger_executor_run(exec);
+    ASSERT(write_fut->completed, "write should complete");
+    ASSERT(write_fut->output == 9, "should write 9 bytes");
+
+    ChallengerFuture* read_fut = challenger_tcp_read_async(accepted_fd, 100);
+    challenger_executor_spawn(exec, read_fut);
+    challenger_executor_run(exec);
+    ASSERT(read_fut->completed, "read should complete");
+    ASSERT(read_fut->output == 9, "should read 9 bytes");
+
+    const char* data = challenger_tcp_get_last_read_buf();
+    ASSERT(memcmp(data, "P0B_PROOF", 9) == 0, "data should match");
+
+    challenger_tcp_close(client_fd);
+    challenger_tcp_close(accepted_fd);
+    challenger_tcp_close(server_fd);
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// ============================================================
 // Real-World Validation: Timer + Executor
 // ============================================================
 
@@ -1632,6 +1780,306 @@ static void test_memory_timer_cycles(void) {
         challenger_set_global_executor(NULL);
         challenger_executor_free(exec);
     }
+    PASS();
+}
+
+// ============================================================
+// Phase 38: Real Pending/Resume
+// ============================================================
+
+// Test 1: Basic Pending → Wake → Resume
+// A future that returns Pending on 1st poll, Ready on 2nd poll.
+// The waker fires between polls, re-enqueueing the task.
+
+typedef struct {
+    int poll_count;
+} PendingResumeState;
+
+static Poll pending_resume_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    PendingResumeState* state = (PendingResumeState*)fut->state;
+    state->poll_count++;
+
+    if (state->poll_count == 1) {
+        // First poll: return Pending. The waker was passed in; the task
+        // will be re-enqueued externally before the next executor_run.
+        (void)waker;
+        return challenger_poll_pending();
+    } else {
+        // Second poll: return Ready with value 42.
+        return challenger_poll_ready(42);
+    }
+}
+
+void test_pending_resume_basic(void) {
+    TEST("Phase 38: Pending -> Wake -> Resume (basic)");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    PendingResumeState* st = (PendingResumeState*)calloc(1, sizeof(PendingResumeState));
+    ChallengerFuture* fut = challenger_future_new(pending_resume_poll, st);
+
+    uint64_t task_id = challenger_executor_spawn(exec, fut);
+    ASSERT(task_id > 0, "spawn should return non-zero task id");
+
+    // First run: task should return Pending and leave the ready queue empty
+    challenger_executor_run(exec);
+    ASSERT(challenger_ready_queue_is_empty(&exec->ready), "ready queue should be empty after Pending");
+
+    // The task is still in all_tasks (pending), not completed.
+    // Manually wake the task (simulating reactor / timer / another task calling the waker).
+    challenger_executor_wake_task(exec, task_id);
+
+    // The task should now be back in the ready queue.
+    ASSERT(!challenger_ready_queue_is_empty(&exec->ready), "ready queue should have task after wake");
+
+    // Second run: task should return Ready(42)
+    challenger_executor_run(exec);
+
+    ASSERT_EQ(exec->all_tasks_count, 0, "all_tasks should be empty after completion");
+
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// Test 2: Two tasks, one returns Pending, both complete.
+
+typedef struct {
+    int poll_count;
+    int value;
+} DualPendingState;
+
+static Poll dual_pending_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    DualPendingState* state = (DualPendingState*)fut->state;
+    state->poll_count++;
+
+    if (state->poll_count == 1) {
+        (void)waker;
+        return challenger_poll_pending();
+    } else {
+        return challenger_poll_ready(state->value);
+    }
+}
+
+void test_pending_resume_two_tasks(void) {
+    TEST("Phase 38: Pending -> Wake -> Resume (two tasks)");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    // Task A: pending once, then Ready(10)
+    DualPendingState* stA = (DualPendingState*)calloc(1, sizeof(DualPendingState));
+    stA->value = 10;
+    ChallengerFuture* futA = challenger_future_new(dual_pending_poll, stA);
+    uint64_t idA = challenger_executor_spawn(exec, futA);
+
+    // Task B: pending once, then Ready(20)
+    DualPendingState* stB = (DualPendingState*)calloc(1, sizeof(DualPendingState));
+    stB->value = 20;
+    ChallengerFuture* futB = challenger_future_new(dual_pending_poll, stB);
+    uint64_t idB = challenger_executor_spawn(exec, futB);
+
+    // First run: both return Pending
+    challenger_executor_run(exec);
+    ASSERT(challenger_ready_queue_is_empty(&exec->ready), "ready queue empty after both Pending");
+    ASSERT_EQ(exec->all_tasks_count, 2, "both tasks still in all_tasks");
+
+    // Wake both
+    challenger_executor_wake_task(exec, idA);
+    challenger_executor_wake_task(exec, idB);
+    ASSERT(!challenger_ready_queue_is_empty(&exec->ready), "ready queue has tasks after wake");
+
+    // Second run: both return Ready
+    challenger_executor_run(exec);
+    ASSERT_EQ(exec->all_tasks_count, 0, "all_tasks empty after both complete");
+
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// Test 3: Self-wake: future wakes itself from within the poll callback.
+// This simulates a timer or channel that resolves immediately during poll.
+
+typedef struct {
+    int poll_count;
+    ChallengerExecutor* exec;
+    uint64_t task_id;
+} SelfWakeState;
+
+static Poll self_wake_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    SelfWakeState* state = (SelfWakeState*)fut->state;
+    state->poll_count++;
+
+    if (state->poll_count == 1) {
+        // First poll: return Pending, but wake ourselves immediately.
+        // This tests that wake_task works even when called from inside the poll.
+        challenger_waker_wake(waker);
+        return challenger_poll_pending();
+    } else {
+        return challenger_poll_ready(99);
+    }
+}
+
+void test_pending_resume_self_wake(void) {
+    TEST("Phase 38: Pending -> self-wake -> Resume");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+    challenger_set_global_executor(exec);
+
+    SelfWakeState* st = (SelfWakeState*)calloc(1, sizeof(SelfWakeState));
+    st->exec = exec;
+    ChallengerFuture* fut = challenger_future_new(self_wake_poll, st);
+
+    uint64_t task_id = challenger_executor_spawn(exec, fut);
+    st->task_id = task_id;
+
+    // Single run should handle both polls (Pending + self-wake re-enqueue + Ready)
+    // because executor_run loops until the ready queue is empty.
+    challenger_executor_run(exec);
+    ASSERT_EQ(exec->all_tasks_count, 0, "all_tasks empty after self-wake + completion");
+
+    challenger_set_global_executor(NULL);
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// ============================================================
+// Phase C: Multi-task Executor Tests
+// ============================================================
+
+// Helper: immediate-ready future — returns Ready(value) on first poll
+static Poll immediate_ready_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    (void)waker;
+    return challenger_poll_ready((int64_t)(uintptr_t)fut->state);
+}
+
+static ChallengerFuture* immediate_ready_create(int64_t value) {
+    return challenger_future_new(immediate_ready_poll, (void*)(uintptr_t)value);
+}
+
+// C1: executor_run_once processes a single ready task
+void test_c_run_once_basic(void) {
+    TEST("Phase C: run_once processes single ready task");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+    ChallengerFuture* fut = immediate_ready_create(42);
+    uint64_t task_id = challenger_executor_spawn(exec, fut);
+    (void)task_id;
+
+    int processed = challenger_executor_run_once(exec);
+    ASSERT_EQ(processed, 1, "run_once processes 1 task");
+    ASSERT_EQ(exec->all_tasks_count, 0, "task removed after completion");
+
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// C2: Two tasks interleaving via run_once — both spawned, both complete
+void test_c_two_tasks_interleave(void) {
+    TEST("Phase C: two tasks complete via run_once");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+
+    ChallengerFuture* fut1 = immediate_ready_create(10);
+    ChallengerFuture* fut2 = immediate_ready_create(20);
+    uint64_t id1 = challenger_executor_spawn(exec, fut1);
+    uint64_t id2 = challenger_executor_spawn(exec, fut2);
+    (void)id1; (void)id2;
+
+    // First run_once should drain both ready tasks
+    int processed = challenger_executor_run_once(exec);
+    ASSERT_EQ(processed, 2, "run_once processes 2 ready tasks");
+    ASSERT_EQ(exec->all_tasks_count, 0, "both tasks completed");
+
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// C3: Three tasks complete in FIFO order (ring buffer order)
+static Poll fifo_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    (void)waker;
+    return challenger_poll_ready((int64_t)(uintptr_t)fut->state);
+}
+
+void test_c_three_tasks_fifo(void) {
+    TEST("Phase C: three tasks FIFO order");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+
+    // Run 10 iterations to verify FIFO is consistent
+    for (int iter = 0; iter < 10; iter++) {
+        for (int i = 0; i < 3; i++) {
+            ChallengerFuture* fut = challenger_future_new(fifo_poll, (void*)(uintptr_t)(i * 100 + 1));
+            challenger_executor_spawn(exec, fut);
+        }
+
+        // All 3 should be in ready queue; run_once drains all
+        challenger_executor_run_once(exec);
+        ASSERT_EQ(exec->all_tasks_count, 0, "all 3 tasks completed");
+    }
+
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// C4: Cancel one task while another runs
+void test_c_cancel_one_of_many(void) {
+    TEST("Phase C: cancel one of multiple tasks");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+
+    ChallengerFuture* fut1 = immediate_ready_create(100);
+    ChallengerFuture* fut2 = immediate_ready_create(200);
+    uint64_t id1 = challenger_executor_spawn(exec, fut1);
+    uint64_t id2 = challenger_executor_spawn(exec, fut2);
+
+    // Cancel task 1 before run
+    challenger_executor_cancel(exec, id1);
+
+    challenger_executor_run_once(exec);
+
+    // task 1 should be cancelled and removed, task 2 completed
+    ASSERT_EQ(exec->all_tasks_count, 0, "both tasks removed (cancelled + completed)");
+
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// C5: Wake deduplication — multiple wake_task calls only enqueues once
+void test_c_wake_dedup(void) {
+    TEST("Phase C: wake deduplication");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+    ChallengerFuture* fut = immediate_ready_create(77);
+    uint64_t id = challenger_executor_spawn(exec, fut);
+
+    // Task is already in ready queue from spawn.
+    // Wake it multiple times — needs_poll should prevent re-enqueue.
+    challenger_executor_wake_task(exec, id);
+    challenger_executor_wake_task(exec, id);
+    challenger_executor_wake_task(exec, id);
+
+    // run_once should process it only once (needs_poll prevents re-enqueue)
+    challenger_executor_run_once(exec);
+    ASSERT_EQ(exec->all_tasks_count, 0, "task completed without duplication issues");
+
+    challenger_executor_free(exec);
+    PASS();
+}
+
+// C6: run_once on empty executor returns 0
+void test_c_run_once_empty(void) {
+    TEST("Phase C: run_once on empty executor");
+
+    ChallengerExecutor* exec = challenger_executor_new();
+
+    int processed = challenger_executor_run_once(exec);
+    ASSERT_EQ(processed, 0, "empty executor processes 0");
+    ASSERT_EQ(exec->all_tasks_count, 0, "no tasks");
+
+    challenger_executor_free(exec);
     PASS();
 }
 
@@ -1781,6 +2229,28 @@ int main(void) {
     test_memory_waker_cycles();
     test_memory_channel_cycles();
     test_memory_timer_cycles();
+
+    // Phase 38: Real Pending/Resume
+    printf("\n--- Phase 38: Real Pending/Resume ---\n");
+    test_pending_resume_basic();
+    test_pending_resume_two_tasks();
+    test_pending_resume_self_wake();
+
+    // Phase C: Multi-task Executor
+    printf("\n--- Phase C: Multi-task Executor ---\n");
+    test_c_run_once_basic();
+    test_c_two_tasks_interleave();
+    test_c_three_tasks_fifo();
+    test_c_cancel_one_of_many();
+    test_c_wake_dedup();
+    test_c_run_once_empty();
+
+    // P0-B: Async TCP Futures
+    printf("\n--- P0-B: Async TCP Futures ---\n");
+    test_p0b_tcp_connect_async();
+    test_p0b_tcp_accept_async();
+    test_p0b_tcp_read_write_async();
+    test_p0b_tcp_full_roundtrip();
 
     // Summary
     printf("\n=== SUMMARY ===\n");

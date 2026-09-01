@@ -28,6 +28,7 @@ use crate::Stmt;
 use crate::StructDef;
 use crate::Type;
 use crate::type_from_str;
+use crate::infer_type;
 use std::collections::HashMap;
 
 struct Cg<'a> {
@@ -79,6 +80,9 @@ struct Cg<'a> {
     /// back to its i32 source, so chained arithmetic stays in i32 without a
     /// sext/trunc round-trip that would defeat LLVM's auto-vectorizer.
     i32_form: HashMap<String, String>,
+    /// True when generating LLVM IR inside a poll function body (state machine).
+    /// Changes Stmt::Return to store value via sret instead of `ret`.
+    poll_fn_mode: bool,
 }
 
 impl<'a> Cg<'a> {
@@ -113,6 +117,7 @@ impl<'a> Cg<'a> {
             loop_counter_init: 0,
             loop_pure_arith: false,
             i32_form: HashMap::new(),
+            poll_fn_mode: false,
         }
     }
 
@@ -159,7 +164,7 @@ impl<'a> Cg<'a> {
         // use state-machine lowering. For now, lime functions compile as
         // regular functions (await is a transparent direct call).
         // TODO: re-enable state machine when real async I/O is tested.
-        if false && fdef.is_async {
+        if fdef.is_async {
             return self.codegen_async_function(name, &llvm_name, fdef, &ret_ty);
         }
         // Function params with names (%p0, %p1, ...) so alloca/store can reference them
@@ -324,6 +329,165 @@ impl<'a> Cg<'a> {
         result
     }
 
+    /// Desugar nested await expressions to statement level.
+    /// `return await f() + n` → `let _a0 = await f(); return _a0 + n`
+    /// `foo(await f(), await g())` → `let _a0 = await f(); let _a1 = await g(); foo(_a0, _a1)`
+    fn desugar_awaits_in_body(stmts: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
+        let mut result = Vec::new();
+        for s in stmts {
+            result.extend(Self::desugar_await_stmt(s, counter));
+        }
+        result
+    }
+
+    fn desugar_await_stmt(s: &Stmt, counter: &mut usize) -> Vec<Stmt> {
+        match s {
+            Stmt::Let {
+                mutable,
+                name,
+                type_hint,
+                value,
+                place,
+            } => {
+                if Self::expr_has_await(value) {
+                    let (new_expr, prefix_stmts) = Self::lift_await_from_expr(value, counter);
+                    let mut out = prefix_stmts;
+                    out.push(Stmt::Let {
+                        mutable: *mutable,
+                        name: name.clone(),
+                        type_hint: type_hint.clone(),
+                        value: new_expr,
+                        place: *place,
+                    });
+                    out
+                } else {
+                    vec![s.clone()]
+                }
+            }
+            Stmt::Return {
+                explicit_type,
+                value: Some(e),
+                ..
+            } => {
+                if Self::expr_has_await(e) {
+                    let (new_expr, prefix_stmts) = Self::lift_await_from_expr(e, counter);
+                    let mut out = prefix_stmts;
+                    out.push(Stmt::Return {
+                        explicit_type: explicit_type.clone(),
+                        value: Some(new_expr),
+                    });
+                    out
+                } else {
+                    vec![s.clone()]
+                }
+            }
+            Stmt::Expr(e) => {
+                if Self::expr_has_await(e) {
+                    let (new_expr, prefix_stmts) = Self::lift_await_from_expr(e, counter);
+                    let mut out = prefix_stmts;
+                    out.push(Stmt::Expr(new_expr));
+                    out
+                } else {
+                    vec![s.clone()]
+                }
+            }
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                let new_then = Self::desugar_awaits_in_body(then_branch, counter);
+                let new_else = else_branch
+                    .as_ref()
+                    .map(|e| Self::desugar_awaits_in_body(e, counter));
+                vec![Stmt::If {
+                    cond: cond.clone(),
+                    then_branch: new_then,
+                    else_branch: new_else,
+                }]
+            }
+            Stmt::While { cond, body } => {
+                let new_body = Self::desugar_awaits_in_body(body, counter);
+                vec![Stmt::While {
+                    cond: cond.clone(),
+                    body: new_body,
+                }]
+            }
+            _ => vec![s.clone()],
+        }
+    }
+
+    /// Lift the first Await found in `expr` into a `let _aN = await inner` statement.
+    /// Returns (modified_expr, vec_of_prefix_statements).
+    fn lift_await_from_expr(expr: &Expr, counter: &mut usize) -> (Expr, Vec<Stmt>) {
+        match expr {
+            Expr::Await(inner) => {
+                let name = format!("_a{}", counter);
+                *counter += 1;
+                (
+                    Expr::Ident(name.clone()),
+                    vec![Stmt::Let {
+                        mutable: false,
+                        name,
+                        type_hint: None,
+                        value: Expr::Await(inner.clone()),
+                        place: None,
+                    }],
+                )
+            }
+            Expr::BinOp {
+                left,
+                op,
+                right,
+                resolved_operator,
+            } => {
+                if Self::expr_has_await(left) {
+                    let (new_left, stmts) = Self::lift_await_from_expr(left, counter);
+                    (
+                        Expr::BinOp {
+                            left: Box::new(new_left),
+                            op: op.clone(),
+                            right: right.clone(),
+                            resolved_operator: resolved_operator.clone(),
+                        },
+                        stmts,
+                    )
+                } else if Self::expr_has_await(right) {
+                    let (new_right, stmts) = Self::lift_await_from_expr(right, counter);
+                    (
+                        Expr::BinOp {
+                            left: left.clone(),
+                            op: op.clone(),
+                            right: Box::new(new_right),
+                            resolved_operator: resolved_operator.clone(),
+                        },
+                        stmts,
+                    )
+                } else {
+                    (expr.clone(), vec![])
+                }
+            }
+            Expr::Call { func, args } => {
+                for (i, arg) in args.iter().enumerate() {
+                    if Self::expr_has_await(arg) {
+                        let (new_arg, stmts) = Self::lift_await_from_expr(arg, counter);
+                        let mut new_args = args.clone();
+                        new_args[i] = new_arg;
+                        return (
+                            Expr::Call {
+                                func: func.clone(),
+                                args: new_args,
+                            },
+                            stmts,
+                        );
+                    }
+                }
+                (expr.clone(), vec![])
+            }
+            _ => (expr.clone(), vec![]),
+        }
+    }
+
     /// Challenger Phase 2: async function lowering → state machine.
     ///
     /// For a `lime` function like:
@@ -342,24 +506,44 @@ impl<'a> Cg<'a> {
         fdef: &FunctionDef,
         _ret_ty: &str,
     ) -> String {
+        // Step 0: desugar nested awaits to statement level
+        // Transforms `return await f() + n` → `let _a0 = await f(); return _a0 + n`
+        // Transforms `foo(await f())` → `let _a0 = await f(); foo(_a0)`
+        let mut desugar_counter = 0usize;
+        let desugared_body = Self::desugar_awaits_in_body(&fdef.body, &mut desugar_counter);
+        let mut fdef_desugared = fdef.clone();
+        fdef_desugared.body = desugared_body;
+
         // Step 1: scan body for await points and collect state info
         let mut await_count = 0usize;
-        Self::count_awaits(&fdef.body, &mut await_count);
+        Self::count_awaits(&fdef_desugared.body, &mut await_count);
         let total_states = await_count + 1; // states 0..N (N = after last await = completion)
 
         // Step 2: collect variables that live across await points
         let mut cross_await_vars: Vec<(String, Type)> = Vec::new();
-        Self::collect_cross_await_vars(&fdef.body, &fdef.params, self.defs, &mut cross_await_vars);
+        Self::collect_cross_await_vars(&fdef_desugared.body, &fdef_desugared.params, self.defs, &mut cross_await_vars);
 
-        // Step 3: build state struct fields: { state_index, param0, param1, ..., local0, local1, ... }
+        // Step 3: build state struct fields: { state_index, _future, param0, param1, ..., local0, local1, ... }
         let mut state_fields: Vec<(String, Type)> = Vec::new();
         state_fields.push(("_state".to_string(), Type::Int));
+        let has_intermediate = total_states > 1;
+        if has_intermediate {
+            state_fields.push(("_future".to_string(), Type::String));
+        }
         for (pname, ptype_str) in &fdef.params {
             let ty = type_from_str(ptype_str, self.defs);
             state_fields.push((pname.clone(), ty));
         }
+        let param_names: std::collections::HashSet<String> = fdef.params.iter().map(|(n, _)| n.clone()).collect();
         for (vname, vty) in &cross_await_vars {
-            state_fields.push((vname.clone(), vty.clone()));
+            if !param_names.contains(vname) {
+                // Unit/void can't be stored in LLVM struct fields — use i64 placeholder
+                let safe_ty = match vty {
+                    Type::Unit => Type::Int,
+                    other => other.clone(),
+                };
+                state_fields.push((vname.clone(), safe_ty));
+            }
         }
 
         // Step 4: generate state struct type
@@ -379,7 +563,7 @@ impl<'a> Cg<'a> {
         let poll_ir = self.codegen_poll_fn(
             name,
             &poll_fn_name,
-            fdef,
+            &fdef_desugared,
             &state_struct_name,
             &state_fields,
             total_states,
@@ -392,7 +576,7 @@ impl<'a> Cg<'a> {
         let wrapper_ir = self.codegen_future_wrapper(
             name,
             llvm_name,
-            fdef,
+            &fdef_desugared,
             &poll_fn_name,
             &state_struct_name,
             &state_fields,
@@ -469,18 +653,21 @@ impl<'a> Cg<'a> {
         out: &mut Vec<(String, Type)>,
     ) {
         let mut defined: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+        let mut defined_types: Vec<(String, Type)> = params
+            .iter()
+            .map(|(n, t)| (n.clone(), type_from_str(t, defs)))
+            .collect();
         let mut seen_await = false;
         for s in stmts {
             if seen_await {
-                // After an await: collect variables used in remaining statements
-                Self::collect_used_vars_stmt(s, &defined, defs, out);
+                Self::collect_used_vars_stmt(s, &defined, &defined_types, defs, out);
             }
             match s {
                 Stmt::Let { name, value, .. } => {
+                    defined.push(name.clone());
+                    let vty = infer_type(value, &std::collections::HashMap::new(), defs, &std::collections::HashMap::new()).unwrap_or(Type::Unknown);
+                    defined_types.push((name.clone(), vty));
                     Self::collect_awaits_in_expr(value, &mut seen_await);
-                    if seen_await {
-                        defined.push(name.clone());
-                    }
                 }
                 Stmt::Expr(e) => Self::collect_awaits_in_expr(e, &mut seen_await),
                 Stmt::Return { value: Some(e), .. } => Self::collect_awaits_in_expr(e, &mut seen_await),
@@ -508,6 +695,7 @@ impl<'a> Cg<'a> {
     fn collect_used_vars_stmt(
         stmt: &Stmt,
         available: &[String],
+        defined_types: &[(String, Type)],
         defs: &Defs,
         out: &mut Vec<(String, Type)>,
     ) {
@@ -515,8 +703,9 @@ impl<'a> Cg<'a> {
         Self::collect_used_vars_in_stmt(stmt, &mut used);
         for u in &used {
             if available.contains(u) && !out.iter().any(|(n, _)| n == u) {
-                // Find type from params or inferred
-                let ty = if let Some((_, ptype)) = defs
+                let ty = if let Some((_, vty)) = defined_types.iter().find(|(n, _)| n == u) {
+                    vty.clone()
+                } else if let Some((_, ptype)) = defs
                     .functions
                     .values()
                     .next()
@@ -582,16 +771,28 @@ impl<'a> Cg<'a> {
             fn_name
         ));
         ir.push_str(&format!(
-            "define %ChallengerPoll @{}(i8* %state_raw, %ChallengerWaker* %waker) {{\n",
+            "define void @{}(%ChallengerPoll* sret(%ChallengerPoll) %sret, %ChallengerFuture* %fut, %ChallengerWaker* %waker) {{\n",
             poll_name
         ));
         ir.push_str("entry:\n");
+
+        // Extract state pointer from future (field 1: i8* state)
+        let state_idx_gep = "%state_gep_raw".to_string();
+        ir.push_str(&format!(
+            "  {} = getelementptr inbounds %ChallengerFuture, %ChallengerFuture* %fut, i32 0, i32 1\n",
+            state_idx_gep
+        ));
+        let state_raw = "%state_raw".to_string();
+        ir.push_str(&format!(
+            "  {} = load i8*, i8** {}, align 8\n",
+            state_raw, state_idx_gep
+        ));
 
         // Cast i8* to state struct*
         let state_ptr = "%state".to_string();
         ir.push_str(&format!(
             "  {} = bitcast i8* {} to {}*\n",
-            state_ptr, "%state_raw", state_llty
+            state_ptr, state_raw, state_llty
         ));
 
         // Load state index (field 0)
@@ -599,7 +800,7 @@ impl<'a> Cg<'a> {
         let state_idx = "%state_idx".to_string();
         ir.push_str(&format!(
             "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
-            state_idx_ptr, state_llty, state_ptr, state_ptr // GEP to field 0
+            state_idx_ptr, state_llty, state_llty, state_ptr // GEP to field 0
         ));
         ir.push_str(&format!(
             "  {} = load i64, i64* {}, align 8\n",
@@ -651,66 +852,264 @@ impl<'a> Cg<'a> {
 
         // Generate each state block
         for state_idx_val in 0..total_states {
+            // Offset temp counter so each state block gets unique names
+            self.temp = state_idx_val * 1000;
             ir.push_str(&format!("state{}:\n", state_idx_val));
 
             if state_idx_val < total_states - 1 {
-                // This state has an await point
-                // Find the statements before the next await
+                // Intermediate state: evaluate nth await point
+                // Layout:
+                //   stateN: check if _future is null → first call or resume
+                //   create_future_N: run stmts_before, call inner(), store Future in _future
+                //   poll_future_N: poll the Future, check tag
+                //   ready_N: extract value, store in cross-await var, clear _future, advance state, return Pending
+                //   pending_N: stay in same state, return Pending
+
                 let stmts_before = Self::get_stmts_before_nth_await(&fdef.body, state_idx_val);
+                let await_info = Self::find_nth_await_stmt(&fdef.body, state_idx_val);
+                let await_info_clone = await_info.clone();
 
-                // Codegen the statements
-                let mut state_builder = self.clone_builder();
-                state_builder.out = String::new();
-                state_builder.current_block = format!("state{}", state_idx_val);
+                let create_bb = format!("create_future_{}", state_idx_val);
+                let poll_bb = format!("poll_future_{}", state_idx_val);
+                let ready_bb = format!("ready_{}", state_idx_val);
+                let pending_bb = format!("pending_{}", state_idx_val);
 
-                // Re-load field pointers in this block's context
-                for (fname, alloca, fty) in &field_ptrs {
-                    if fname == "_state" {
-                        continue;
+                let future_alloca = field_ptrs.iter()
+                    .find(|(n, _, _)| n == "_future")
+                    .map(|(_, a, _)| a.clone());
+
+                // --- stateN entry: null-check _future ---
+                if let Some(ref fa) = future_alloca {
+                    let future_load = format!("%future_check_{}", state_idx_val);
+                    let is_null = format!("%is_null_{}", state_idx_val);
+                    ir.push_str(&format!(
+                        "  {} = load i8*, i8** {}, align 8\n",
+                        future_load, fa
+                    ));
+                    ir.push_str(&format!(
+                        "  {} = icmp eq i8* {}, null\n",
+                        is_null, future_load
+                    ));
+                    ir.push_str(&format!(
+                        "  br i1 {}, label %{}, label %{}\n",
+                        is_null, create_bb, poll_bb
+                    ));
+                } else {
+                    ir.push_str(&format!("  br label %{}\n", create_bb));
+                }
+
+                // --- create_future_N: run stmts_before, call inner(), store Future ---
+                ir.push_str(&format!("{}:\n", create_bb));
+                {
+                    let mut state_builder = self.clone_builder();
+                    state_builder.out = String::new();
+                    state_builder.current_block = format!("create_future_{}", state_idx_val);
+                    state_builder.poll_fn_mode = true;
+
+                    for (fname, alloca, fty) in &field_ptrs {
+                        if fname == "_state" {
+                            continue;
+                        }
+                        state_builder.named.insert(fname.clone(), alloca.clone());
+                        state_builder.env.insert(fname.clone(), fty.clone());
                     }
-                    state_builder.named.insert(fname.clone(), alloca.clone());
-                    state_builder.env.insert(fname.clone(), fty.clone());
-                }
 
-                // Also insert params as named
-                let mut param_idx = 0;
-                for (pname, ptype_str) in &fdef.params {
-                    let pty = type_from_str(ptype_str, self.defs);
-                    if let Some((_, alloca, _)) = field_ptrs.iter().find(|(n, _, _)| n == pname) {
-                        state_builder.named.insert(pname.clone(), alloca.clone());
-                        state_builder.env.insert(pname.clone(), pty);
+                    for (pname, ptype_str) in &fdef.params {
+                        let pty = type_from_str(ptype_str, self.defs);
+                        if let Some((_, alloca, _)) = field_ptrs.iter().find(|(n, _, _)| n == pname) {
+                            state_builder.named.insert(pname.clone(), alloca.clone());
+                            state_builder.env.insert(pname.clone(), pty);
+                        }
                     }
-                    param_idx += 1;
+
+                    if let Err(e) = state_builder.codegen_stmts(&stmts_before) {
+                        self.warnings.push(format!("{}: state{}: stmts_before: {}", fn_name, state_idx_val, e));
+                    }
+
+                    // Write back any variables assigned in stmts_before to the state struct
+                    // so they persist across poll invocations.
+                    for stmt in &stmts_before {
+                        if let Stmt::Let { name, .. } = stmt {
+                            if let Some((_, alloca, ty)) = field_ptrs.iter().find(|(n, _, _)| n == name) {
+                                let llty = llvm_type_name(ty);
+                                let tmp = state_builder.fresh_temp();
+                                state_builder.out.push_str(&format!(
+                                    "  {} = load {}, {}* {}, align 8\n",
+                                    tmp, llty, llty, alloca
+                                ));
+                                if let Some(field_idx) = state_fields.iter().position(|(n, _)| n == name) {
+                                    let gep = format!("%gep_wb_cf_{}_{}", name, state_idx_val);
+                                    state_builder.out.push_str(&format!(
+                                        "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 {}\n",
+                                        gep, state_llty, state_llty, state_ptr, field_idx
+                                    ));
+                                    state_builder.out.push_str(&format!(
+                                        "  store {} {}, {}* {}, align 8\n",
+                                        llty, tmp, llty, gep
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    // Evaluate the inner call from the nth await
+                    if let Some((let_name, inner_expr)) = await_info {
+                        match state_builder.codegen_expr(inner_expr) {
+                            Ok((future_val, _future_ty)) => {
+                                ir.push_str(&state_builder.out);
+                                // Store Future pointer in _future field (local alloca)
+                                if let Some(ref fa) = future_alloca {
+                                    let bare = state_builder.bare_value(&future_val);
+                                    ir.push_str(&format!(
+                                        "  store i8* {}, i8** {}, align 8\n",
+                                        bare, fa
+                                    ));
+                                    // Persist to state struct so next poll sees it
+                                    ir.push_str(&format!(
+                                        "  store i8* {}, i8** %gep__future, align 8\n",
+                                        bare
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                ir.push_str(&state_builder.out);
+                                self.warnings.push(format!("{}: state{}: inner call: {}", fn_name, state_idx_val, e));
+                                // Store null Future so poll block can handle it
+                                if let Some(ref fa) = future_alloca {
+                                    ir.push_str(&format!("  store i8* null, i8** {}, align 8\n", fa));
+                                    ir.push_str("  store i8* null, i8** %gep__future, align 8\n");
+                                }
+                            }
+                        }
+                    } else {
+                        ir.push_str(&state_builder.out);
+                    }
+
+                    ir.push_str(&format!("  br label %{}\n", poll_bb));
                 }
 
-                if let Err(e) = state_builder.codegen_stmts(&stmts_before) {
-                    self.warnings
-                        .push(format!("{}: state{}: {}", fn_name, state_idx_val, e));
+                // --- poll_future_N: poll the Future, check Ready/Pending ---
+                ir.push_str(&format!("{}:\n", poll_bb));
+                {
+                    let future_load = format!("%future_to_poll_{}", state_idx_val);
+                    if let Some(ref fa) = future_alloca {
+                        ir.push_str(&format!(
+                            "  {} = load i8*, i8** {}, align 8\n",
+                            future_load, fa
+                        ));
+                    }
+
+                    let poll_result = format!("%poll_result_{}", state_idx_val);
+                    ir.push_str(&Cg::sret_poll_call(
+                        "challenger_future_poll",
+                        &format!("i8* {}, %ChallengerWaker* %waker", future_load),
+                        &poll_result,
+                    ));
+
+                    let tag = format!("%tag_{}", state_idx_val);
+                    let value = format!("%value_{}", state_idx_val);
+                    let is_pending = format!("%is_pending_{}", state_idx_val);
+                    ir.push_str(&format!(
+                        "  {} = extractvalue %ChallengerPoll {}, 0\n",
+                        tag, poll_result
+                    ));
+                    ir.push_str(&format!(
+                        "  {} = extractvalue %ChallengerPoll {}, 1\n",
+                        value, poll_result
+                    ));
+                    ir.push_str(&format!(
+                        "  {} = icmp eq i64 {}, 1\n",
+                        is_pending, tag
+                    ));
+                    ir.push_str(&format!(
+                        "  br i1 {}, label %{}, label %{}\n",
+                        is_pending, pending_bb, ready_bb
+                    ));
                 }
 
-                ir.push_str(&state_builder.out);
+                // --- ready_N: Future returned Ready → store value, advance state ---
+                ir.push_str(&format!("{}:\n", ready_bb));
+                {
+                    let value = format!("%value_{}", state_idx_val);
+                    let future_load = format!("%future_to_poll_{}", state_idx_val);
 
-                // Generate state transition: store next state, return Pending
-                let next_state = state_idx_val + 1;
-                let state_ptr_tmp = format!("%sp_{}", state_idx_val);
-                ir.push_str(&format!(
-                    "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
-                    state_ptr_tmp, state_llty, state_ptr, state_ptr
-                ));
-                ir.push_str(&format!(
-                    "  store i64 {}, i64* {}, align 8\n",
-                    next_state, state_ptr_tmp
-                ));
-                ir.push_str(
-                    "  %poll_pending = call %ChallengerPoll @challenger_poll_pending()\n",
-                );
-                ir.push_str("  ret %ChallengerPoll %poll_pending\n");
+                    // Store the awaited result in the cross-await variable slot
+                    if let Some((let_name, _)) = await_info_clone {
+                        if let Some((_, let_alloca, let_ty)) = field_ptrs.iter().find(|(n, _, _)| n == &let_name) {
+                            let llty = llvm_type_name(let_ty);
+                            // Store to local alloca
+                            ir.push_str(&format!(
+                                "  store {} {}, {}* {}, align 8\n",
+                                llty, value, llty, let_alloca
+                            ));
+                            // Write back to state struct so next poll invocation sees it
+                            if let Some(field_idx) = state_fields.iter().position(|(n, _)| n == &let_name) {
+                                let gep_wb = format!("%gep_wb_{}_{}", let_name, state_idx_val);
+                                ir.push_str(&format!(
+                                    "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 {}\n",
+                                    gep_wb, state_llty, state_llty, state_ptr, field_idx
+                                ));
+                                ir.push_str(&format!(
+                                    "  store {} {}, {}* {}, align 8\n",
+                                    llty, value, llty, gep_wb
+                                ));
+                            }
+                        }
+                    }
+
+                    // Free the Future
+                    ir.push_str(&format!(
+                        "  call void @challenger_future_free(i8* {})\n",
+                        future_load
+                    ));
+
+                    // Clear _future to null
+                    if let Some(ref fa) = future_alloca {
+                        ir.push_str(&format!(
+                            "  store i8* null, i8** {}, align 8\n", fa
+                        ));
+                        // Persist null to state struct so next poll sees _future as null
+                        ir.push_str("  store i8* null, i8** %gep__future, align 8\n");
+                    }
+
+                    // Advance to next state
+                    let next_state = state_idx_val + 1;
+                    let state_ptr_tmp = format!("%sp_{}", state_idx_val);
+                    ir.push_str(&format!(
+                        "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
+                        state_ptr_tmp, state_llty, state_llty, state_ptr
+                    ));
+                    ir.push_str(&format!(
+                        "  store i64 {}, i64* {}, align 8\n",
+                        next_state, state_ptr_tmp
+                    ));
+                    // Schedule continuation: task has more work (next state),
+                    // wake self so executor re-enqueues after current drain cycle.
+                    ir.push_str("  call void @challenger_waker_wake(%ChallengerWaker* %waker)\n");
+                    ir.push_str(&Cg::sret_poll_call("challenger_poll_pending", "", &format!("%poll_pending_rdy_{}", state_idx_val)));
+                    ir.push_str(&format!("  store %ChallengerPoll %poll_pending_rdy_{}, %ChallengerPoll* %sret, align 8\n", state_idx_val));
+                    ir.push_str("  ret void\n");
+                }
+
+                // --- pending_N: inner Future not ready → stay in same state ---
+                ir.push_str(&format!("{}:\n", pending_bb));
+                {
+                    ir.push_str(&Cg::sret_poll_call("challenger_poll_pending", "", &format!("%poll_pending_pen_{}", state_idx_val)));
+                    ir.push_str(&format!("  store %ChallengerPoll %poll_pending_pen_{}, %ChallengerPoll* %sret, align 8\n", state_idx_val));
+                    ir.push_str("  ret void\n");
+                }
             } else {
                 // Final state: codegen remaining statements, return Ready
-                let stmts_after = Self::get_stmts_after_nth_await(&fdef.body, await_count_in(fdef));
+                let ac = await_count_in(fdef);
+                let stmts_after = if ac == 0 {
+                    fdef.body.clone()
+                } else {
+                    Self::get_stmts_after_nth_await(&fdef.body, ac - 1)
+                };
                 let mut state_builder = self.clone_builder();
                 state_builder.out = String::new();
                 state_builder.current_block = format!("state{}", state_idx_val);
+                state_builder.poll_fn_mode = true;
 
                 for (fname, alloca, fty) in &field_ptrs {
                     if fname == "_state" {
@@ -740,20 +1139,16 @@ impl<'a> Cg<'a> {
                     // Store result in future output
                     if ll_ret != "void" {
                         ir.push_str(&format!(
-                            "  %fut_ptr = bitcast i8* %state_raw to %ChallengerFuture*\n"
+                            "  %out_gep = getelementptr inbounds %ChallengerFuture, %ChallengerFuture* %fut, i32 0, i32 2\n"
                         ));
-                        ir.push_str(
-                            "  %out_ptr = getelementptr inbounds %ChallengerFuture, %ChallengerFuture* %fut_ptr, i32 0, i32 2\n",
-                        );
                         ir.push_str(&format!(
-                            "  store i64 {}, i64* %out_ptr, align 8\n",
+                            "  store i64 {}, i64* %out_gep, align 8\n",
                             ret_zero
                         ));
                     }
-                    ir.push_str(
-                        "  %poll_ready = call %ChallengerPoll @challenger_poll_ready(i64 0)\n",
-                    );
-                    ir.push_str("  ret %ChallengerPoll %poll_ready\n");
+                    ir.push_str(&Cg::sret_poll_call("challenger_poll_ready", "i64 0", "%poll_ready"));
+                    ir.push_str("  store %ChallengerPoll %poll_ready, %ChallengerPoll* %sret, align 8\n");
+                    ir.push_str("  ret void\n");
                 }
             }
         }
@@ -797,46 +1192,67 @@ impl<'a> Cg<'a> {
         ));
         ir.push_str("wrapper_entry:\n");
 
-        // Allocate state struct
+        // Allocate state struct ON HEAP (must outlive wrapper frame)
+        let state_size = state_fields.len() as i64 * 8;
+        let state_raw_alloc = "%state_alloc_raw".to_string();
+        ir.push_str(&format!(
+            "  {} = call i8* @runtime_alloc(i64 {}, i64 8)\n",
+            state_raw_alloc, state_size
+        ));
         let state_alloca = "%state_alloc".to_string();
         ir.push_str(&format!(
-            "  {} = alloca {}, align 8\n",
-            state_alloca, state_llty
+            "  {} = bitcast i8* {} to {}*\n",
+            state_alloca, state_raw_alloc, state_llty
         ));
 
         // Store state index = 0
         let state_idx_ptr = "%sidx_ptr".to_string();
         ir.push_str(&format!(
             "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 0\n",
-            state_idx_ptr, state_llty, state_alloca, state_alloca
+            state_idx_ptr, state_llty, state_llty, state_alloca
         ));
         ir.push_str("  store i64 0, i64* %sidx_ptr, align 8\n");
 
         // Store each parameter into the state struct
-        for (i, (pname, _)) in state_fields.iter().enumerate() {
+        // Track which user param index we're at (skip _state and _future)
+        let param_names: std::collections::HashSet<String> = fdef.params.iter().map(|(n, _)| n.clone()).collect();
+        let mut user_param_idx = 0;
+        for (i, (pname, pty)) in state_fields.iter().enumerate() {
             if pname == "_state" {
                 continue;
             }
-            let pidx = state_fields
-                .iter()
-                .take(i)
-                .filter(|(n, _)| n != "_state")
-                .count();
             let gep = format!("%gep_param_{}", pname);
             ir.push_str(&format!(
                 "  {} = getelementptr inbounds {}, {}* {}, i32 0, i32 {}\n",
                 gep, state_llty, state_llty, state_alloca, i
             ));
-            ir.push_str(&format!(
-                "  store {} %p{}, {}* {}, align 8\n",
-                llvm_type_name(&state_fields[i].1),
-                pidx,
-                llvm_type_name(&state_fields[i].1),
-                gep
-            ));
+            if pname == "_future" {
+                ir.push_str(&format!(
+                    "  store i8* null, i8** {}, align 8\n",
+                    gep
+                ));
+            } else if param_names.contains(pname) {
+                ir.push_str(&format!(
+                    "  store {} %p{}, {}* {}, align 8\n",
+                    llvm_type_name(pty),
+                    user_param_idx,
+                    llvm_type_name(pty),
+                    gep
+                ));
+                user_param_idx += 1;
+            } else {
+                let zv = zero_value_for_type(pty);
+                ir.push_str(&format!(
+                    "  store {} {}, {}* {}, align 8\n",
+                    llvm_type_name(pty),
+                    zv,
+                    llvm_type_name(pty),
+                    gep
+                ));
+            }
         }
 
-        // Cast state alloca to i8*
+        // State pointer is already i8* from runtime_alloc
         let state_raw = "%state_raw".to_string();
         ir.push_str(&format!(
             "  {} = bitcast {}* {} to i8*\n",
@@ -846,7 +1262,7 @@ impl<'a> Cg<'a> {
         // Create Future: challenger_future_new(@poll_fn, state)
         let fut_tmp = "%fut_new".to_string();
         ir.push_str(&format!(
-            "  {} = call i8* @challenger_future_new(i8* bitcast ({{ %ChallengerPoll (i8*, %ChallengerWaker*) }}* @{} to i8*), i8* {})\n",
+            "  {} = call i8* @challenger_future_new(i8* bitcast (void (ptr, ptr, ptr)* @{} to i8*), i8* {})\n",
             fut_tmp, poll_name, state_raw
         ));
 
@@ -881,6 +1297,7 @@ impl<'a> Cg<'a> {
             loop_counter_init: 0,
             loop_pure_arith: false,
             i32_form: HashMap::new(),
+            poll_fn_mode: false,
         }
     }
 
@@ -891,37 +1308,12 @@ impl<'a> Cg<'a> {
         for s in stmts {
             if Self::stmt_has_await(s) {
                 if await_seen == n {
-                    // This statement contains the nth await — split it
-                    // For simplicity: include the let-binding up to the await,
-                    // the actual await is handled by state transition
-                    match s {
-                        Stmt::Let {
-                            mutable,
-                            name,
-                            type_hint,
-                            value,
-                            place,
-                        } => {
-                            if Self::expr_has_await(value) {
-                                // `let x = await expr` → the await is here
-                                // Don't include this statement; the poll fn handles it
-                            } else {
-                                result.push(s.clone());
-                            }
-                        }
-                        _ => {
-                            if Self::expr_has_await_in_stmt(s) {
-                                // Statement has await — skip it here, poll handles it
-                            } else {
-                                result.push(s.clone());
-                            }
-                        }
-                    }
                     return result;
                 }
                 await_seen += 1;
+            } else if await_seen == n {
+                result.push(s.clone());
             }
-            result.push(s.clone());
         }
         result
     }
@@ -976,6 +1368,84 @@ impl<'a> Cg<'a> {
         }
     }
 
+    /// Emit an sret call to a Challenger function returning %ChallengerPoll.
+    /// Returns IR lines: alloc sret, call, load result into `result_var`.
+    fn sret_poll_call(func_name: &str, args: &str, result_var: &str) -> String {
+        let sret_var = format!("{}_sret", result_var);
+        let all_args = if args.is_empty() {
+            format!("%ChallengerPoll* sret(%ChallengerPoll) {}", sret_var)
+        } else {
+            format!("%ChallengerPoll* sret(%ChallengerPoll) {}, {}", sret_var, args)
+        };
+        format!(
+            "  {} = alloca %ChallengerPoll, align 8\n  call void @{}({})\n  {} = load %ChallengerPoll, %ChallengerPoll* {}, align 8\n",
+            sret_var, func_name, all_args, result_var, sret_var
+        )
+    }
+
+    /// Find the nth await (0-indexed) in statements, returning the variable
+    /// name (if let-binding) and the inner expression.
+    fn find_nth_await_stmt<'b>(stmts: &'b [Stmt], n: usize) -> Option<(String, &'b Expr)> {
+        let mut count = 0;
+        for s in stmts {
+            if let Some(info) = Self::extract_await_info(s) {
+                if count == n {
+                    return Some(info);
+                }
+                count += 1;
+            }
+        }
+        None
+    }
+
+    /// Extract the variable name and await inner expression from a statement.
+    fn extract_await_info(s: &Stmt) -> Option<(String, &Expr)> {
+        match s {
+            Stmt::Let { name, value, .. } => {
+                if Self::expr_has_await(value) {
+                    // Find the Await expression inside
+                    Self::find_await_in_expr(value).map(|e| (name.clone(), e))
+                } else {
+                    None
+                }
+            }
+            Stmt::Expr(e) => {
+                if Self::expr_has_await(e) {
+                    Self::find_await_in_expr(e).map(|e| ("_await_tmp".to_string(), e))
+                } else {
+                    None
+                }
+            }
+            Stmt::Return { value: Some(e), .. } => {
+                if Self::expr_has_await(e) {
+                    Self::find_await_in_expr(e).map(|e| ("_await_ret".to_string(), e))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Find the innermost Await expression.
+    fn find_await_in_expr(e: &Expr) -> Option<&Expr> {
+        match e {
+            Expr::Await(inner) => Some(inner),
+            Expr::Call { args, .. } => {
+                for a in args {
+                    if let Some(found) = Self::find_await_in_expr(a) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            Expr::BinOp { left, right, .. } => {
+                Self::find_await_in_expr(left).or_else(|| Self::find_await_in_expr(right))
+            }
+            _ => None,
+        }
+    }
+
     /// 蜈ｷ雎｡縺ｮ縺ｪ縺ｿ縺ｪ縺・蜻蜷代″縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｿ縺ｪ縺・
     fn codegen_stmts(&mut self, stmts: &[Stmt]) -> Result<(), String> {
         for s in stmts {
@@ -1010,7 +1480,12 @@ impl<'a> Cg<'a> {
                 let align = align_of(&ty);
                 let is_heap = matches!(place, Some(MemoryPlace::Heap))
                     || self.memory.get(name) == Some(&MemoryPlace::Heap);
-                let ptr = if is_heap {
+                let ptr = if self.poll_fn_mode && self.named.contains_key(name) {
+                    // In poll_fn_mode (create_future block), if the variable already
+                    // exists in named (from state struct fields), use the existing
+                    // alloca directly so the value persists across poll invocations.
+                    self.named[name].clone()
+                } else if is_heap {
                     // Phase 1: Heap 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE runtime_alloc 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・
                     // (Runtime 縺ｯ Phase 3 縺ｯ繧｢繝ｩ繝ｼ・ｽE・ｽE縺ｮ縺ｪ縺ｿ縺ｪ縺・縺ｮ縺ｪ縺ｿ縺ｪ縺・蝣ｴ蜷隗｣譫怜ｸ・縺ｮ縺ｿ縺ｪ縺・)
                     let size = match ty {
@@ -1073,32 +1548,61 @@ impl<'a> Cg<'a> {
                 match value {
                     Some(expr) => {
                         let (v, ty) = self.codegen_expr(expr)?;
-                        let llty = llvm_type_name(&ty);
-                        self.out
-                            .push_str(&format!("  ret {} {}\n", llty, self.bare_value(&v)));
-                        Ok(())
+                        let cv = self.bare_value(&v).to_string();
+                        if self.poll_fn_mode {
+                            let llty = llvm_type_name(&ty);
+                            let i64_arg = if llty == "i64" {
+                                format!("i64 {}", cv)
+                            } else {
+                                let bc = self.fresh_temp();
+                                self.out.push_str(&format!(
+                                    "  {} = ptrtoint {} {} to i64\n", bc, llty, cv
+                                ));
+                                format!("i64 {}", bc)
+                            };
+                            self.out.push_str(&Self::sret_poll_call(
+                                "challenger_poll_ready",
+                                &i64_arg,
+                                "%poll_ret",
+                            ));
+                            self.out.push_str("  store %ChallengerPoll %poll_ret, %ChallengerPoll* %sret, align 8\n");
+                            self.out.push_str("  ret void\n");
+                            Ok(())
+                        } else {
+                            let llty = llvm_type_name(&ty);
+                            self.out
+                                .push_str(&format!("  ret {} {}\n", llty, cv));
+                            Ok(())
+                        }
                     }
                     None => {
-                        // A bare `return` still has to satisfy the function's
-                        // (possibly inferred) return type: emit the default
-                        // value instead of `ret void` when the type is non-void.
-                        if self.fn_ret_ty == "void" {
+                        if self.poll_fn_mode {
+                            self.out.push_str(&Self::sret_poll_call("challenger_poll_ready", "i64 0", "%poll_ret"));
+                            self.out.push_str("  store %ChallengerPoll %poll_ret, %ChallengerPoll* %sret, align 8\n");
                             self.out.push_str("  ret void\n");
+                            Ok(())
                         } else {
-                            let zero = if self.fn_ret_ty.starts_with('%') {
-                                "zeroinitializer".to_string()
+                            // A bare `return` still has to satisfy the function's
+                            // (possibly inferred) return type: emit the default
+                            // value instead of `ret void` when the type is non-void.
+                            if self.fn_ret_ty == "void" {
+                                self.out.push_str("  ret void\n");
                             } else {
-                                match self.fn_ret_ty.as_str() {
-                                    "double" => "0.0".to_string(),
-                                    "i1" => "false".to_string(),
-                                    "i8*" => "null".to_string(),
-                                    _ => "0".to_string(),
-                                }
-                            };
-                            self.out
-                                .push_str(&format!("  ret {} {}\n", self.fn_ret_ty, zero));
+                                let zero = if self.fn_ret_ty.starts_with('%') {
+                                    "zeroinitializer".to_string()
+                                } else {
+                                    match self.fn_ret_ty.as_str() {
+                                        "double" => "0.0".to_string(),
+                                        "i1" => "false".to_string(),
+                                        "i8*" => "null".to_string(),
+                                        _ => "0".to_string(),
+                                    }
+                                };
+                                self.out
+                                    .push_str(&format!("  ret {} {}\n", self.fn_ret_ty, zero));
+                            }
+                            Ok(())
                         }
-                        Ok(())
                     }
                 }
             }
@@ -1793,7 +2297,128 @@ impl<'a> Cg<'a> {
                 args,
             } => self.codegen_method_call(object, method, args),
             Expr::Array(items) => self.codegen_array_lit(items),
-            Expr::Await(inner) => self.codegen_expr(inner),
+            Expr::Await(inner) => {
+                // Multi-task executor-based poll loop: call inner to get Future,
+                // poll directly until Ready.
+                // On Pending: call executor_run_once() to process other tasks
+                // (enables multi-task interleaving), then re-poll.
+                // The future is NOT spawned as a separate task — the poll loop
+                // handles it directly. This avoids dual-polling and use-after-free.
+                let (future_val, future_ty) = self.codegen_expr(inner)?;
+                let inner_type = match &future_ty {
+                    Type::Future(inner) => (**inner).clone(),
+                    _ => Type::Unknown,
+                };
+
+                // Get global executor (created by main_lime wrapper)
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+
+                // Poll loop — poll the future directly, no spawn
+                let loop_bb = self.fresh_block();
+                let done_bb = self.fresh_block();
+
+                self.out.push_str(&format!("  br label %{}\n", loop_bb));
+                self.out.push_str(&format!("{}:\n", loop_bb));
+                self.current_block = loop_bb.clone();
+
+                // Allocate poll result slot
+                let poll_slot = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = alloca %ChallengerPoll, align 8\n",
+                    poll_slot
+                ));
+
+                // Call challenger_future_poll with null waker (waker not needed
+                // for direct poll — reactor-based futures will use a stored waker)
+                self.out.push_str(&format!(
+                    "  call void @challenger_future_poll(%ChallengerPoll* sret(%ChallengerPoll) {}, i8* {}, %ChallengerWaker* null)\n",
+                    poll_slot,
+                    self.bare_value(&future_val),
+                ));
+
+                // Load poll result
+                let poll_loaded = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = load %ChallengerPoll, %ChallengerPoll* {}, align 8\n",
+                    poll_loaded, poll_slot
+                ));
+
+                // Extract tag (field 0)
+                let tag = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %ChallengerPoll {}, 0\n",
+                    tag, poll_loaded
+                ));
+
+                // tag == 1 means Pending → run_once and re-poll
+                let is_pending = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = icmp eq i64 {}, 1\n",
+                    is_pending, tag
+                ));
+
+                let pending_bb = self.fresh_block();
+                self.out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    is_pending, pending_bb, done_bb
+                ));
+
+                // Pending block: run executor once (drain ready queue + reactor)
+                // to process other tasks, then re-poll
+                self.out.push_str(&format!("{}:\n", pending_bb));
+                self.current_block = pending_bb.clone();
+                self.out.push_str(&format!(
+                    "  call i32 @challenger_executor_run_once(i8* {})\n",
+                    exec
+                ));
+                self.out.push_str(&format!("  br label %{}\n", loop_bb));
+
+                // Done block: extract value (field 1)
+                self.out.push_str(&format!("{}:\n", done_bb));
+                self.current_block = done_bb.clone();
+
+                let value = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = extractvalue %ChallengerPoll {}, 1\n",
+                    value, poll_loaded
+                ));
+
+                // Do NOT free executor — it's the global one, freed by main_lime wrapper
+
+                // Convert i64 value to the actual inner type
+                match &inner_type {
+                    Type::Float => {
+                        let bc = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = bitcast i64 {} to double\n",
+                            bc, value
+                        ));
+                        Ok((bc, Type::Float))
+                    }
+                    Type::Bool => {
+                        let tr = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = trunc i64 {} to i1\n",
+                            tr, value
+                        ));
+                        Ok((tr, Type::Bool))
+                    }
+                    Type::String => {
+                        let ptr_val = self.fresh_temp();
+                        self.out.push_str(&format!(
+                            "  {} = inttoptr i64 {} to i8*\n",
+                            ptr_val, value
+                        ));
+                        Ok((ptr_val, Type::String))
+                    }
+                    Type::Unit => Ok((String::new(), Type::Unit)),
+                    _ => Ok((value, Type::Int)),
+                }
+            }
             Expr::FnDef { params, body } => self.codegen_anon_fn(params, body),
             // Iteration 34 PH1: tuple literal — elements are stored as i64
             // slots in an anonymous [N x i64] aggregate (same payload model
@@ -3245,6 +3870,18 @@ impl<'a> Cg<'a> {
             call_args.push(self.fmt_call_arg(&v, &t));
         }
         let call_args_str = call_args.join(", ");
+        if fdef.is_async {
+            let tmp = self.fresh_temp();
+            self.out.push_str(&format!(
+                "  {} = call i8* @{}({})\n",
+                tmp, llvm_name, call_args_str
+            ));
+            let inner_ret = match &fdef.return_type {
+                Some(rt) => type_from_str(rt, self.defs),
+                None => Type::Unit,
+            };
+            return Ok((tmp, Type::Future(Box::new(inner_ret))));
+        }
         let ret_type = match &fdef.return_type {
             Some(rt) => {
                 let t = type_from_str(rt, self.defs);
@@ -3810,7 +4447,655 @@ impl<'a> Cg<'a> {
                 let (v, t) = call_bool(self, "runtime_time_sleep", &[x]);
                 Ok(Some((v, t)))
             }
-            // ---- stdio builtin ----
+            // ---- spawn: fire-and-forget task on global executor ----
+            "spawn" => {
+                if args.len() != 1 {
+                    return Err("spawn() expects 1 argument (future)".to_string());
+                }
+                let (future_val, _future_ty) = self.codegen_expr(&args[0])?;
+                let bare_future = self.bare_value(&future_val);
+                // Get global executor
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                // Spawn on executor (fire-and-forget)
+                let task_id = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @challenger_executor_spawn(i8* {}, i8* {})\n",
+                    task_id, exec, bare_future
+                ));
+                Ok(Some((task_id, Type::Int)))
+            }
+            // ---- cancel: cancel a spawned task by ID ----
+            "cancel" => {
+                if args.len() != 1 {
+                    return Err("cancel() expects 1 argument (task_id)".to_string());
+                }
+                let (task_id_val, _task_id_ty) = self.codegen_expr(&args[0])?;
+                let bare_id = self.bare_value(&task_id_val);
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_task_cancel(i8* {}, i64 {})\n",
+                    exec, bare_id
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- channel_new(capacity): create channel ----
+            "channel_new" => {
+                if args.len() != 1 {
+                    return Err("channel_new() expects 1 argument (capacity)".to_string());
+                }
+                let cap = i64_arg(self, &args[0])?;
+                let bare_cap = self.bare_value(&cap).to_string();
+                let cap32 = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = trunc i64 {} to i32\n",
+                    cap32, bare_cap
+                ));
+                let ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_channel_new(i32 {})\n",
+                    ptr, cap32
+                ));
+                // Bitcast pointer to i64 for storage in Lime state structs
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    tmp, ptr
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            // ---- channel_send(ch, value): async send future ----
+            "channel_send" => {
+                if args.len() != 2 {
+                    return Err("channel_send() expects 2 arguments (channel, value)".to_string());
+                }
+                let (ch_val, _ch_ty) = self.codegen_expr(&args[0])?;
+                let bare_ch = self.bare_value(&ch_val);
+                let ch_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ch_ptr, bare_ch
+                ));
+                let (val_val, _val_ty) = self.codegen_expr(&args[1])?;
+                let bare_val = self.bare_value(&val_val);
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_channel_send_async(i8* {}, i64 {})\n",
+                    tmp, ch_ptr, bare_val
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- channel_receive(ch): async receive future ----
+            "channel_receive" => {
+                if args.len() != 1 {
+                    return Err("channel_receive() expects 1 argument (channel)".to_string());
+                }
+                let (ch_val, _ch_ty) = self.codegen_expr(&args[0])?;
+                let bare_ch = self.bare_value(&ch_val);
+                let ch_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ch_ptr, bare_ch
+                ));
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_channel_receive_async(i8* {})\n",
+                    tmp, ch_ptr
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- channel_close(ch): close channel ----
+            "channel_close" => {
+                if args.len() != 1 {
+                    return Err("channel_close() expects 1 argument (channel)".to_string());
+                }
+                let (ch_val, _ch_ty) = self.codegen_expr(&args[0])?;
+                let bare_ch = self.bare_value(&ch_val);
+                let ch_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ch_ptr, bare_ch
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_channel_close(i8* {})\n",
+                    ch_ptr
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- notify_new() ----
+            "notify_new" => {
+                if !args.is_empty() {
+                    return Err("notify_new() expects no arguments".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_notify_new()\n",
+                    tmp
+                ));
+                let ptr_int = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_int, tmp
+                ));
+                Ok(Some((ptr_int, Type::Int)))
+            }
+            // ---- notify_wait(n): register as waiter, returns Future(Pending/Ready) ----
+            "notify_wait" => {
+                if args.len() != 1 {
+                    return Err("notify_wait() expects 1 argument (notify)".to_string());
+                }
+                let (n_val, _n_ty) = self.codegen_expr(&args[0])?;
+                let bare_n = self.bare_value(&n_val);
+                let n_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    n_ptr, bare_n
+                ));
+                // Create async future that calls notify_wait
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_notify_wait_create(i8* {})\n",
+                    tmp, n_ptr
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- notify_one(n) ----
+            "notify_one" => {
+                if args.len() != 1 {
+                    return Err("notify_one() expects 1 argument (notify)".to_string());
+                }
+                let (n_val, _n_ty) = self.codegen_expr(&args[0])?;
+                let bare_n = self.bare_value(&n_val);
+                let n_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    n_ptr, bare_n
+                ));
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_notify_one(i8* {}, i8* {})\n",
+                    exec, n_ptr
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- notify_all(n) ----
+            "notify_all" => {
+                if args.len() != 1 {
+                    return Err("notify_all() expects 1 argument (notify)".to_string());
+                }
+                let (n_val, _n_ty) = self.codegen_expr(&args[0])?;
+                let bare_n = self.bare_value(&n_val);
+                let n_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    n_ptr, bare_n
+                ));
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_notify_all(i8* {}, i8* {})\n",
+                    exec, n_ptr
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- mutex_new() ----
+            "mutex_new" => {
+                if !args.is_empty() {
+                    return Err("mutex_new() expects no arguments".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_mutex_new()\n",
+                    tmp
+                ));
+                let ptr_int = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_int, tmp
+                ));
+                Ok(Some((ptr_int, Type::Int)))
+            }
+            // ---- mutex_lock(m): async lock future ----
+            "mutex_lock" => {
+                if args.len() != 1 {
+                    return Err("mutex_lock() expects 1 argument (mutex)".to_string());
+                }
+                let (m_val, _m_ty) = self.codegen_expr(&args[0])?;
+                let bare_m = self.bare_value(&m_val);
+                let m_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    m_ptr, bare_m
+                ));
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_mutex_lock_create(i8* {})\n",
+                    tmp, m_ptr
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- mutex_unlock(m) ----
+            "mutex_unlock" => {
+                if args.len() != 1 {
+                    return Err("mutex_unlock() expects 1 argument (mutex)".to_string());
+                }
+                let (m_val, _m_ty) = self.codegen_expr(&args[0])?;
+                let bare_m = self.bare_value(&m_val);
+                let m_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    m_ptr, bare_m
+                ));
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                // Get current task id for unlock verification
+                let task_id = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @challenger_executor_current_task_id(i8* {})\n",
+                    task_id, exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_mutex_unlock(i8* {}, i8* {}, i64 {})\n",
+                    exec, m_ptr, task_id
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- semaphore_new(max_count) ----
+            "semaphore_new" => {
+                if args.len() != 1 {
+                    return Err("semaphore_new() expects 1 argument (max_count)".to_string());
+                }
+                let max = i64_arg(self, &args[0])?;
+                let bare_max = self.bare_value(&max).to_string();
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_semaphore_new(i32 {})\n",
+                    tmp, bare_max
+                ));
+                let ptr_int = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_int, tmp
+                ));
+                Ok(Some((ptr_int, Type::Int)))
+            }
+            // ---- semaphore_acquire(s): async acquire future ----
+            "semaphore_acquire" => {
+                if args.len() != 1 {
+                    return Err("semaphore_acquire() expects 1 argument (semaphore)".to_string());
+                }
+                let (s_val, _s_ty) = self.codegen_expr(&args[0])?;
+                let bare_s = self.bare_value(&s_val);
+                let s_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    s_ptr, bare_s
+                ));
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_semaphore_acquire_create(i8* {})\n",
+                    tmp, s_ptr
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- semaphore_release(s) ----
+            "semaphore_release" => {
+                if args.len() != 1 {
+                    return Err("semaphore_release() expects 1 argument (semaphore)".to_string());
+                }
+                let (s_val, _s_ty) = self.codegen_expr(&args[0])?;
+                let bare_s = self.bare_value(&s_val);
+                let s_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    s_ptr, bare_s
+                ));
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_semaphore_release(i8* {}, i8* {})\n",
+                    exec, s_ptr
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- rwlock_new() ----
+            "rwlock_new" => {
+                if !args.is_empty() {
+                    return Err("rwlock_new() expects no arguments".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_rwlock_new()\n",
+                    tmp
+                ));
+                let ptr_int = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = ptrtoint i8* {} to i64\n",
+                    ptr_int, tmp
+                ));
+                Ok(Some((ptr_int, Type::Int)))
+            }
+            // ---- read_lock(rw): async read lock future ----
+            "read_lock" => {
+                if args.len() != 1 {
+                    return Err("read_lock() expects 1 argument (rwlock)".to_string());
+                }
+                let (rw_val, _rw_ty) = self.codegen_expr(&args[0])?;
+                let bare_rw = self.bare_value(&rw_val);
+                let rw_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    rw_ptr, bare_rw
+                ));
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_rwlock_read_create(i8* {})\n",
+                    tmp, rw_ptr
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- read_unlock(rw) ----
+            "read_unlock" => {
+                if args.len() != 1 {
+                    return Err("read_unlock() expects 1 argument (rwlock)".to_string());
+                }
+                let (rw_val, _rw_ty) = self.codegen_expr(&args[0])?;
+                let bare_rw = self.bare_value(&rw_val);
+                let rw_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    rw_ptr, bare_rw
+                ));
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_rwlock_read_unlock(i8* {}, i8* {})\n",
+                    exec, rw_ptr
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- write_lock(rw): async write lock future ----
+            "write_lock" => {
+                if args.len() != 1 {
+                    return Err("write_lock() expects 1 argument (rwlock)".to_string());
+                }
+                let (rw_val, _rw_ty) = self.codegen_expr(&args[0])?;
+                let bare_rw = self.bare_value(&rw_val);
+                let rw_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    rw_ptr, bare_rw
+                ));
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_rwlock_write_create(i8* {})\n",
+                    tmp, rw_ptr
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- write_unlock(rw) ----
+            "write_unlock" => {
+                if args.len() != 1 {
+                    return Err("write_unlock() expects 1 argument (rwlock)".to_string());
+                }
+                let (rw_val, _rw_ty) = self.codegen_expr(&args[0])?;
+                let bare_rw = self.bare_value(&rw_val);
+                let rw_ptr = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    rw_ptr, bare_rw
+                ));
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                self.out.push_str(&format!(
+                    "  call void @challenger_rwlock_write_unlock(i8* {}, i8* {})\n",
+                    exec, rw_ptr
+                ));
+                Ok(Some((String::new(), Type::Unit)))
+            }
+            // ---- yield_now: cooperative yield (returns Pending, wakes self) ----
+            "yield_now" => {
+                if !args.is_empty() {
+                    return Err("yield_now() expects no arguments".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_yield_now_create()\n",
+                    tmp
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Unit)))))
+            }
+            // ---- sleep(ms): async timer future ----
+            "sleep" => {
+                if args.len() != 1 {
+                    return Err("sleep() expects 1 argument (int ms)".to_string());
+                }
+                let ms = i64_arg(self, &args[0])?;
+                let ms_bare = self.bare_value(&ms).to_string();
+                // Get global executor
+                let exec = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_get_global_executor()\n",
+                    exec
+                ));
+                // Convert ms to us
+                let us = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = mul i64 {}, 1000\n",
+                    us, ms_bare
+                ));
+                // Create sleep future
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_sleep_create(i8* {}, i64 {})\n",
+                    tmp, exec, us
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Unit)))))
+            }
+            // ---- delayed-ready futures (async E2E verification) ----
+            "delayed_ready" => {
+                if args.len() != 1 {
+                    return Err("delayed_ready() expects 1 argument (int)".to_string());
+                }
+                let x = i64_arg(self, &args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_delayed_ready_create({})\n",
+                    tmp, x
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            "delayed_ready_multi" => {
+                if args.len() != 2 {
+                    return Err("delayed_ready_multi() expects 2 arguments (int, int)".to_string());
+                }
+                let x = i64_arg(self, &args[0])?;
+                let c = i64_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_delayed_ready_multi_create({}, {})\n",
+                    tmp, x, c
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            // ---- TCP blocking builtins ----
+            "tcp_socket" => {
+                if !args.is_empty() {
+                    return Err("tcp_socket() takes no arguments".to_string());
+                }
+                let (v, t) = call_i64(self, "challenger_tcp_socket", &[]);
+                Ok(Some((v, t)))
+            }
+            "tcp_set_nonblocking" => {
+                if args.len() != 1 {
+                    return Err("tcp_set_nonblocking() expects 1 argument".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "challenger_tcp_set_nonblocking", &[fd]);
+                Ok(Some((v, t)))
+            }
+            "tcp_bind" => {
+                if args.len() != 3 {
+                    return Err("tcp_bind() expects 3 arguments (fd, host, port)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let host = str_arg(self, &args[1])?;
+                let port = i64_arg(self, &args[2])?;
+                let (v, t) = call_i64(self, "challenger_tcp_bind", &[fd, host, port]);
+                Ok(Some((v, t)))
+            }
+            "tcp_listen" => {
+                if args.len() != 2 {
+                    return Err("tcp_listen() expects 2 arguments (fd, backlog)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let backlog = i64_arg(self, &args[1])?;
+                let (v, t) = call_i64(self, "challenger_tcp_listen", &[fd, backlog]);
+                Ok(Some((v, t)))
+            }
+            "tcp_connect" => {
+                if args.len() != 3 {
+                    return Err("tcp_connect() expects 3 arguments (fd, host, port)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let host = str_arg(self, &args[1])?;
+                let port = i64_arg(self, &args[2])?;
+                let (v, t) = call_i64(self, "challenger_tcp_connect", &[fd, host, port]);
+                Ok(Some((v, t)))
+            }
+            "tcp_read" => {
+                if args.len() != 3 {
+                    return Err("tcp_read() expects 3 arguments (fd, buf_ptr, max_len)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let (buf, bt) = self.codegen_expr(&args[1])?;
+                let buf_typed = self.fmt_call_arg(&buf, &bt);
+                let max_len = i64_arg(self, &args[2])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @challenger_tcp_read({}, {}, {})\n", tmp, fd, buf_typed, max_len
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "tcp_write" => {
+                if args.len() != 3 {
+                    return Err("tcp_write() expects 3 arguments (fd, buf, len)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let (buf, bt) = self.codegen_expr(&args[1])?;
+                let buf_typed = self.fmt_call_arg(&buf, &bt);
+                let len = i64_arg(self, &args[2])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @challenger_tcp_write({}, {}, {})\n", tmp, fd, buf_typed, len
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "tcp_close" => {
+                if args.len() != 1 {
+                    return Err("tcp_close() expects 1 argument".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let (v, t) = call_i64(self, "challenger_tcp_close", &[fd]);
+                Ok(Some((v, t)))
+            }
+            // ---- TCP async futures (P0-B) ----
+            "tcp_connect_async" => {
+                if args.len() != 3 {
+                    return Err("tcp_connect_async() expects 3 arguments (fd, host, port)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let host = str_arg(self, &args[1])?;
+                let port = i64_arg(self, &args[2])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_tcp_connect_async({}, {}, {})\n", tmp, fd, host, port
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            "tcp_accept_async" => {
+                if args.len() != 1 {
+                    return Err("tcp_accept_async() expects 1 argument".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_tcp_accept_async({})\n", tmp, fd
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            "tcp_read_async" => {
+                if args.len() != 2 {
+                    return Err("tcp_read_async() expects 2 arguments (fd, max_len)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let max_len = i64_arg(self, &args[1])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_tcp_read_async({}, {})\n", tmp, fd, max_len
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            "tcp_write_async" => {
+                if args.len() != 3 {
+                    return Err("tcp_write_async() expects 3 arguments (fd, buf, len)".to_string());
+                }
+                let fd = i64_arg(self, &args[0])?;
+                let (buf, bt) = self.codegen_expr(&args[1])?;
+                let buf_typed = self.fmt_call_arg(&buf, &bt);
+                let len = i64_arg(self, &args[2])?;
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_tcp_write_async({}, {}, {})\n", tmp, fd, buf_typed, len
+                ));
+                Ok(Some((tmp, Type::Future(Box::new(Type::Int)))))
+            }
+            "tcp_get_last_read_len" => {
+                if !args.is_empty() {
+                    return Err("tcp_get_last_read_len() takes no arguments".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i64 @challenger_tcp_get_last_read_len()\n", tmp
+                ));
+                Ok(Some((tmp, Type::Int)))
+            }
+            "tcp_get_last_read_buf" => {
+                if !args.is_empty() {
+                    return Err("tcp_get_last_read_buf() takes no arguments".to_string());
+                }
+                let tmp = self.fresh_temp();
+                self.out.push_str(&format!(
+                    "  {} = call i8* @challenger_tcp_get_last_read_buf()\n", tmp
+                ));
+                Ok(Some((tmp, Type::String)))
+            }
             "input" => {
                 if args.len() > 1 {
                     return Err("input() takes at most 1 argument".to_string());

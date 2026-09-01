@@ -206,14 +206,14 @@ pub fn emit_llvm(
     // Challenger Async Runtime: Future / Poll / Waker (Phase 1)
     out.push_str("declare i8* @challenger_future_new(i8*, i8*)\n");
     out.push_str("declare void @challenger_future_free(i8*)\n");
-    out.push_str("declare %ChallengerPoll @challenger_future_poll(i8*, %ChallengerWaker*)\n");
+    out.push_str("declare void @challenger_future_poll(%ChallengerPoll* sret(%ChallengerPoll), i8*, %ChallengerWaker*)\n");
     out.push_str("declare i8 @challenger_future_is_completed(i8*)\n");
     out.push_str("declare %ChallengerWaker* @challenger_waker_new(i8*, i8*)\n");
     out.push_str("declare void @challenger_waker_free(%ChallengerWaker*)\n");
     out.push_str("declare void @challenger_waker_wake(%ChallengerWaker*)\n");
     out.push_str("declare void @challenger_waker_wake_by_ref(%ChallengerWaker*)\n");
-    out.push_str("declare %ChallengerPoll @challenger_poll_ready(i64)\n");
-    out.push_str("declare %ChallengerPoll @challenger_poll_pending()\n");
+    out.push_str("declare void @challenger_poll_ready(%ChallengerPoll* sret(%ChallengerPoll), i64)\n");
+    out.push_str("declare void @challenger_poll_pending(%ChallengerPoll* sret(%ChallengerPoll))\n");
     // Challenger Task / Executor (Phase 3-5)
     out.push_str("declare i8* @challenger_executor_new()\n");
     out.push_str("declare void @challenger_executor_free(i8*)\n");
@@ -221,13 +221,27 @@ pub fn emit_llvm(
     out.push_str("declare void @challenger_executor_cancel(i8*, i64)\n");
     out.push_str("declare i32 @challenger_executor_run(i8*)\n");
     out.push_str("declare void @challenger_executor_wake_task(i8*, i64)\n");
+    out.push_str("declare i64 @challenger_executor_current_task_id(i8*)\n");
     out.push_str("declare void @challenger_waker_wake_from_executor(i8*, i64)\n");
+    out.push_str("declare void @challenger_set_global_executor(i8*)\n");
+    out.push_str("declare i8* @challenger_get_global_executor()\n");
+    out.push_str("declare i32 @challenger_executor_run_once(i8*)\n");
+    out.push_str("declare %ChallengerWaker* @challenger_waker_new_for_task(i8*, i64)\n");
+    // Delayed-ready futures (for async E2E verification)
+    out.push_str("declare i8* @challenger_delayed_ready_create(i64)\n");
+    out.push_str("declare i8* @challenger_delayed_ready_multi_create(i64, i64)\n");
+    out.push_str("declare i8* @challenger_yield_now_create()\n");
+    // Task event log
+    out.push_str("declare void @challenger_task_event(i8*)\n");
+    out.push_str("declare void @challenger_task_event_reset()\n");
+    out.push_str("declare i64 @challenger_task_event_count()\n");
     // Challenger Timer (Phase 6)
     out.push_str("declare void @challenger_timer_init(i8*)\n");
     out.push_str("declare i64 @challenger_time_now_us()\n");
     out.push_str("declare i64 @challenger_timer_sleep(i8*, i8*, i64)\n");
     out.push_str("declare void @challenger_timer_cancel(i8*, i64)\n");
     out.push_str("declare i64 @challenger_timer_tick(i8*, i8*)\n");
+    out.push_str("declare i8* @challenger_sleep_create(i8*, i64)\n");
     // Challenger Reactor (Phase 7)
     out.push_str("declare i8* @challenger_reactor_new()\n");
     out.push_str("declare void @challenger_reactor_free(i8*)\n");
@@ -235,15 +249,23 @@ pub fn emit_llvm(
     out.push_str("declare i32 @challenger_reactor_unregister(i8*, i32)\n");
     out.push_str("declare i32 @challenger_reactor_poll(i8*, i8*, i32)\n");
     // Challenger TCP (Phase 8)
-    out.push_str("declare i32 @challenger_tcp_socket()\n");
-    out.push_str("declare i32 @challenger_tcp_set_nonblocking(i32)\n");
-    out.push_str("declare i32 @challenger_tcp_bind(i32, i8*, i32)\n");
-    out.push_str("declare i32 @challenger_tcp_listen(i32, i32)\n");
-    out.push_str("declare i32 @challenger_tcp_accept(i32)\n");
-    out.push_str("declare i32 @challenger_tcp_connect(i32, i8*, i32)\n");
-    out.push_str("declare i32 @challenger_tcp_read(i32, i8*, i32)\n");
-    out.push_str("declare i32 @challenger_tcp_write(i32, i8*, i32)\n");
-    out.push_str("declare i32 @challenger_tcp_close(i32)\n");
+    out.push_str("declare i64 @challenger_tcp_socket()\n");
+    out.push_str("declare i64 @challenger_tcp_set_nonblocking(i64)\n");
+    out.push_str("declare i64 @challenger_tcp_bind(i64, i8*, i64)\n");
+    out.push_str("declare i64 @challenger_tcp_listen(i64, i64)\n");
+    out.push_str("declare i64 @challenger_tcp_accept(i64)\n");
+    out.push_str("declare i64 @challenger_tcp_connect(i64, i8*, i64)\n");
+    out.push_str("declare i64 @challenger_tcp_read(i64, i8*, i64)\n");
+    out.push_str("declare i64 @challenger_tcp_write(i64, i8*, i64)\n");
+    out.push_str("declare i64 @challenger_tcp_close(i64)\n");
+    // Challenger TCP Async Futures (P0-B)
+    out.push_str("declare i8* @challenger_tcp_connect_async(i64, i8*, i64)\n");
+    out.push_str("declare i8* @challenger_tcp_accept_async(i64)\n");
+    out.push_str("declare i8* @challenger_tcp_read_async(i64, i64)\n");
+    out.push_str("declare i8* @challenger_tcp_read_into_async(i64, i8*, i64)\n");
+    out.push_str("declare i8* @challenger_tcp_write_async(i64, i8*, i64)\n");
+    out.push_str("declare i64 @challenger_tcp_get_last_read_len()\n");
+    out.push_str("declare i8* @challenger_tcp_get_last_read_buf()\n");
     // Challenger UDP (Phase 9)
     out.push_str("declare i32 @challenger_udp_socket()\n");
     out.push_str("declare i32 @challenger_udp_bind(i32, i8*, i32)\n");
@@ -254,17 +276,19 @@ pub fn emit_llvm(
     out.push_str("declare i8* @challenger_mutex_new()\n");
     out.push_str("declare void @challenger_mutex_free(i8*)\n");
     out.push_str("declare i32 @challenger_mutex_try_lock(i8*, i64)\n");
-    out.push_str("declare void @challenger_mutex_unlock(i8*, i64)\n");
+    out.push_str("declare void @challenger_mutex_unlock(i8*, i8*, i64)\n");
     out.push_str("declare i8* @challenger_rwlock_new()\n");
     out.push_str("declare void @challenger_rwlock_free(i8*)\n");
     out.push_str("declare i32 @challenger_rwlock_try_read(i8*, i64)\n");
-    out.push_str("declare void @challenger_rwlock_read_unlock(i8*)\n");
+    out.push_str("declare void @challenger_rwlock_read_unlock(i8*, i8*)\n");
     out.push_str("declare i32 @challenger_rwlock_try_write(i8*, i64)\n");
-    out.push_str("declare void @challenger_rwlock_write_unlock(i8*)\n");
+    out.push_str("declare void @challenger_rwlock_write_unlock(i8*, i8*)\n");
+    out.push_str("declare i8* @challenger_rwlock_read_create(i8*)\n");
+    out.push_str("declare i8* @challenger_rwlock_write_create(i8*)\n");
     out.push_str("declare i8* @challenger_semaphore_new(i32)\n");
     out.push_str("declare void @challenger_semaphore_free(i8*)\n");
     out.push_str("declare i32 @challenger_semaphore_try_acquire(i8*, i64)\n");
-    out.push_str("declare void @challenger_semaphore_release(i8*)\n");
+    out.push_str("declare void @challenger_semaphore_release(i8*, i8*)\n");
     out.push_str("declare i8* @challenger_notify_new()\n");
     out.push_str("declare void @challenger_notify_free(i8*)\n");
     out.push_str("declare i32 @challenger_notify_wait(i8*, i64)\n");
@@ -277,6 +301,12 @@ pub fn emit_llvm(
     out.push_str("declare i32 @challenger_channel_receive(i8*, i64*)\n");
     out.push_str("declare void @challenger_channel_close(i8*)\n");
     out.push_str("declare i32 @challenger_channel_is_closed(i8*)\n");
+    out.push_str("declare i8* @challenger_channel_send_async(i8*, i64)\n");
+    out.push_str("declare i8* @challenger_channel_receive_async(i8*)\n");
+    // Async sync primitive futures
+    out.push_str("declare i8* @challenger_notify_wait_create(i8*)\n");
+    out.push_str("declare i8* @challenger_mutex_lock_create(i8*)\n");
+    out.push_str("declare i8* @challenger_semaphore_acquire_create(i8*)\n");
     // Challenger Join/Select (Phase 12)
     out.push_str("declare i8* @challenger_join_all_new(i8**, i32)\n");
     out.push_str("declare void @challenger_join_all_free(i8*)\n");

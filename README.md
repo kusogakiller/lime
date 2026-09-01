@@ -103,6 +103,13 @@ Type error: undefined variable 'xyz'
 - Match on tuples partially supported
 - Enum construction not lowered (bare variants work)
 
+### Async runtime (Challenger)
+- Single-thread only (multi-thread executor not supported)
+- Sync primitive waiter arrays fixed at 256 slots
+- Channel capacity maximum 65536
+- Interpreter does not implement async Pending/Wake/Resume
+- Reactor fd cleanup on task cancellation is incomplete
+
 ### Charger
 - `charger install` has stack overflow on fixture libraries (pre-existing)
 - Charger is frozen for 1.0 RC

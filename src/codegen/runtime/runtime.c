@@ -5428,6 +5428,110 @@ int8_t challenger_future_is_completed(ChallengerFuture* fut) {
     return fut ? fut->completed : 1;
 }
 
+// ============================================================
+// Delayed-ready futures (for async E2E verification)
+// ============================================================
+
+typedef struct {
+    int64_t polls_before_ready;
+    int64_t poll_count;
+    int64_t value;
+} DelayedReadyState;
+
+static Poll delayed_ready_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    DelayedReadyState* state = (DelayedReadyState*)self->state;
+    if (state->poll_count < state->polls_before_ready) {
+        state->poll_count++;
+        // Self-wake: re-enqueue this task so executor_run picks it up on the
+        // next iteration. Without this, spawned tasks that return Pending would
+        // never be re-polled because nobody else calls waker_wake on them.
+        if (waker) {
+            challenger_waker_wake(waker);
+        }
+        Poll p;
+        p.tag = 1;  // Pending
+        p.value = 0;
+        return p;
+    }
+    Poll p;
+    p.tag = 0;  // Ready
+    p.value = state->value;
+    return p;
+}
+
+ChallengerFuture* challenger_delayed_ready_create(int64_t value) {
+    DelayedReadyState* state = (DelayedReadyState*)calloc(1, sizeof(DelayedReadyState));
+    if (!state) return NULL;
+    state->polls_before_ready = 1;
+    state->poll_count = 0;
+    state->value = value;
+    return challenger_future_new(delayed_ready_poll, state);
+}
+
+ChallengerFuture* challenger_delayed_ready_multi_create(int64_t value, int64_t count) {
+    DelayedReadyState* state = (DelayedReadyState*)calloc(1, sizeof(DelayedReadyState));
+    if (!state) return NULL;
+    state->polls_before_ready = count > 0 ? count : 1;
+    state->poll_count = 0;
+    state->value = value;
+    return challenger_future_new(delayed_ready_poll, state);
+}
+
+// ============================================================
+// Yield-now primitive (scheduler cooperative yield)
+// ============================================================
+
+typedef struct {
+    int64_t poll_count;
+} YieldNowState;
+
+static Poll yield_now_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    YieldNowState* state = (YieldNowState*)self->state;
+    state->poll_count++;
+    if (state->poll_count == 1) {
+        // First poll: return Pending, wake self so executor re-enqueues
+        if (waker) {
+            challenger_waker_wake(waker);
+        }
+        Poll p;
+        p.tag = 1;  // Pending
+        p.value = 0;
+        return p;
+    }
+    // Second poll: return Ready
+    Poll p;
+    p.tag = 0;  // Ready
+    p.value = 0;
+    return p;
+}
+
+ChallengerFuture* challenger_yield_now_create(void) {
+    YieldNowState* state = (YieldNowState*)calloc(1, sizeof(YieldNowState));
+    return challenger_future_new(yield_now_poll, state);
+}
+
+// ============================================================
+// Task event log (for async E2E verification)
+// ============================================================
+
+#define MAX_TASK_EVENTS 1024
+static const char* g_task_events[MAX_TASK_EVENTS];
+static int64_t g_task_event_count = 0;
+
+void challenger_task_event(const char* event) {
+    if (g_task_event_count < MAX_TASK_EVENTS) {
+        g_task_events[g_task_event_count++] = event;
+    }
+}
+
+void challenger_task_event_reset(void) {
+    g_task_event_count = 0;
+}
+
+int64_t challenger_task_event_count(void) {
+    return g_task_event_count;
+}
+
 ChallengerWaker* challenger_waker_new(ChallengerWakeFn wake_fn, void* data) {
     ChallengerWaker* w = (ChallengerWaker*)malloc(sizeof(ChallengerWaker));
     if (!w) return NULL;
@@ -5502,6 +5606,14 @@ int challenger_ready_queue_is_empty(ReadyQueue* q) {
 
 // --- Executor ---
 
+// Forward declarations (reactor defined later in file)
+ChallengerReactor* challenger_reactor_new(void);
+void challenger_reactor_free(ChallengerReactor* reactor);
+int challenger_reactor_poll(ChallengerExecutor* exec, ChallengerReactor* reactor, int timeout_ms);
+int challenger_reactor_register(ChallengerReactor* reactor, int fd, uint64_t task_id);
+int challenger_reactor_unregister(ChallengerReactor* reactor, int fd);
+static void timer_cancel_task_timers(ChallengerTimerWheel* tw, uint64_t task_id);
+
 ChallengerExecutor* challenger_executor_new(void) {
     ChallengerExecutor* exec = (ChallengerExecutor*)calloc(1, sizeof(ChallengerExecutor));
     if (!exec) return NULL;
@@ -5512,20 +5624,44 @@ ChallengerExecutor* challenger_executor_new(void) {
     exec->running = 0;
     exec->shutdown = 0;
     exec->worker_handle = NULL;
+    exec->all_tasks_count = 0;
+    // Create reactor for async I/O integration
+    exec->reactor = challenger_reactor_new();
+    // Create timer wheel for async sleep/timers
+    exec->timer_wheel = (ChallengerTimerWheel*)calloc(1, sizeof(ChallengerTimerWheel));
+    if (exec->timer_wheel) {
+        challenger_timer_init(exec->timer_wheel);
+    }
     return exec;
 }
 
 void challenger_executor_free(ChallengerExecutor* exec) {
     if (!exec) return;
-    // Free all remaining tasks
-    while (!challenger_ready_queue_is_empty(&exec->ready)) {
-        ChallengerTask* t = challenger_ready_queue_pop(&exec->ready);
+    // Free reactor
+    if (exec->reactor) {
+        challenger_reactor_free(exec->reactor);
+        exec->reactor = NULL;
+    }
+    // Free timer wheel
+    if (exec->timer_wheel) {
+        free(exec->timer_wheel);
+        exec->timer_wheel = NULL;
+    }
+    // Free all tasks from the global registry (includes both ready and pending tasks)
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        ChallengerTask* t = exec->all_tasks[i];
         if (t) {
             if (t->future) challenger_future_free(t->future);
             if (t->waker) challenger_waker_free(t->waker);
             free(t);
         }
+        exec->all_tasks[i] = NULL;
     }
+    exec->all_tasks_count = 0;
+    // Clear the ready queue (don't pop — tasks already freed above)
+    exec->ready.head = 0;
+    exec->ready.tail = 0;
+    exec->ready.count = 0;
     free(exec);
 }
 
@@ -5539,9 +5675,16 @@ uint64_t challenger_executor_spawn(ChallengerExecutor* exec, ChallengerFuture* f
     task->future = fut;
     task->state = CHALLENGER_TASK_READY;
     task->needs_poll = 0;
+    task->woken = 0;
 
     // Create a real waker that references the executor and this task
     task->waker = challenger_waker_new_for_task(exec, task->id);
+
+    // Register in global task table (so wake_task can find it even when pending)
+    if (exec->all_tasks_count < CHALLENGER_MAX_TASKS) {
+        exec->all_tasks[exec->all_tasks_count] = task;
+        exec->all_tasks_count++;
+    }
 
     challenger_ready_queue_push(&exec->ready, task);
     return task->id;
@@ -5549,9 +5692,9 @@ uint64_t challenger_executor_spawn(ChallengerExecutor* exec, ChallengerFuture* f
 
 void challenger_executor_cancel(ChallengerExecutor* exec, uint64_t task_id) {
     if (!exec) return;
-    // Find task in the ready queue and mark as cancelled
-    for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
-        ChallengerTask* t = exec->ready.tasks[i];
+    // Search all tracked tasks (not just ready queue)
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        ChallengerTask* t = exec->all_tasks[i];
         if (t && t->id == task_id) {
             t->state = CHALLENGER_TASK_CANCELLED;
             return;
@@ -5561,13 +5704,34 @@ void challenger_executor_cancel(ChallengerExecutor* exec, uint64_t task_id) {
 
 void challenger_executor_wake_task(ChallengerExecutor* exec, uint64_t task_id) {
     if (!exec) return;
-    // Find the task and re-enqueue it
-    for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
-        ChallengerTask* t = exec->ready.tasks[i];
+    // Search ALL tasks (including pending tasks not in the ready queue)
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        ChallengerTask* t = exec->all_tasks[i];
         if (t && t->id == task_id) {
-            if (!t->needs_poll) {
+            if (exec->current_task_id == task_id) {
+                // Task is currently being polled — defer re-enqueue to next
+                // executor iteration. Setting woken ensures it gets re-enqueued
+                // after the current drain cycle completes.
+                t->woken = 1;
+            } else if (!t->needs_poll) {
                 challenger_ready_queue_push(&exec->ready, t);
             }
+            return;
+        }
+    }
+}
+
+uint64_t challenger_executor_current_task_id(ChallengerExecutor* exec) {
+    if (!exec) return 0;
+    return exec->current_task_id;
+}
+
+static void executor_remove_task(ChallengerExecutor* exec, ChallengerTask* task) {
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        if (exec->all_tasks[i] == task) {
+            exec->all_tasks[i] = exec->all_tasks[exec->all_tasks_count - 1];
+            exec->all_tasks[exec->all_tasks_count - 1] = NULL;
+            exec->all_tasks_count--;
             return;
         }
     }
@@ -5578,49 +5742,113 @@ int challenger_executor_run(ChallengerExecutor* exec) {
     exec->running = 1;
 
     while (!exec->shutdown) {
-        // Check if all tasks are done
-        if (challenger_ready_queue_is_empty(&exec->ready)) {
+        // Phase 1: Re-enqueue tasks woken during the previous drain cycle
+        for (int i = 0; i < exec->all_tasks_count; i++) {
+            ChallengerTask* t = exec->all_tasks[i];
+            if (t && t->woken) {
+                t->woken = 0;
+                challenger_ready_queue_push(&exec->ready, t);
+            }
+        }
+
+        // Phase 2: Drain the ready queue
+        while (!challenger_ready_queue_is_empty(&exec->ready)) {
+            ChallengerTask* task = challenger_ready_queue_pop(&exec->ready);
+            if (!task) continue;
+            if (task->state == CHALLENGER_TASK_CANCELLED) {
+                // Cancel any timers belonging to this task
+                if (exec->timer_wheel) {
+                    timer_cancel_task_timers(exec->timer_wheel, task->id);
+                }
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                executor_remove_task(exec, task);
+                free(task);
+                continue;
+            }
+
+            task->state = CHALLENGER_TASK_RUNNING;
+            exec->current_task_id = task->id;
+
+            // Poll the future
+            if (task->future && !task->future->completed) {
+                Poll result = challenger_future_poll(task->future, task->waker);
+
+                exec->current_task_id = 0;
+
+                if (result.tag == 0) {
+                    // Ready: task completed
+                    task->state = CHALLENGER_TASK_COMPLETED;
+                    task->future->output = result.value;
+                    if (task->future) challenger_future_free(task->future);
+                    if (task->waker) challenger_waker_free(task->waker);
+                    executor_remove_task(exec, task);
+                    free(task);
+                } else {
+                    // Pending: task waits for wake
+                    task->state = CHALLENGER_TASK_READY;
+                    // Task stays in all_tasks registry; waker will re-enqueue to ready queue.
+                }
+            } else {
+                exec->current_task_id = 0;
+                // Future already completed or null
+                task->state = CHALLENGER_TASK_COMPLETED;
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                executor_remove_task(exec, task);
+                free(task);
+            }
+        }
+
+        // Phase 3: Re-enqueue tasks woken during the drain (self-wake, external wake)
+        for (int i = 0; i < exec->all_tasks_count; i++) {
+            ChallengerTask* t = exec->all_tasks[i];
+            if (t && t->woken) {
+                t->woken = 0;
+                challenger_ready_queue_push(&exec->ready, t);
+            }
+        }
+
+        // If no more tasks, we're done
+        if (exec->all_tasks_count == 0) {
             break;
         }
 
-        ChallengerTask* task = challenger_ready_queue_pop(&exec->ready);
-        if (!task) continue;
-        if (task->state == CHALLENGER_TASK_CANCELLED) {
-            if (task->future) challenger_future_free(task->future);
-            if (task->waker) challenger_waker_free(task->waker);
-            free(task);
+        // If ready queue has tasks (from Phase 3 re-enqueue), loop back to process them
+        if (!challenger_ready_queue_is_empty(&exec->ready)) {
             continue;
         }
 
-        task->state = CHALLENGER_TASK_RUNNING;
-        exec->current_task_id = task->id;
-
-        // Poll the future
-        if (task->future && !task->future->completed) {
-            Poll result = challenger_future_poll(task->future, task->waker);
-
-            exec->current_task_id = 0;
-
-            if (result.tag == 0) {
-                // Ready: task completed
-                task->state = CHALLENGER_TASK_COMPLETED;
-                task->future->output = result.value;
-                if (task->future) challenger_future_free(task->future);
-                if (task->waker) challenger_waker_free(task->waker);
-                free(task);
-            } else {
-                // Pending: task waits for wake
-                task->state = CHALLENGER_TASK_READY;
-                // Task stays in the system but is not in the ready queue.
-                // When waker fires, it will be re-enqueued.
+        // Ready queue is empty but tasks are pending — check timers, then poll reactor for I/O events
+        if (exec->timer_wheel) {
+            int64_t next_timer_us = challenger_timer_tick(exec, exec->timer_wheel);
+            // If timer_tick woke tasks, check ready queue
+            if (!challenger_ready_queue_is_empty(&exec->ready)) {
+                continue;
+            }
+            // Use next timer deadline as reactor timeout (convert us to ms, min 1ms)
+            int timeout_ms = (next_timer_us > 0) ? (int)((next_timer_us + 999) / 1000) : 100;
+            if (exec->reactor) {
+                int events = challenger_reactor_poll(exec, exec->reactor, timeout_ms);
+                if (events == 0) {
+                    // Re-check timers after reactor poll (might have expired during wait)
+                    if (exec->timer_wheel) {
+                        challenger_timer_tick(exec, exec->timer_wheel);
+                    }
+                    if (challenger_ready_queue_is_empty(&exec->ready)) {
+                        break;
+                    }
+                }
+            }
+        } else if (exec->reactor) {
+            int events = challenger_reactor_poll(exec, exec->reactor, 100);
+            if (events == 0) {
+                if (challenger_ready_queue_is_empty(&exec->ready)) {
+                    break;
+                }
             }
         } else {
-            exec->current_task_id = 0;
-            // Future already completed or null
-            task->state = CHALLENGER_TASK_COMPLETED;
-            if (task->future) challenger_future_free(task->future);
-            if (task->waker) challenger_waker_free(task->waker);
-            free(task);
+            break;
         }
     }
 
@@ -5642,6 +5870,140 @@ static ChallengerExecutor* g_challenger_executor = NULL;
 
 void challenger_set_global_executor(ChallengerExecutor* exec) {
     g_challenger_executor = exec;
+}
+
+ChallengerExecutor* challenger_get_global_executor(void) {
+    return g_challenger_executor;
+}
+
+// Run one iteration of the executor loop:
+// 0) Re-enqueue tasks woken during the previous drain cycle
+// 1) Drain all currently ready tasks
+// 2) Re-enqueue tasks woken during drain (self-wake, external wake)
+// 3) If ready queue empty but tasks pending, poll reactor once (1ms timeout)
+// 4) Drain any newly woken tasks from reactor
+// Returns total number of tasks processed in this iteration.
+int challenger_executor_run_once(ChallengerExecutor* exec) {
+    if (!exec) return 0;
+    int processed = 0;
+
+    // Phase 0: Re-enqueue tasks woken during the previous drain cycle
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        ChallengerTask* t = exec->all_tasks[i];
+        if (t && t->woken) {
+            t->woken = 0;
+            challenger_ready_queue_push(&exec->ready, t);
+        }
+    }
+
+    // Phase 1: drain the ready queue
+    while (!challenger_ready_queue_is_empty(&exec->ready)) {
+        ChallengerTask* task = challenger_ready_queue_pop(&exec->ready);
+        if (!task) continue;
+        if (task->state == CHALLENGER_TASK_CANCELLED) {
+            // Cancel any timers belonging to this task
+            if (exec->timer_wheel) {
+                timer_cancel_task_timers(exec->timer_wheel, task->id);
+            }
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            executor_remove_task(exec, task);
+            free(task);
+            continue;
+        }
+
+        task->state = CHALLENGER_TASK_RUNNING;
+        exec->current_task_id = task->id;
+
+        if (task->future && !task->future->completed) {
+            Poll result = challenger_future_poll(task->future, task->waker);
+            exec->current_task_id = 0;
+
+            if (result.tag == 0) {
+                // Ready: task completed
+                task->state = CHALLENGER_TASK_COMPLETED;
+                task->future->output = result.value;
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                executor_remove_task(exec, task);
+                free(task);
+            } else {
+                // Pending: task waits for wake
+                task->state = CHALLENGER_TASK_READY;
+            }
+            processed++;
+        } else {
+            exec->current_task_id = 0;
+            task->state = CHALLENGER_TASK_COMPLETED;
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            executor_remove_task(exec, task);
+            free(task);
+            processed++;
+        }
+    }
+
+    // Phase 2: Re-enqueue tasks woken during the drain (self-wake, external wake)
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        ChallengerTask* t = exec->all_tasks[i];
+        if (t && t->woken) {
+            t->woken = 0;
+            challenger_ready_queue_push(&exec->ready, t);
+        }
+    }
+
+    // Phase 3: if no ready tasks but tasks are pending, check timers then poll reactor once
+    if (exec->all_tasks_count > 0 && processed == 0) {
+        if (exec->timer_wheel) {
+            challenger_timer_tick(exec, exec->timer_wheel);
+        }
+        if (exec->reactor) {
+            challenger_reactor_poll(exec, exec->reactor, 1);
+        }
+    }
+
+    // Phase 4: drain any newly woken tasks from reactor
+    while (!challenger_ready_queue_is_empty(&exec->ready)) {
+        ChallengerTask* task = challenger_ready_queue_pop(&exec->ready);
+        if (!task) continue;
+        if (task->state == CHALLENGER_TASK_CANCELLED) {
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            executor_remove_task(exec, task);
+            free(task);
+            continue;
+        }
+
+        task->state = CHALLENGER_TASK_RUNNING;
+        exec->current_task_id = task->id;
+
+        if (task->future && !task->future->completed) {
+            Poll result = challenger_future_poll(task->future, task->waker);
+            exec->current_task_id = 0;
+
+            if (result.tag == 0) {
+                task->state = CHALLENGER_TASK_COMPLETED;
+                task->future->output = result.value;
+                if (task->future) challenger_future_free(task->future);
+                if (task->waker) challenger_waker_free(task->waker);
+                executor_remove_task(exec, task);
+                free(task);
+            } else {
+                task->state = CHALLENGER_TASK_READY;
+            }
+            processed++;
+        } else {
+            exec->current_task_id = 0;
+            task->state = CHALLENGER_TASK_COMPLETED;
+            if (task->future) challenger_future_free(task->future);
+            if (task->waker) challenger_waker_free(task->waker);
+            executor_remove_task(exec, task);
+            free(task);
+            processed++;
+        }
+    }
+
+    return processed;
 }
 
 // Wake callback: called by waker when a task needs to be rescheduled
@@ -5761,6 +6123,59 @@ int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw
     return -1; // no active timers
 }
 
+// Cancel all timers belonging to a specific task (called on task cancellation)
+static void timer_cancel_task_timers(ChallengerTimerWheel* tw, uint64_t task_id) {
+    if (!tw || task_id == 0) return;
+    for (int i = 0; i < CHALLENGER_MAX_TIMERS; i++) {
+        if (tw->timers[i].active && tw->timers[i].task_id == task_id) {
+            tw->timers[i].active = 0;
+            tw->count--;
+        }
+    }
+}
+
+// ============================================================
+// Async Sleep Future (Phase D)
+// ============================================================
+
+typedef struct {
+    int64_t duration_us;
+    int registered;     // 0 = timer not yet registered, 1 = registered
+    uint64_t timer_id;  // 1-based timer ID from timer_sleep
+    ChallengerExecutor* exec;
+} SleepState;
+
+static Poll sleep_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    SleepState* state = (SleepState*)self->state;
+    if (!state) {
+        Poll p; p.tag = 0; p.value = 0; return p;
+    }
+
+    if (!state->registered) {
+        // First poll: register timer with executor's timer wheel
+        if (state->exec && state->exec->timer_wheel) {
+            state->timer_id = challenger_timer_sleep(
+                state->exec, state->exec->timer_wheel, state->duration_us);
+            state->registered = 1;
+        }
+        // Return Pending — timer_tick will wake the task when expired
+        Poll p; p.tag = 1; p.value = 0; return p;
+    }
+
+    // Second poll: timer expired (task was woken by timer_tick)
+    Poll p; p.tag = 0; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_sleep_create(ChallengerExecutor* exec, int64_t duration_us) {
+    SleepState* state = (SleepState*)calloc(1, sizeof(SleepState));
+    if (!state) return NULL;
+    state->duration_us = duration_us;
+    state->registered = 0;
+    state->timer_id = 0;
+    state->exec = exec;
+    return challenger_future_new(sleep_poll, state);
+}
+
 // ============================================================
 // Challenger Async Runtime — OS Reactor (Phase 7)
 // ============================================================
@@ -5770,13 +6185,10 @@ int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw
 ChallengerReactor* challenger_reactor_new(void) {
     ChallengerReactor* r = (ChallengerReactor*)calloc(1, sizeof(ChallengerReactor));
     if (!r) return NULL;
-    r->iocp_handle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
+    r->iocp_handle = NULL;
     r->event_handle = NULL;
-    r->backend = 0; // IOCP
-    if (r->iocp_handle == NULL) {
-        free(r);
-        return NULL;
-    }
+    r->backend = 3; // select-based
+    r->registered_count = 0;
     return r;
 }
 
@@ -5788,35 +6200,80 @@ void challenger_reactor_free(ChallengerReactor* reactor) {
 
 int challenger_reactor_register(ChallengerReactor* reactor, int fd, uint64_t task_id) {
     if (!reactor || fd < 0) return -1;
-    HANDLE h = (HANDLE)(intptr_t)_get_osfhandle(fd);
-    if (h == INVALID_HANDLE_VALUE) return -1;
-    // Associate with IOCP, use task_id as completion key
-    HANDLE result = CreateIoCompletionPort(h, reactor->iocp_handle, (ULONG_PTR)task_id, 0);
-    return result ? 0 : -1;
+    if (reactor->registered_count >= 1024) return -1;
+    // Check if already registered
+    for (int i = 0; i < reactor->registered_count; i++) {
+        if (reactor->registered_fds[i] == fd) {
+            reactor->registered_task_ids[i] = task_id;
+            return 0;
+        }
+    }
+    reactor->registered_fds[reactor->registered_count] = fd;
+    reactor->registered_task_ids[reactor->registered_count] = task_id;
+    reactor->registered_count++;
+    return 0;
 }
 
 int challenger_reactor_unregister(ChallengerReactor* reactor, int fd) {
-    // IOCP: unregistering is implicit when the handle is closed
-    (void)reactor; (void)fd;
+    if (!reactor) return -1;
+    for (int i = 0; i < reactor->registered_count; i++) {
+        if (reactor->registered_fds[i] == fd) {
+            // Swap with last
+            reactor->registered_fds[i] = reactor->registered_fds[reactor->registered_count - 1];
+            reactor->registered_task_ids[i] = reactor->registered_task_ids[reactor->registered_count - 1];
+            reactor->registered_count--;
+            return 0;
+        }
+    }
     return 0;
 }
 
 int challenger_reactor_poll(ChallengerExecutor* exec, ChallengerReactor* reactor, int timeout_ms) {
-    if (!reactor || !reactor->iocp_handle) return 0;
+    if (!reactor) return 0;
 
-    DWORD bytes;
-    ULONG_PTR completion_key;
-    OVERLAPPED* overlapped;
-    BOOL ok = GetQueuedCompletionStatus(
-        reactor->iocp_handle, &bytes, &completion_key, &overlapped, (DWORD)timeout_ms
-    );
-
-    if (ok && completion_key > 0) {
-        // Wake the task associated with this completion
-        challenger_executor_wake_task(exec, (uint64_t)completion_key);
-        return 1;
+    if (reactor->registered_count == 0) {
+        if (timeout_ms > 0) Sleep(timeout_ms);
+        return 0;
     }
-    return 0;
+
+    fd_set read_fds, write_fds, error_fds;
+    FD_ZERO(&read_fds);
+    FD_ZERO(&write_fds);
+    FD_ZERO(&error_fds);
+
+    SOCKET max_sock = 0;
+    for (int i = 0; i < reactor->registered_count; i++) {
+        int fd = reactor->registered_fds[i];
+        if (fd >= 0) {
+            SOCKET s = (SOCKET)_get_osfhandle(fd);
+            if (s != INVALID_SOCKET) {
+                FD_SET(s, &read_fds);
+                FD_SET(s, &write_fds);
+                FD_SET(s, &error_fds);
+                if (s > max_sock) max_sock = s;
+            }
+        }
+    }
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int n = select(0, &read_fds, &write_fds, &error_fds, &tv);
+    if (n <= 0) return 0;
+
+    int woken = 0;
+    for (int i = 0; i < reactor->registered_count; i++) {
+        int fd = reactor->registered_fds[i];
+        if (fd >= 0) {
+            SOCKET s = (SOCKET)_get_osfhandle(fd);
+            if (s != INVALID_SOCKET && (FD_ISSET(s, &read_fds) || FD_ISSET(s, &write_fds) || FD_ISSET(s, &error_fds))) {
+                challenger_executor_wake_task(exec, reactor->registered_task_ids[i]);
+                woken++;
+            }
+        }
+    }
+    return woken;
 }
 
 #else
@@ -5904,6 +6361,12 @@ int challenger_reactor_poll(ChallengerExecutor* exec, ChallengerReactor* reactor
 #ifdef _WIN32
 
 int challenger_tcp_socket(void) {
+    static int wsa_init = 0;
+    if (!wsa_init) {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2,2), &wsa);
+        wsa_init = 1;
+    }
     SOCKET s = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, WSA_FLAG_OVERLAPPED);
     if (s == INVALID_SOCKET) return -1;
     return _open_osfhandle((intptr_t)s, 0);
@@ -6032,6 +6495,338 @@ int challenger_tcp_close(int fd) {
 }
 
 #endif // _WIN32
+
+// ============================================================
+// Challenger Async Runtime — TCP Async Futures (P0-B)
+// ============================================================
+// Each future attempts non-blocking I/O; on WOULDBLOCK, registers
+// with the executor's reactor and returns Pending. When the reactor
+// detects the event, the waker wakes the task, executor re-polls.
+
+static char g_last_read_buf[65536];
+static int g_last_read_len = 0;
+
+int64_t challenger_tcp_get_last_read_len(void) {
+    return (int64_t)g_last_read_len;
+}
+
+const char* challenger_tcp_get_last_read_buf(void) {
+    return g_last_read_buf;
+}
+
+// --- Connect Future ---
+
+typedef struct {
+    int fd;
+    char host[256];
+    int port;
+    int started;  // 0=not yet attempted, 1=connect initiated
+} TcpConnectState;
+
+static Poll tcp_connect_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    TcpConnectState* s = (TcpConnectState*)fut->state;
+    if (!s) return challenger_poll_ready(-1);
+
+    if (!s->started) {
+        // First poll: initiate non-blocking connect
+        challenger_tcp_set_nonblocking(s->fd);
+        int rc = challenger_tcp_connect(s->fd, s->host, s->port);
+        if (rc == 0) {
+            // Connected immediately (loopback)
+            free(s);
+            fut->state = NULL;
+            return challenger_poll_ready(0);
+        }
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAEISCONN) {
+            // Already connected
+            free(s);
+            fut->state = NULL;
+            return challenger_poll_ready(0);
+        }
+        if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS || err == WSAEALREADY) {
+#else
+        if (errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EALREADY) {
+#endif
+            // Connect in progress — register with reactor and return Pending
+            s->started = 1;
+            ChallengerExecutor* exec = g_challenger_executor;
+            if (exec && exec->reactor) {
+                challenger_reactor_register(exec->reactor, s->fd, (uint64_t)(uintptr_t)waker->data);
+            }
+            return challenger_poll_pending();
+        }
+        // Real error
+        free(s);
+        fut->state = NULL;
+        return challenger_poll_ready(-1);
+    }
+
+    // Subsequent polls: use non-blocking select to check if socket is writable
+    fd_set write_fds, error_fds;
+    FD_ZERO(&write_fds);
+    FD_ZERO(&error_fds);
+#ifdef _WIN32
+    SOCKET sock = (SOCKET)_get_osfhandle(s->fd);
+    if (sock == INVALID_SOCKET) {
+        free(s);
+        fut->state = NULL;
+        return challenger_poll_ready(-1);
+    }
+    FD_SET(sock, &write_fds);
+    FD_SET(sock, &error_fds);
+    struct timeval tv = {0, 0};
+    int n = select(0, NULL, &write_fds, &error_fds, &tv);
+#else
+    FD_SET(s->fd, &write_fds);
+    FD_SET(s->fd, &error_fds);
+    struct timeval tv = {0, 0};
+    int n = select(s->fd + 1, NULL, &write_fds, &error_fds, &tv);
+#endif
+    if (n > 0) {
+        // Socket is writable (or has error) — check SO_ERROR
+        int err = 0;
+#ifdef _WIN32
+        int errlen = sizeof(err);
+        getsockopt(sock, SOL_SOCKET, SO_ERROR, (char*)&err, &errlen);
+#else
+        socklen_t errlen = sizeof(err);
+        getsockopt(s->fd, SOL_SOCKET, SO_ERROR, (char*)&err, &errlen);
+#endif
+        ChallengerExecutor* exec = g_challenger_executor;
+        if (exec && exec->reactor) {
+            challenger_reactor_unregister(exec->reactor, s->fd);
+        }
+        int result = (err == 0) ? 0 : -1;
+        free(s);
+        fut->state = NULL;
+        return challenger_poll_ready(result);
+    }
+    // Not ready yet — register with reactor and return Pending
+    ChallengerExecutor* exec = g_challenger_executor;
+    if (exec && exec->reactor) {
+        challenger_reactor_register(exec->reactor, s->fd, (uint64_t)(uintptr_t)waker->data);
+    }
+    return challenger_poll_pending();
+}
+
+ChallengerFuture* challenger_tcp_connect_async(int fd, const char* host, int port) {
+    TcpConnectState* s = (TcpConnectState*)calloc(1, sizeof(TcpConnectState));
+    if (!s) return NULL;
+    s->fd = fd;
+    strncpy(s->host, host, sizeof(s->host) - 1);
+    s->host[sizeof(s->host) - 1] = '\0';
+    s->port = port;
+    s->started = 0;
+    ChallengerFuture* fut = challenger_future_new(tcp_connect_poll, s);
+    return fut;
+}
+
+// --- Accept Future ---
+
+typedef struct {
+    int listen_fd;
+    int accepted_fd;  // set when accept succeeds
+} TcpAcceptState;
+
+static Poll tcp_accept_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    TcpAcceptState* s = (TcpAcceptState*)fut->state;
+    if (!s) return challenger_poll_ready(-1);
+
+    // Try non-blocking accept
+    challenger_tcp_set_nonblocking(s->listen_fd);
+    int client_fd = challenger_tcp_accept(s->listen_fd);
+    if (client_fd >= 0) {
+        // Got a connection immediately
+        ChallengerExecutor* exec = g_challenger_executor;
+        if (exec && exec->reactor) {
+            challenger_reactor_unregister(exec->reactor, s->listen_fd);
+        }
+        free(s);
+        fut->state = NULL;
+        return challenger_poll_ready(client_fd);
+    }
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
+#else
+    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+#endif
+        // No connection yet — register for read readiness
+        ChallengerExecutor* exec = g_challenger_executor;
+        if (exec && exec->reactor) {
+            challenger_reactor_register(exec->reactor, s->listen_fd, (uint64_t)(uintptr_t)waker->data);
+        }
+        return challenger_poll_pending();
+    }
+    // Error
+    ChallengerExecutor* exec = g_challenger_executor;
+    if (exec && exec->reactor) {
+        challenger_reactor_unregister(exec->reactor, s->listen_fd);
+    }
+    free(s);
+    fut->state = NULL;
+    return challenger_poll_ready(-1);
+}
+
+ChallengerFuture* challenger_tcp_accept_async(int fd) {
+    TcpAcceptState* s = (TcpAcceptState*)calloc(1, sizeof(TcpAcceptState));
+    if (!s) return NULL;
+    s->listen_fd = fd;
+    s->accepted_fd = -1;
+    ChallengerFuture* fut = challenger_future_new(tcp_accept_poll, s);
+    return fut;
+}
+
+// --- Read Future ---
+
+typedef struct {
+    int fd;
+    char* buf;
+    int max_len;
+    int use_internal;  // 1 = use g_last_read_buf
+} TcpReadState;
+
+static Poll tcp_read_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    TcpReadState* s = (TcpReadState*)fut->state;
+    if (!s) return challenger_poll_ready(-1);
+
+    challenger_tcp_set_nonblocking(s->fd);
+    char* target = s->use_internal ? g_last_read_buf : s->buf;
+    int maxlen = s->use_internal ? (int)sizeof(g_last_read_buf) : s->max_len;
+
+    int n = challenger_tcp_read(s->fd, target, maxlen);
+    if (n > 0) {
+        if (s->use_internal) g_last_read_len = n;
+        int result = (int64_t)n;
+        if (!s->use_internal) free(s->buf);
+        free(s);
+        fut->state = NULL;
+        return challenger_poll_ready(result);
+    }
+    if (n == 0) {
+        // Connection closed
+        if (s->use_internal) g_last_read_len = 0;
+        if (!s->use_internal) free(s->buf);
+        free(s);
+        fut->state = NULL;
+        return challenger_poll_ready(0);
+    }
+    // n < 0: error or WOULDBLOCK
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
+#else
+    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+#endif
+        ChallengerExecutor* exec = g_challenger_executor;
+        if (exec && exec->reactor) {
+            challenger_reactor_register(exec->reactor, s->fd, (uint64_t)(uintptr_t)waker->data);
+        }
+        return challenger_poll_pending();
+    }
+    // Real error
+    if (s->use_internal) g_last_read_len = 0;
+    if (!s->use_internal) free(s->buf);
+    free(s);
+    fut->state = NULL;
+    return challenger_poll_ready(-1);
+}
+
+ChallengerFuture* challenger_tcp_read_async(int fd, int max_len) {
+    TcpReadState* s = (TcpReadState*)calloc(1, sizeof(TcpReadState));
+    if (!s) return NULL;
+    s->fd = fd;
+    s->buf = NULL;
+    s->max_len = max_len;
+    s->use_internal = 1;
+    ChallengerFuture* fut = challenger_future_new(tcp_read_poll, s);
+    return fut;
+}
+
+ChallengerFuture* challenger_tcp_read_into_async(int fd, char* buf, int max_len) {
+    TcpReadState* s = (TcpReadState*)calloc(1, sizeof(TcpReadState));
+    if (!s) return NULL;
+    s->fd = fd;
+    s->buf = buf;
+    s->max_len = max_len;
+    s->use_internal = 0;
+    ChallengerFuture* fut = challenger_future_new(tcp_read_poll, s);
+    return fut;
+}
+
+// --- Write Future ---
+
+typedef struct {
+    int fd;
+    char* buf;
+    int buf_len;
+    int written;
+} TcpWriteState;
+
+static Poll tcp_write_poll(ChallengerFuture* fut, ChallengerWaker* waker) {
+    TcpWriteState* s = (TcpWriteState*)fut->state;
+    if (!s) return challenger_poll_ready(-1);
+
+    challenger_tcp_set_nonblocking(s->fd);
+
+    while (s->written < s->buf_len) {
+        int n = challenger_tcp_write(s->fd, s->buf + s->written, s->buf_len - s->written);
+        if (n > 0) {
+            s->written += n;
+        } else if (n == 0) {
+            break;
+        } else {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
+#else
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+#endif
+                if (s->written > 0) {
+                    // Partial write — return what we wrote so far
+                    int result = s->written;
+                    free(s->buf);
+                    free(s);
+                    fut->state = NULL;
+                    return challenger_poll_ready(result);
+                }
+                // Register for write readiness
+                ChallengerExecutor* exec = g_challenger_executor;
+                if (exec && exec->reactor) {
+                    challenger_reactor_register(exec->reactor, s->fd, (uint64_t)(uintptr_t)waker->data);
+                }
+                return challenger_poll_pending();
+            }
+            // Real error
+            free(s->buf);
+            free(s);
+            fut->state = NULL;
+            return challenger_poll_ready(-1);
+        }
+    }
+
+    // All data written
+    int result = s->written;
+    free(s->buf);
+    free(s);
+    fut->state = NULL;
+    return challenger_poll_ready(result);
+}
+
+ChallengerFuture* challenger_tcp_write_async(int fd, const char* buf, int buf_len) {
+    TcpWriteState* s = (TcpWriteState*)calloc(1, sizeof(TcpWriteState));
+    if (!s) return NULL;
+    s->fd = fd;
+    s->buf = (char*)malloc(buf_len);
+    if (!s->buf) { free(s); return NULL; }
+    memcpy(s->buf, buf, buf_len);
+    s->buf_len = buf_len;
+    s->written = 0;
+    ChallengerFuture* fut = challenger_future_new(tcp_write_poll, s);
+    return fut;
+}
 
 // ============================================================
 // Challenger Async Runtime — UDP (Phase 9)
@@ -6202,6 +6997,76 @@ void challenger_rwlock_write_unlock(ChallengerExecutor* exec, ChallengerRwLock* 
     }
 }
 
+// --- RwLock Read Future ---
+typedef struct {
+    ChallengerRwLock* rw;
+    int phase;
+} RwLockReadState;
+
+static Poll rwlock_read_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    RwLockReadState* state = (RwLockReadState*)self->state;
+    if (!state || !state->rw) {
+        Poll p; p.tag = 0; p.value = 0; return p;
+    }
+    ChallengerExecutor* exec = challenger_get_global_executor();
+    uint64_t task_id = exec ? exec->current_task_id : 0;
+    int acquired = challenger_rwlock_try_read(state->rw, task_id);
+    if (acquired) {
+        Poll p; p.tag = 0; p.value = 1; return p;
+    }
+    if (state->phase > 0) {
+        acquired = challenger_rwlock_try_read(state->rw, task_id);
+        if (acquired) {
+            Poll p; p.tag = 0; p.value = 1; return p;
+        }
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_rwlock_read_create(ChallengerRwLock* rw) {
+    RwLockReadState* state = (RwLockReadState*)calloc(1, sizeof(RwLockReadState));
+    if (!state) return NULL;
+    state->rw = rw;
+    state->phase = 0;
+    return challenger_future_new(rwlock_read_poll, state);
+}
+
+// --- RwLock Write Future ---
+typedef struct {
+    ChallengerRwLock* rw;
+    int phase;
+} RwLockWriteState;
+
+static Poll rwlock_write_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    RwLockWriteState* state = (RwLockWriteState*)self->state;
+    if (!state || !state->rw) {
+        Poll p; p.tag = 0; p.value = 0; return p;
+    }
+    ChallengerExecutor* exec = challenger_get_global_executor();
+    uint64_t task_id = exec ? exec->current_task_id : 0;
+    int acquired = challenger_rwlock_try_write(state->rw, task_id);
+    if (acquired) {
+        Poll p; p.tag = 0; p.value = 1; return p;
+    }
+    if (state->phase > 0) {
+        acquired = challenger_rwlock_try_write(state->rw, task_id);
+        if (acquired) {
+            Poll p; p.tag = 0; p.value = 1; return p;
+        }
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_rwlock_write_create(ChallengerRwLock* rw) {
+    RwLockWriteState* state = (RwLockWriteState*)calloc(1, sizeof(RwLockWriteState));
+    if (!state) return NULL;
+    state->rw = rw;
+    state->phase = 0;
+    return challenger_future_new(rwlock_write_poll, state);
+}
+
 ChallengerSemaphore* challenger_semaphore_new(int max_count) {
     ChallengerSemaphore* s = (ChallengerSemaphore*)calloc(1, sizeof(ChallengerSemaphore));
     if (s) { s->max_count = max_count; s->count = max_count; }
@@ -6261,7 +7126,11 @@ void challenger_notify_all(ChallengerExecutor* exec, ChallengerNotify* n) {
 
 ChallengerChannel* challenger_channel_new(int capacity) {
     ChallengerChannel* ch = (ChallengerChannel*)calloc(1, sizeof(ChallengerChannel));
-    (void)capacity; // unbounded for now
+    if (ch) {
+        if (capacity <= 0 || capacity > CHALLENGER_CHANNEL_MAX_MSGS)
+            capacity = CHALLENGER_CHANNEL_MAX_MSGS;
+        ch->capacity = capacity;
+    }
     return ch;
 }
 
@@ -6269,9 +7138,9 @@ void challenger_channel_free(ChallengerChannel* ch) { free(ch); }
 
 int challenger_channel_send(ChallengerExecutor* exec, ChallengerChannel* ch, int64_t value) {
     if (!ch || ch->closed) return -1;
-    if (ch->count >= CHALLENGER_CHANNEL_MAX_MSGS) return 0; // full
+    if (ch->count >= ch->capacity) return 0; // full
     ch->messages[ch->tail] = value;
-    ch->tail = (ch->tail + 1) % CHALLENGER_CHANNEL_MAX_MSGS;
+    ch->tail = (ch->tail + 1) % ch->capacity;
     ch->count++;
     // Wake one waiting receiver
     if (ch->recv_waiter_count > 0 && exec) {
@@ -6288,7 +7157,7 @@ int challenger_channel_receive(ChallengerExecutor* exec, ChallengerChannel* ch, 
         return 0; // empty
     }
     if (out) *out = ch->messages[ch->head];
-    ch->head = (ch->head + 1) % CHALLENGER_CHANNEL_MAX_MSGS;
+    ch->head = (ch->head + 1) % ch->capacity;
     ch->count--;
     // Wake one waiting sender (space freed)
     if (ch->send_waiter_count > 0 && exec) {
@@ -6299,11 +7168,262 @@ int challenger_channel_receive(ChallengerExecutor* exec, ChallengerChannel* ch, 
 }
 
 void challenger_channel_close(ChallengerChannel* ch) {
-    if (ch) ch->closed = 1;
+    if (!ch) return;
+    ch->closed = 1;
+    // Wake all pending receivers (they'll see closed+empty and return -1)
+    ChallengerExecutor* exec = challenger_get_global_executor();
+    if (exec) {
+        while (ch->recv_waiter_count > 0) {
+            uint64_t waiter_id = ch->recv_waiters[--ch->recv_waiter_count];
+            challenger_executor_wake_task(exec, waiter_id);
+        }
+        // Wake all pending senders (they'll see closed and return)
+        while (ch->send_waiter_count > 0) {
+            uint64_t waiter_id = ch->send_waiters[--ch->send_waiter_count];
+            challenger_executor_wake_task(exec, waiter_id);
+        }
+    }
 }
 
 int challenger_channel_is_closed(ChallengerChannel* ch) {
     return ch ? ch->closed : 1;
+}
+
+// ============================================================
+// Async Channel Futures (Phase E)
+// ============================================================
+
+typedef struct {
+    ChallengerChannel* ch;
+    int64_t value;
+    int phase; // 0 = first poll, 1+ = subsequent
+} ChannelSendState;
+
+static Poll channel_send_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    ChannelSendState* state = (ChannelSendState*)self->state;
+    if (!state || !state->ch) {
+        Poll p; p.tag = 0; p.value = -1; return p;
+    }
+    ChallengerChannel* ch = state->ch;
+    if (ch->closed) {
+        Poll p; p.tag = 0; p.value = -1; return p;
+    }
+    // Try send
+    if (ch->count < ch->capacity) {
+        ch->messages[ch->tail] = state->value;
+        ch->tail = (ch->tail + 1) % ch->capacity;
+        ch->count++;
+        // Wake one waiting receiver
+        if (ch->recv_waiter_count > 0) {
+            uint64_t waiter_id = ch->recv_waiters[--ch->recv_waiter_count];
+            ChallengerExecutor* exec = challenger_get_global_executor();
+            if (exec) challenger_executor_wake_task(exec, waiter_id);
+        }
+        Poll p; p.tag = 0; p.value = 1; return p;
+    }
+    // Channel full — register as sender waiter
+    // On second+ poll after being woken, retry
+    if (state->phase > 0) {
+        // Retried after wake — channel should have space now
+        if (ch->count < ch->capacity) {
+            ch->messages[ch->tail] = state->value;
+            ch->tail = (ch->tail + 1) % ch->capacity;
+            ch->count++;
+            if (ch->recv_waiter_count > 0) {
+                uint64_t waiter_id = ch->recv_waiters[--ch->recv_waiter_count];
+                ChallengerExecutor* exec = challenger_get_global_executor();
+                if (exec) challenger_executor_wake_task(exec, waiter_id);
+            }
+            Poll p; p.tag = 0; p.value = 1; return p;
+        }
+    }
+    // Register as send waiter
+    if (ch->send_waiter_count < 256) {
+        ChallengerExecutor* exec = challenger_get_global_executor();
+        if (exec) {
+            ch->send_waiters[ch->send_waiter_count++] = exec->current_task_id;
+        }
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_channel_send_async(ChallengerChannel* ch, int64_t value) {
+    ChannelSendState* state = (ChannelSendState*)calloc(1, sizeof(ChannelSendState));
+    if (!state) return NULL;
+    state->ch = ch;
+    state->value = value;
+    state->phase = 0;
+    return challenger_future_new(channel_send_poll, state);
+}
+
+typedef struct {
+    ChallengerChannel* ch;
+    int64_t out_value;
+    int phase;
+} ChannelRecvState;
+
+static Poll channel_recv_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    ChannelRecvState* state = (ChannelRecvState*)self->state;
+    if (!state || !state->ch) {
+        Poll p; p.tag = 0; p.value = -1; return p;
+    }
+    ChallengerChannel* ch = state->ch;
+    // Try receive
+    if (ch->count > 0) {
+        state->out_value = ch->messages[ch->head];
+        ch->head = (ch->head + 1) % ch->capacity;
+        ch->count--;
+        // Wake one waiting sender (space freed)
+        if (ch->send_waiter_count > 0) {
+            uint64_t waiter_id = ch->send_waiters[--ch->send_waiter_count];
+            ChallengerExecutor* exec = challenger_get_global_executor();
+            if (exec) challenger_executor_wake_task(exec, waiter_id);
+        }
+        Poll p; p.tag = 0; p.value = state->out_value; return p;
+    }
+    if (ch->closed) {
+        Poll p; p.tag = 0; p.value = -1; return p;
+    }
+    // Channel empty — on second+ poll after being woken, retry
+    if (state->phase > 0) {
+        if (ch->count > 0) {
+            state->out_value = ch->messages[ch->head];
+            ch->head = (ch->head + 1) % ch->capacity;
+            ch->count--;
+            if (ch->send_waiter_count > 0) {
+                uint64_t waiter_id = ch->send_waiters[--ch->send_waiter_count];
+                ChallengerExecutor* exec = challenger_get_global_executor();
+                if (exec) challenger_executor_wake_task(exec, waiter_id);
+            }
+            Poll p; p.tag = 0; p.value = state->out_value; return p;
+        }
+    }
+    // Register as recv waiter
+    if (ch->recv_waiter_count < 256) {
+        ChallengerExecutor* exec = challenger_get_global_executor();
+        if (exec) {
+            ch->recv_waiters[ch->recv_waiter_count++] = exec->current_task_id;
+        }
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_channel_receive_async(ChallengerChannel* ch) {
+    ChannelRecvState* state = (ChannelRecvState*)calloc(1, sizeof(ChannelRecvState));
+    if (!state) return NULL;
+    state->ch = ch;
+    state->out_value = 0;
+    state->phase = 0;
+    return challenger_future_new(channel_recv_poll, state);
+}
+
+// ============================================================
+// Async Sync Primitive Futures (Phase E)
+// ============================================================
+
+// --- Notify Wait Future ---
+typedef struct {
+    ChallengerNotify* n;
+    int phase;
+} NotifyWaitState;
+
+static Poll notify_wait_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    NotifyWaitState* state = (NotifyWaitState*)self->state;
+    if (!state || !state->n) {
+        Poll p; p.tag = 0; p.value = 0; return p;
+    }
+    if (state->phase > 0) {
+        // Woken by notify_one/notify_all
+        Poll p; p.tag = 0; p.value = 1; return p;
+    }
+    // First poll: register as waiter
+    ChallengerExecutor* exec = challenger_get_global_executor();
+    if (exec) {
+        challenger_notify_wait(state->n, exec->current_task_id);
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_notify_wait_create(ChallengerNotify* n) {
+    NotifyWaitState* state = (NotifyWaitState*)calloc(1, sizeof(NotifyWaitState));
+    if (!state) return NULL;
+    state->n = n;
+    state->phase = 0;
+    return challenger_future_new(notify_wait_poll, state);
+}
+
+// --- Mutex Lock Future ---
+typedef struct {
+    ChallengerMutex* m;
+    int phase;
+} MutexLockState;
+
+static Poll mutex_lock_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    MutexLockState* state = (MutexLockState*)self->state;
+    if (!state || !state->m) {
+        Poll p; p.tag = 0; p.value = 0; return p;
+    }
+    ChallengerExecutor* exec = challenger_get_global_executor();
+    uint64_t task_id = exec ? exec->current_task_id : 0;
+    int locked = challenger_mutex_try_lock(state->m, task_id);
+    if (locked) {
+        Poll p; p.tag = 0; p.value = 1; return p;
+    }
+    if (state->phase > 0) {
+        // Retried after being woken, try again
+        locked = challenger_mutex_try_lock(state->m, task_id);
+        if (locked) {
+            Poll p; p.tag = 0; p.value = 1; return p;
+        }
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_mutex_lock_create(ChallengerMutex* m) {
+    MutexLockState* state = (MutexLockState*)calloc(1, sizeof(MutexLockState));
+    if (!state) return NULL;
+    state->m = m;
+    state->phase = 0;
+    return challenger_future_new(mutex_lock_poll, state);
+}
+
+// --- Semaphore Acquire Future ---
+typedef struct {
+    ChallengerSemaphore* s;
+    int phase;
+} SemaphoreAcquireState;
+
+static Poll semaphore_acquire_poll(ChallengerFuture* self, ChallengerWaker* waker) {
+    SemaphoreAcquireState* state = (SemaphoreAcquireState*)self->state;
+    if (!state || !state->s) {
+        Poll p; p.tag = 0; p.value = 0; return p;
+    }
+    ChallengerExecutor* exec = challenger_get_global_executor();
+    uint64_t task_id = exec ? exec->current_task_id : 0;
+    int acquired = challenger_semaphore_try_acquire(state->s, task_id);
+    if (acquired) {
+        Poll p; p.tag = 0; p.value = 1; return p;
+    }
+    if (state->phase > 0) {
+        acquired = challenger_semaphore_try_acquire(state->s, task_id);
+        if (acquired) {
+            Poll p; p.tag = 0; p.value = 1; return p;
+        }
+    }
+    state->phase++;
+    Poll p; p.tag = 1; p.value = 0; return p;
+}
+
+ChallengerFuture* challenger_semaphore_acquire_create(ChallengerSemaphore* s) {
+    SemaphoreAcquireState* state = (SemaphoreAcquireState*)calloc(1, sizeof(SemaphoreAcquireState));
+    if (!state) return NULL;
+    state->s = s;
+    state->phase = 0;
+    return challenger_future_new(semaphore_acquire_poll, state);
 }
 
 // ============================================================
@@ -6361,8 +7481,21 @@ int challenger_select_poll(ChallengerFuture** futures, int count, ChallengerWake
 
 void challenger_task_cancel(ChallengerExecutor* exec, uint64_t task_id) {
     if (!exec) return;
+    // Cancel any timers belonging to this task immediately
+    if (exec->timer_wheel) {
+        timer_cancel_task_timers(exec->timer_wheel, task_id);
+    }
+    // Check ready queue first
     for (int i = exec->ready.head; i != exec->ready.tail; i = (i + 1) % CHALLENGER_MAX_TASKS) {
         ChallengerTask* t = exec->ready.tasks[i];
+        if (t && t->id == task_id) {
+            t->state = CHALLENGER_TASK_CANCELLED;
+            return;
+        }
+    }
+    // Check all tasks (includes pending tasks waiting on timers/IO)
+    for (int i = 0; i < exec->all_tasks_count; i++) {
+        ChallengerTask* t = exec->all_tasks[i];
         if (t && t->id == task_id) {
             t->state = CHALLENGER_TASK_CANCELLED;
             return;

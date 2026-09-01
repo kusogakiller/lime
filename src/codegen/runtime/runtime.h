@@ -688,6 +688,18 @@ void challenger_future_free(ChallengerFuture* fut);
 Poll challenger_future_poll(ChallengerFuture* fut, ChallengerWaker* waker);
 int8_t challenger_future_is_completed(ChallengerFuture* fut);
 
+// Delayed-ready futures (for async E2E verification)
+ChallengerFuture* challenger_delayed_ready_create(int64_t value);
+ChallengerFuture* challenger_delayed_ready_multi_create(int64_t value, int64_t count);
+
+// Yield-now primitive (cooperative yield)
+ChallengerFuture* challenger_yield_now_create(void);
+
+// Task event log (for async E2E verification)
+void challenger_task_event(const char* event);
+void challenger_task_event_reset(void);
+int64_t challenger_task_event_count(void);
+
 // Waker lifecycle
 ChallengerWaker* challenger_waker_new(ChallengerWakeFn wake_fn, void* data);
 void challenger_waker_free(ChallengerWaker* waker);
@@ -711,6 +723,8 @@ Poll challenger_poll_pending(void);
 #define CHALLENGER_MAX_EVENTS 1024
 
 typedef struct ChallengerTask ChallengerTask;
+typedef struct ChallengerReactor ChallengerReactor;
+typedef struct ChallengerTimerWheel ChallengerTimerWheel;
 
 struct ChallengerTask {
     uint64_t id;
@@ -718,6 +732,7 @@ struct ChallengerTask {
     ChallengerWaker* waker;
     int state;          // CHALLENGER_TASK_*
     int needs_poll;     // 1 = in ready queue, 0 = waiting
+    int woken;          // 1 = wake requested during poll, re-enqueue after drain
 };
 
 typedef struct {
@@ -735,6 +750,13 @@ typedef struct {
     int shutdown;
     // Worker thread (for multi-thread, later)
     void* worker_handle;
+    // Global task registry: tracks ALL spawned tasks (ready, running, pending)
+    ChallengerTask* all_tasks[CHALLENGER_MAX_TASKS];
+    int all_tasks_count;
+    // Reactor for async I/O integration
+    struct ChallengerReactor* reactor;
+    // Timer wheel for async sleep/timers
+    struct ChallengerTimerWheel* timer_wheel;
 } ChallengerExecutor;
 
 // Executor lifecycle
@@ -753,6 +775,7 @@ void challenger_executor_park(ChallengerExecutor* exec);
 
 // Wake a specific task (called by Waker)
 void challenger_executor_wake_task(ChallengerExecutor* exec, uint64_t task_id);
+uint64_t challenger_executor_current_task_id(ChallengerExecutor* exec);
 
 // Ready queue operations
 void challenger_ready_queue_init(ReadyQueue* q);
@@ -762,7 +785,12 @@ int challenger_ready_queue_is_empty(ReadyQueue* q);
 
 // Global executor for waker callbacks (single-thread mode)
 void challenger_set_global_executor(ChallengerExecutor* exec);
+ChallengerExecutor* challenger_get_global_executor(void);
 ChallengerWaker* challenger_waker_new_for_task(ChallengerExecutor* exec, uint64_t task_id);
+
+// Run one iteration of the executor loop (drain ready queue + reactor poll once).
+// Returns number of tasks processed. Used by await codegen for multi-task interleaving.
+int challenger_executor_run_once(ChallengerExecutor* exec);
 
 // ============================================================
 // Challenger Async Runtime — Timer (Phase 6)
@@ -776,10 +804,10 @@ typedef struct {
     int active;
 } ChallengerTimer;
 
-typedef struct {
+struct ChallengerTimerWheel {
     ChallengerTimer timers[CHALLENGER_MAX_TIMERS];
     int count;
-} ChallengerTimerWheel;
+};
 
 // Timer operations
 void challenger_timer_init(ChallengerTimerWheel* tw);
@@ -789,15 +817,22 @@ void challenger_timer_cancel(ChallengerTimerWheel* tw, uint64_t timer_id);
 // Check expired timers and wake their tasks. Returns time until next timer (us), or -1 if none.
 int64_t challenger_timer_tick(ChallengerExecutor* exec, ChallengerTimerWheel* tw);
 
+// Async sleep: creates a Future that becomes Ready after duration_us microseconds.
+ChallengerFuture* challenger_sleep_create(ChallengerExecutor* exec, int64_t duration_us);
+
 // ============================================================
 // Challenger Async Runtime — OS Reactor (Phase 7)
 // ============================================================
 
-typedef struct {
-    void* iocp_handle;        // IOCP handle on Windows
+struct ChallengerReactor {
+    void* iocp_handle;        // IOCP handle on Windows (legacy, may be NULL)
     void* event_handle;       // epoll fd on Linux / kqueue fd on macOS
-    int backend;              // 0=IOCP, 1=epoll, 2=kqueue
-} ChallengerReactor;
+    int backend;              // 0=IOCP, 1=epoll, 2=kqueue, 3=select
+    // select() registry for regular sockets
+    int registered_fds[1024];
+    uint64_t registered_task_ids[1024];
+    int registered_count;
+};
 
 // Reactor lifecycle
 ChallengerReactor* challenger_reactor_new(void);
@@ -835,6 +870,33 @@ int challenger_tcp_write(int fd, const char* buf, int buf_len);
 
 // Close
 int challenger_tcp_close(int fd);
+
+// ============================================================
+// Challenger Async Runtime — TCP Async Futures (P0-B)
+// ============================================================
+
+// Create async TCP futures that return Pending on WOULDBLOCK,
+// register with reactor, and return Ready when I/O completes.
+// These futures use the executor's integrated reactor.
+
+// Connect: returns Future(Int) — 0 on success, -1 on error
+ChallengerFuture* challenger_tcp_connect_async(int fd, const char* host, int port);
+
+// Accept: returns Future(Int) — accepted fd on success, -1 on error
+ChallengerFuture* challenger_tcp_accept_async(int fd);
+
+// Read: returns Future(Int) — bytes read; data stored in internal buffer
+ChallengerFuture* challenger_tcp_read_async(int fd, int max_len);
+
+// Read into caller buffer: returns Future(Int) — bytes read
+ChallengerFuture* challenger_tcp_read_into_async(int fd, char* buf, int max_len);
+
+// Write: returns Future(Int) — bytes written
+ChallengerFuture* challenger_tcp_write_async(int fd, const char* buf, int buf_len);
+
+// Get last read data as string (synchronous helper after read Future completes)
+int64_t challenger_tcp_get_last_read_len(void);
+const char* challenger_tcp_get_last_read_buf(void);
 
 // ============================================================
 // Challenger Async Runtime — UDP (Phase 9)
@@ -894,6 +956,8 @@ int challenger_rwlock_try_read(ChallengerRwLock* rw, uint64_t task_id);
 void challenger_rwlock_read_unlock(ChallengerExecutor* exec, ChallengerRwLock* rw);
 int challenger_rwlock_try_write(ChallengerRwLock* rw, uint64_t task_id);
 void challenger_rwlock_write_unlock(ChallengerExecutor* exec, ChallengerRwLock* rw);
+ChallengerFuture* challenger_rwlock_read_create(ChallengerRwLock* rw);
+ChallengerFuture* challenger_rwlock_write_create(ChallengerRwLock* rw);
 
 ChallengerSemaphore* challenger_semaphore_new(int max_count);
 void challenger_semaphore_free(ChallengerSemaphore* s);
@@ -921,6 +985,7 @@ typedef struct {
     int head;
     int tail;
     int count;
+    int capacity;
     int closed;
     uint64_t recv_waiters[256];
     int recv_waiter_count;
@@ -936,6 +1001,13 @@ int challenger_channel_send(ChallengerExecutor* exec, ChallengerChannel* ch, int
 int challenger_channel_receive(ChallengerExecutor* exec, ChallengerChannel* ch, int64_t* out);
 void challenger_channel_close(ChallengerChannel* ch);
 int challenger_channel_is_closed(ChallengerChannel* ch);
+ChallengerFuture* challenger_channel_send_async(ChallengerChannel* ch, int64_t value);
+ChallengerFuture* challenger_channel_receive_async(ChallengerChannel* ch);
+
+// Async sync primitive futures
+ChallengerFuture* challenger_notify_wait_create(ChallengerNotify* n);
+ChallengerFuture* challenger_mutex_lock_create(ChallengerMutex* m);
+ChallengerFuture* challenger_semaphore_acquire_create(ChallengerSemaphore* s);
 
 // ============================================================
 // Challenger Async Runtime — Join / Select (Phase 12)
